@@ -1,0 +1,31 @@
+# Models (too large for git)
+models/detection/*.ckpt
+models/detection/*.onnx
+models/inpainting/*.ckpt
+models/inpainting/*.onnx
+models/ocr/*.ckpt
+models/ocr/*.onnx
+
+# Fonts (large files)
+fonts/*.ttf
+fonts/*.ttc
+fonts/*.otf
+
+# Cache and temp files
+__pycache__/
+*.pyc
+*.pyo
+.env
+*.log
+result/log_*.txt
+result/*.db
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# IDE
+.idea/
+.vscode/
+*.swp

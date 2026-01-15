@@ -1,0 +1,145 @@
+# AMD ROCm GPU 依赖文件
+# ===================================================================================
+# AMD ROCm PyTorch 不在 requirements 文件中，需要通过特殊源安装
+# 
+# 安装命令格式:
+#   python -m pip install torch torchvision torchaudio \
+#     --index-url https://d2awnip2yjpvqn.cloudfront.net/v2/{gfx_version}/
+#
+# AMD 显卡 gfx 版本对应表:
+# ===================================================================================
+# 
+# RDNA 3 架构 (RX 7000 系列):
+#   - gfx1150:      RX 7900 XTX, RX 7900 XT, RX 7950 (Navi 31)
+#   - gfx1151:      RX 7800 XT, RX 7700 XT, RX 7600 (Navi 32/33)
+#   - gfx110X-all:  通用 RX 7000 系列支持
+#
+# RDNA 2 架构 (RX 6000 系列): ⚠️ 不支持，请使用 CPU 版本
+#   - gfx103X-dgpu: RX 6900 XT, RX 6800 XT, RX 6800, RX 6700 XT, 
+#                   RX 6600 XT, RX 6600, RX 6500 XT, RX 6400
+#   注意：这些显卡不支持 AMD ROCm PyTorch，请使用 requirements_cpu.txt
+#
+# RDNA 1 架构 (RX 5000 系列): ⚠️ 不支持，请使用 CPU 版本
+#   - gfx101X-dgpu: RX 5700 XT, RX 5700, RX 5600 XT, RX 5600, RX 5500 XT
+#   注意：这些显卡不支持 AMD ROCm PyTorch，请使用 requirements_cpu.txt
+#
+# Vega 架构:
+#   - gfx90X-dcgpu: Radeon VII, Radeon Vega 64/56, MI25, MI50, MI60
+#
+# CDNA 数据中心系列:
+#   - gfx94X-dcgpu: MI200, MI210, MI250, MI260 (CDNA 2)
+#   - gfx950-dcgpu: MI300 系列 (CDNA 3)
+#
+# RDNA 4 架构 (RX 9000 系列):
+#   - gfx120X-all:  RX 9070 XT, RX 9070, RX 9060 XT, RX 9060, RX 9050
+#
+# ===================================================================================
+# 示例安装命令:
+#
+# RX 7900 XTX (RDNA 3):
+#   python -m pip install torch torchvision torchaudio \
+#     --index-url https://d2awnip2yjpvqn.cloudfront.net/v2/gfx1150/
+#
+# RX 7800 XT (RDNA 3):
+#   python -m pip install torch torchvision torchaudio \
+#     --index-url https://d2awnip2yjpvqn.cloudfront.net/v2/gfx1151/
+#
+# ⚠️ RX 6000/5000 系列不支持，请使用 requirements_cpu.txt
+#
+# ===================================================================================
+# 注意事项:
+# - AMD ROCm PyTorch 是实验性功能，稳定性可能不如 NVIDIA CUDA 版本
+# - 首次运行可能需要编译某些操作，请耐心等待
+# - 如果遇到问题，建议使用 CPU 版本 (requirements_cpu.txt)
+# - AMD ROCm 对 Windows 的支持有限，Linux 下体验更好
+# ===================================================================================
+
+
+aiofiles==25.1.0
+aiohttp==3.12.15
+aioshutil==1.5
+albumentations==2.0.8
+arabic-reshaper==3.0.0
+backports.statistics==0.1.0
+colorama==0.4.6
+ctranslate2>=4.6.0
+customtkinter==5.2.2
+einops==0.8.1
+fastapi>=0.116.1
+fire==0.7.1
+freetype-py==2.5.1
+fugashi==1.3.2
+python-multipart==0.0.20
+
+httpcore==1.0.9
+httpx>=0.28.1,<1.0.0
+huggingface-hub>=0.36.0
+ijson==3.4.0
+jaconv==0.3.4
+kornia==0.8.1
+langcodes==3.5.0
+loguru==0.7.3
+matplotlib==3.10.5
+networkx==3.5
+# numpy 由 PyTorch 自动管理，不要在此显式指定以避免版本冲突
+omegaconf==2.3.0
+onnxruntime>=1.23.0
+openai==2.14.0
+opencv-contrib-python>=4.10.0
+packaging<25.0
+pandas==2.3.1
+Pillow==11.3.0
+pillow-heif==0.21.0
+psutil==5.9.5
+py3langid==0.2.2
+pyclipper==1.3.0.post6
+pydantic==2.11.7
+pyperclip==1.9.0
+PyHyphen==4.0.4
+PyQt6==6.9.1
+pytest==7.2.2
+python-dotenv==1.1.1
+rich>=14.1.0
+safetensors==0.6.2
+spandrel==0.4.1
+scipy==1.16.1
+# sentencepiece 已移除，改用 tokenizers 库 (use_fast=True)
+setuptools==80.9.0
+Shapely==2.1.1
+scikit-image==0.25.2
+starlette==0.47.2
+tiktoken==0.11.0
+timm>=1.0.19
+transformers==4.55.0
+accelerate>=1.12.0
+tqdm==4.67.1
+unidic_lite==1.0.8
+uvicorn==0.35.0
+websockets==14.2
+anyio>=4.8.0
+# xformers - AMD ROCm 支持有限,暂不包含
+google-genai==1.57.0
+# pydensecrf - 预编译 wheel 文件 (Python 3.12 Windows)
+# 使用官方 GitHub 源
+pydensecrf @ https://github.com/hgmzhn/manga-translator-ui/releases/download/v1.7.6/pydensecrf-1.0-cp312-cp312-win_amd64.whl
+# 如果下载失败,可尝试镜像站:
+# pydensecrf @ https://gh-proxy.com/https://github.com/hgmzhn/manga-translator-ui/releases/download/v1.7.6/pydensecrf-1.0-cp312-cp312-win_amd64.whl
+# 或从源码安装(需要 C++ 编译工具):
+# pydensecrf @ git+https://github.com/lucasb-eyer/pydensecrf.git
+torchsummary
+open_clip_torch==3.1.0
+python-bidi==0.6.6
+tufup==0.9.0
+google-cloud==0.34.0
+
+
+# PDF/EPUB/CBZ 压缩包支持
+PyMuPDF==1.25.5
+rarfile==4.2
+py7zr==0.22.0
+
+# Server 模块依赖
+bcrypt==4.2.1
+cryptography==44.0.0
+APScheduler==3.10.4
+pytest-anyio==0.0.0

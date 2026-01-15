@@ -1,0 +1,177 @@
+{
+  "version": 2,
+  "groups": [
+    {
+      "name": "韩文漫画站点",
+      "partial_match_patterns": [
+        {
+          "pattern": "(웹툰왕국|뉴토끼).*\\d{2,}",
+          "regex": true,
+          "case_sensitive": false
+        },
+        "newtoki",
+        "newtok",
+        "뉴토끼",
+        "웹툰왕국",
+        "만화왕국",
+        "toonkor",
+        "webtoon",
+        {
+          "pattern": "저작권\\s*법에\\s*의(해|거)",
+          "regex": true,
+          "case_sensitive": false
+        },
+        "최빠 만화 제공",
+        {
+          "pattern": "가장\\s*빠른.{0,8}(제공|사이트)",
+          "regex": true,
+          "case_sensitive": false
+        },
+        {
+          "pattern": "저자.{0,10}승인.{0,10}콘텐츠",
+          "regex": true,
+          "case_sensitive": false
+        },
+        "pfftt situ waras",
+        "situ waras",
+        "DIVASCANS.COM",
+        "COMICK.IO",
+        "MANGA PARK"
+      ],
+      "exact_match_patterns": []
+    },
+    {
+      "name": "中文OCR误识别",
+      "partial_match_patterns": [
+        {
+          "pattern": "^是\\d{3,5}$",
+          "regex": true,
+          "case_sensitive": false
+        },
+        "最快的漫画提供网站",
+        "漫画王国"
+      ],
+      "exact_match_patterns": []
+    },
+    {
+      "name": "常见网站/链接",
+      "partial_match_patterns": [
+        {
+          "pattern": "divascans[.,\\s]?com?",
+          "regex": true,
+          "case_sensitive": false
+        },
+        {
+          "pattern": "comick[.,]?io",
+          "regex": true,
+          "case_sensitive": false
+        },
+        {
+          "pattern": "bato[.,]?\\s?to",
+          "regex": true,
+          "case_sensitive": false
+        },
+        "manga park",
+        "manga18",
+        "discord.gg",
+        "bit.ly",
+        "bit.lv"
+      ],
+      "exact_match_patterns": []
+    },
+    {
+      "name": "印尼漫画站",
+      "partial_match_patterns": [
+        "doujindesu",
+        "javdesu",
+        "igodesu",
+        "sawerdesu",
+        "baca",
+        "kunjungi",
+        "web lain",
+        "website pal",
+        "link website",
+        "reupload"
+      ],
+      "exact_match_patterns": []
+    },
+    {
+      "name": "西班牙语漫画站",
+      "partial_match_patterns": [
+        {
+          "pattern": "(temple|emple|ple|mple|iple)scanesp",
+          "regex": true,
+          "case_sensitive": false
+        },
+        "scanesp.net",
+        "lee antes en",
+        "leé antes en"
+      ],
+      "exact_match_patterns": []
+    },
+    {
+      "name": "广告词汇",
+      "partial_match_patterns": [
+        "scan me",
+        "qr code",
+        "announcement",
+        "we are no longer uploading",
+        "you can find all our chapters",
+        "updates just in time"
+      ],
+      "exact_match_patterns": []
+    },
+    {
+      "name": "Diva广告",
+      "partial_match_patterns": [
+        "step into the alluring",
+        "realm of diva",
+        "tempting webtoons await",
+        "let your desires",
+        "fulfill your every craving",
+        "visit divascans",
+        "surrender yourself",
+        "storytelling like you've never",
+        "the spice doesn't stop here",
+        "explore more on our website"
+      ],
+      "exact_match_patterns": []
+    },
+    {
+      "name": "广告模式(正则)",
+      "partial_match_patterns": [
+        {
+          "pattern": "(best|greatest)\\s+community",
+          "regex": true,
+          "case_sensitive": false
+        },
+        {
+          "pattern": "fastest\\s+at\\s+release",
+          "regex": true,
+          "case_sensitive": false
+        },
+        {
+          "pattern": "highest\\s+at\\s+quality",
+          "regex": true,
+          "case_sensitive": false
+        },
+        {
+          "pattern": "19\\s*(ser|series)",
+          "regex": true,
+          "case_sensitive": false
+        },
+        {
+          "pattern": "wanna\\s+some",
+          "regex": true,
+          "case_sensitive": false
+        },
+        {
+          "pattern": "spice\\s+things",
+          "regex": true,
+          "case_sensitive": false
+        }
+      ],
+      "exact_match_patterns": []
+    }
+  ]
+}

@@ -1,0 +1,158 @@
+
+{
+  "offline": {
+    "name": "offline",
+    "display_name": "离线翻译",
+    "required_env_vars": []
+  },
+  "sugoi": {
+    "name": "sugoi",
+    "display_name": "Sugoi",
+    "required_env_vars": []
+  },
+  "m2m100": {
+    "name": "m2m100",
+    "display_name": "M2M100",
+    "required_env_vars": []
+  },
+  "m2m100_big": {
+    "name": "m2m100_big",
+    "display_name": "M2M100 Big",
+    "required_env_vars": []
+  },
+  "nllb": {
+    "name": "nllb",
+    "display_name": "NLLB",
+    "required_env_vars": []
+  },
+  "nllb_big": {
+    "name": "nllb_big",
+    "display_name": "NLLB Big",
+    "required_env_vars": []
+  },
+  "none": {
+    "name": "none",
+    "display_name": "不翻译",
+    "required_env_vars": []
+  },
+  "original": {
+    "name": "original",
+    "display_name": "保留原文",
+    "required_env_vars": []
+  },
+  "youdao": {
+    "name": "youdao",
+    "display_name": "有道翻译",
+    "required_env_vars": [],
+    "optional_env_vars": ["YOUDAO_APP_KEY", "YOUDAO_SECRET_KEY"],
+    "validation_rules": {
+      "YOUDAO_APP_KEY": "^[a-zA-Z0-9]{8,}$",
+      "YOUDAO_SECRET_KEY": "^[a-zA-Z0-9]{8,}$"
+    }
+  },
+  "baidu": {
+    "name": "baidu",
+    "display_name": "百度翻译",
+    "required_env_vars": [],
+    "optional_env_vars": ["BAIDU_APP_ID", "BAIDU_SECRET_KEY"],
+    "validation_rules": {
+      "BAIDU_APP_ID": "^[0-9]{20}$",
+      "BAIDU_SECRET_KEY": "^[a-zA-Z0-9]{32}$"
+    }
+  },
+  "openai": {
+    "name": "openai",
+    "display_name": "OpenAI",
+    "required_env_vars": [],
+    "optional_env_vars": ["OPENAI_API_KEY", "OPENAI_MODEL", "OPENAI_API_BASE"],
+    "validation_rules": {
+      "OPENAI_API_KEY": "^sk-[a-zA-Z0-9]{48}$"
+    }
+  },
+  "caiyun": {
+    "name": "caiyun",
+    "display_name": "彩云小译",
+    "required_env_vars": [],
+    "optional_env_vars": ["CAIYUN_TOKEN"]
+  },
+  "papago": {
+    "name": "papago",
+    "display_name": "Papago",
+    "required_env_vars": [],
+    "optional_env_vars": ["PAPAGO_CLIENT_ID", "PAPAGO_CLIENT_SECRET"]
+  },
+  "gemini": {
+    "name": "gemini",
+    "display_name": "Google Gemini",
+    "required_env_vars": [],
+    "optional_env_vars": ["GEMINI_API_KEY", "GEMINI_MODEL", "GEMINI_API_BASE"]
+  },
+  "groq": {
+    "name": "groq",
+    "display_name": "Groq",
+    "required_env_vars": [],
+    "optional_env_vars": ["GROQ_API_KEY", "GROQ_MODEL"]
+  },
+  "sakura": {
+    "name": "sakura",
+    "display_name": "Sakura",
+    "required_env_vars": [],
+    "optional_env_vars": ["SAKURA_API_BASE", "SAKURA_DICT_PATH", "SAKURA_VERSION"]
+  },
+  "deepl": {
+    "name": "deepl",
+    "display_name": "DeepL",
+    "required_env_vars": [],
+    "optional_env_vars": ["DEEPL_AUTH_KEY"],
+    "validation_rules": {
+      "DEEPL_AUTH_KEY": "^[a-zA-Z0-9-:]{39}$"
+    }
+  },
+  "google": {
+    "name": "google",
+    "display_name": "Google 翻译",
+    "required_env_vars": []
+  },
+  "gpt4": {
+    "name": "gpt4",
+    "display_name": "GPT-4",
+    "required_env_vars": [],
+    "optional_env_vars": ["OPENAI_API_KEY", "OPENAI_API_BASE"],
+    "validation_rules": {
+      "OPENAI_API_KEY": "^sk-[a-zA-Z0-9]{48}$"
+    }
+  },
+  "gpt3": {
+    "name": "gpt3",
+    "display_name": "GPT-3.5",
+    "required_env_vars": [],
+    "optional_env_vars": ["OPENAI_API_KEY", "OPENAI_API_BASE"],
+    "validation_rules": {
+      "OPENAI_API_KEY": "^sk-[a-zA-Z0-9]{48}$"
+    }
+  },
+  "gpt3.5": {
+    "name": "gpt3.5",
+    "display_name": "GPT-3.5",
+    "required_env_vars": [],
+    "optional_env_vars": ["OPENAI_API_KEY", "OPENAI_API_BASE"],
+    "validation_rules": {
+      "OPENAI_API_KEY": "^sk-[a-zA-Z0-9]{48}$"
+    }
+  },
+  "openai_hq": {
+    "name": "openai_hq",
+    "display_name": "高质量翻译 OpenAI",
+    "required_env_vars": [],
+    "optional_env_vars": ["OPENAI_API_KEY", "OPENAI_MODEL", "OPENAI_API_BASE"],
+    "validation_rules": {
+      "OPENAI_API_KEY": "^sk-[a-zA-Z0-9]{48}$"
+    }
+  },
+  "gemini_hq": {
+    "name": "gemini_hq",
+    "display_name": "高质量翻译 Gemini",
+    "required_env_vars": [],
+    "optional_env_vars": ["GEMINI_API_KEY", "GEMINI_MODEL", "GEMINI_API_BASE"]
+  }
+}

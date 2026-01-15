@@ -1,0 +1,473 @@
+{
+  "system_prompt": "",
+  "glossary": {
+    "works": {
+      "借妻條約": {
+        "Person": [],
+        "Location": [],
+        "Org": [],
+        "Item": [],
+        "Skill": [],
+        "Creature": []
+      },
+      "飞机杯女神连线中": {
+        "Person": [
+          {
+            "original": "SHIN AHYOUNG",
+            "translation": "申雅英",
+            "lang": "en"
+          },
+          {
+            "original": "TUAN HANTU",
+            "translation": "鬼魂大人",
+            "lang": "en"
+          },
+          {
+            "original": "WOOJIN",
+            "translation": "宇镇",
+            "lang": "en"
+          },
+          {
+            "original": "AHYOUNG",
+            "translation": "雅英",
+            "lang": "en"
+          },
+          {
+            "original": "우진",
+            "translation": "宇镇",
+            "lang": "auto"
+          },
+          {
+            "original": "한희진",
+            "translation": "韩熙珍",
+            "lang": "auto"
+          },
+          {
+            "original": "Aria",
+            "translation": "Aria"
+          },
+          {
+            "original": "신아영",
+            "translation": "申雅英"
+          }
+        ],
+        "Location": [
+          {
+            "original": "ALPHA UNIVERSITY",
+            "translation": "阿尔法大学",
+            "lang": "auto"
+          },
+          {
+            "original": "청진동해장국",
+            "translation": "清进洞解酒汤"
+          }
+        ],
+        "Org": [],
+        "Item": [
+          {
+            "original": "오나휠",
+            "translation": "飞机杯轮盘"
+          }
+        ],
+        "Skill": [],
+        "Creature": []
+      },
+      "女神都在看这些": {
+        "Person": [],
+        "Location": [],
+        "Org": [],
+        "Item": [],
+        "Skill": [],
+        "Creature": []
+      },
+      "币转人生": {
+        "Person": [],
+        "Location": [],
+        "Org": [],
+        "Item": [],
+        "Skill": [],
+        "Creature": []
+      },
+      "我不画成人漫画了": {
+        "Person": [],
+        "Location": [],
+        "Org": [],
+        "Item": [],
+        "Skill": [],
+        "Creature": []
+      },
+      "校园成人礼": {
+        "Person": [],
+        "Location": [],
+        "Org": [],
+        "Item": [],
+        "Skill": [],
+        "Creature": []
+      },
+      "男人配額制": {
+        "Person": [],
+        "Location": [],
+        "Org": [],
+        "Item": [],
+        "Skill": [],
+        "Creature": []
+      },
+      "老师的亲密指导": {
+        "Person": [],
+        "Location": [],
+        "Org": [],
+        "Item": [],
+        "Skill": [],
+        "Creature": []
+      },
+      "老闆娘的誘惑": {
+        "Person": [],
+        "Location": [],
+        "Org": [],
+        "Item": [],
+        "Skill": [],
+        "Creature": []
+      },
+      "神圣陷阱": {
+        "Person": [
+          {
+            "original": "메시아",
+            "translation": "弥赛亚"
+          },
+          {
+            "original": "류시온",
+            "translation": "柳始温"
+          },
+          {
+            "original": "배진아",
+            "translation": "裴真雅"
+          },
+          {
+            "original": "이훈",
+            "translation": "李勋"
+          }
+        ],
+        "Location": [],
+        "Org": [
+          {
+            "original": "투믹스",
+            "translation": "Toomics"
+          }
+        ],
+        "Item": [],
+        "Skill": [],
+        "Creature": []
+      },
+      "我的掌上明珠": {
+        "Person": [],
+        "Location": [],
+        "Org": [],
+        "Item": [],
+        "Skill": [],
+        "Creature": []
+      },
+      "排球少女": {
+        "Person": [],
+        "Location": [],
+        "Org": [],
+        "Item": [],
+        "Skill": [],
+        "Creature": []
+      },
+      "熟女交换计划": {
+        "Person": [],
+        "Location": [],
+        "Org": [],
+        "Item": [],
+        "Skill": [],
+        "Creature": []
+      },
+      "猎艳管理员": {
+        "Person": [],
+        "Location": [],
+        "Org": [],
+        "Item": [],
+        "Skill": [],
+        "Creature": []
+      },
+      "极乐桌游": {
+        "Person": [
+          {
+            "original": "서진",
+            "translation": "瑞镇"
+          },
+          {
+            "original": "하린",
+            "translation": "夏琳"
+          },
+          {
+            "original": "세진",
+            "translation": "世镇"
+          },
+          {
+            "original": "함소빌",
+            "translation": "咸少非"
+          },
+          {
+            "original": "CANAPE",
+            "translation": "CANAPE"
+          },
+          {
+            "original": "F선향",
+            "translation": "F线香"
+          },
+          {
+            "original": "송하린",
+            "translation": "宋夏琳"
+          },
+          {
+            "original": "서아",
+            "translation": "书雅"
+          },
+          {
+            "original": "윤서아",
+            "translation": "尹瑞雅",
+            "lang": "auto"
+          },
+          {
+            "original": "정다은",
+            "translation": "郑多恩"
+          },
+          {
+            "original": "이세진",
+            "translation": "李世镇"
+          }
+        ],
+        "Location": [
+          {
+            "original": "STODELS",
+            "translation": "STODELS"
+          }
+        ],
+        "Org": [
+          {
+            "original": "투믹스",
+            "translation": "Toomics"
+          },
+          {
+            "original": "아스모데",
+            "translation": "阿斯莫德"
+          }
+        ],
+        "Item": [
+          {
+            "original": "아스모덱",
+            "translation": "阿斯莫德",
+            "lang": "auto"
+          },
+          {
+            "original": "역바니",
+            "translation": "逆兔女郎"
+          },
+          {
+            "original": "히로인 공략노트",
+            "translation": "女主角攻略笔记"
+          }
+        ],
+        "Skill": [
+          {
+            "original": "강제수행",
+            "translation": "强制执行"
+          },
+          {
+            "original": "쾌락의물결",
+            "translation": "快乐之潮",
+            "lang": "auto"
+          }
+        ],
+        "Creature": []
+      }
+    },
+    "unassigned": {
+      "Person": [
+        {
+          "original": "쇼타네암컷",
+          "translation": "正太的雌性",
+          "raw_work_name": "未翻译"
+        }
+      ],
+      "Location": [],
+      "Org": [
+        {
+          "original": "Toomics",
+          "translation": "Toomics",
+          "lang": "en"
+        },
+        {
+          "original": "은밀한 그림자",
+          "translation": "隐秘的影子",
+          "lang": "ko"
+        }
+      ],
+      "Item": [],
+      "Skill": [],
+      "Creature": []
+    },
+    "Person": [
+      {
+        "original": "SHIN AHYOUNG",
+        "translation": "申雅英",
+        "lang": "en"
+      },
+      {
+        "original": "TUAN HANTU",
+        "translation": "鬼魂大人",
+        "lang": "en"
+      },
+      {
+        "original": "WOOJIN",
+        "translation": "宇镇",
+        "lang": "en"
+      },
+      {
+        "original": "AHYOUNG",
+        "translation": "雅英",
+        "lang": "en"
+      },
+      {
+        "original": "우진",
+        "translation": "宇镇",
+        "lang": "auto"
+      },
+      {
+        "original": "한희진",
+        "translation": "韩熙珍",
+        "lang": "auto"
+      },
+      {
+        "original": "메시아",
+        "translation": "弥赛亚"
+      },
+      {
+        "original": "류시온",
+        "translation": "柳始温"
+      },
+      {
+        "original": "배진아",
+        "translation": "裴真雅"
+      },
+      {
+        "original": "이훈",
+        "translation": "李勋"
+      },
+      {
+        "original": "서진",
+        "translation": "瑞镇"
+      },
+      {
+        "original": "하린",
+        "translation": "夏琳"
+      },
+      {
+        "original": "세진",
+        "translation": "世镇"
+      },
+      {
+        "original": "함소빌",
+        "translation": "咸少非"
+      },
+      {
+        "original": "CANAPE",
+        "translation": "CANAPE"
+      },
+      {
+        "original": "F선향",
+        "translation": "F线香"
+      },
+      {
+        "original": "송하린",
+        "translation": "宋夏琳"
+      },
+      {
+        "original": "서아",
+        "translation": "书雅"
+      },
+      {
+        "original": "윤서아",
+        "translation": "尹瑞雅",
+        "lang": "auto"
+      },
+      {
+        "original": "정다은",
+        "translation": "郑多恩"
+      },
+      {
+        "original": "이세진",
+        "translation": "李世镇"
+      },
+      {
+        "original": "Aria",
+        "translation": "Aria"
+      },
+      {
+        "original": "신아영",
+        "translation": "申雅英"
+      }
+    ],
+    "Location": [
+      {
+        "original": "ALPHA UNIVERSITY",
+        "translation": "阿尔法大学",
+        "lang": "auto"
+      },
+      {
+        "original": "STODELS",
+        "translation": "STODELS"
+      },
+      {
+        "original": "청진동해장국",
+        "translation": "清进洞解酒汤"
+      }
+    ],
+    "Org": [
+      {
+        "original": "투믹스",
+        "translation": "Toomics"
+      },
+      {
+        "original": "투믹스",
+        "translation": "Toomics"
+      },
+      {
+        "original": "아스모데",
+        "translation": "阿斯莫德"
+      }
+    ],
+    "Item": [
+      {
+        "original": "아스모덱",
+        "translation": "阿斯莫德",
+        "lang": "auto"
+      },
+      {
+        "original": "역바니",
+        "translation": "逆兔女郎"
+      },
+      {
+        "original": "히로인 공략노트",
+        "translation": "女主角攻略笔记"
+      },
+      {
+        "original": "오나휠",
+        "translation": "飞机杯轮盘"
+      }
+    ],
+    "Skill": [
+      {
+        "original": "강제수행",
+        "translation": "强制执行"
+      },
+      {
+        "original": "쾌락의물결",
+        "translation": "快乐之潮",
+        "lang": "auto"
+      }
+    ],
+    "Creature": []
+  }
+}
