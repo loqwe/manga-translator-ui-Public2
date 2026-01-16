@@ -5,6 +5,11 @@
       "name": "韩文漫画站点",
       "partial_match_patterns": [
         {
+          "pattern": "(원작|각색|작화|채색|배경|식자)[.\\s]",
+          "regex": true,
+          "case_sensitive": false
+        },
+        {
           "pattern": "(웹툰왕국|뉴토끼).*\\d{2,}",
           "regex": true,
           "case_sensitive": false

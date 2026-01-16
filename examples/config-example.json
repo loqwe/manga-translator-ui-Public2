@@ -13,7 +13,7 @@
       "log_expanded": false
     },
     "window_x": 483,
-    "window_y": 281,
+    "window_y": 311,
     "window_width": 1300,
     "window_height": 758,
     "window_maximized": false
@@ -111,7 +111,7 @@
     "use_gpu": true,
     "context_size": 3,
     "format": "不指定",
-    "overwrite": false,
+    "overwrite": true,
     "skip_no_text": false,
     "save_text": true,
     "load_text": false,
