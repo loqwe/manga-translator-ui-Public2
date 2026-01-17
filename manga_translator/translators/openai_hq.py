@@ -122,6 +122,7 @@ class OpenAIHighQualityTranslator(CommonTranslator):
         self.temperature = 0.1
         self.use_stream = False  # 流式输出开关，默认关闭
         self._MAX_REQUESTS_PER_MINUTE = 0  # 默认无限制
+        self._rate_limit_attempt = 0  # 429限速错误独立计数器
         # 使用全局时间戳,跨实例共享
         if self.model not in OpenAIHighQualityTranslator._GLOBAL_LAST_REQUEST_TS:
             OpenAIHighQualityTranslator._GLOBAL_LAST_REQUEST_TS[self.model] = 0
@@ -188,7 +189,7 @@ class OpenAIHighQualityTranslator(CommonTranslator):
                 default_headers=BROWSER_HEADERS,
                 http_client=httpx.AsyncClient(
                     headers=BROWSER_HEADERS,
-                    timeout=httpx.Timeout(300.0, connect=60.0)
+                    timeout=httpx.Timeout(400.0, connect=60.0, read=40.0)  # read=40s 首字节超时
                 )
             )
     
@@ -740,6 +741,7 @@ This is an incorrect response because it includes extra text and explanations.
                         await asyncio.sleep(2)
                         continue
 
+                    self._rate_limit_attempt = 0  # 成功后重置429计数器
                     return translations[:len(texts)]
                 
                 # 如果不成功，则记录原因并准备重试
@@ -802,6 +804,36 @@ This is an incorrect response because it includes extra text and explanations.
                     await asyncio.sleep(1)
                     
             except Exception as e:
+                error_msg = str(e).lower()
+                
+                # 429 限速错误：独立计数，不受 max_retries 限制
+                if 'rate limit' in error_msg or 'ratelimit' in error_msg or '429' in error_msg or 'too many requests' in error_msg:
+                    self._rate_limit_attempt += 1
+                    max_rate_limit_attempts = 4  # 总共尝试4次（初始1次 + 重试3次）
+                    
+                    # 指数退避：2^n 秒，但第1、2次都是2秒
+                    if self._rate_limit_attempt <= 2:
+                        wait_time = 2
+                    else:
+                        wait_time = 2 ** (self._rate_limit_attempt - 1)  # 第3次=4秒，第4次=8秒
+                    wait_time = min(wait_time, 64)  # 最大64秒
+                    
+                    self.logger.warning(f"[限速] 触发 429 限速错误 ({self._rate_limit_attempt}/{max_rate_limit_attempts})")
+                    self.logger.warning(f"[限速] 等待 {wait_time}s 后重试...")
+                    
+                    # 通知全局限速器（如果有）
+                    if ctx and hasattr(ctx, 'rate_limiter') and ctx.rate_limiter:
+                        ctx.rate_limiter.report_rate_limit_error()
+                    
+                    if self._rate_limit_attempt >= max_rate_limit_attempts:
+                        self._rate_limit_attempt = 0  # 重置计数器
+                        last_exception = Exception(f"429限速错误: 已重试{max_rate_limit_attempts}次仍失败")
+                        raise last_exception
+                    
+                    await asyncio.sleep(wait_time)
+                    continue  # 不计入 max_retries，继续重试
+                
+                # 其他错误：正常计数
                 attempt += 1
                 log_attempt = f"{attempt}/{max_retries}" if not is_infinite else f"Attempt {attempt}"
                 last_exception = e

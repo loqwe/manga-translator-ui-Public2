@@ -486,11 +486,30 @@ class ConcurrentPipeline:
                     task = asyncio.create_task(self._process_translation_batch(batch_to_translate))
                     running_tasks.add(task)
                     
-                    # ✅ 修复线程运行期间：串行模式，等待当前批次完成后再收集下一批
+                    # ✅ While inpaint worker is still running, keep serial behavior.
+                    # But once inpaint is stopped, do NOT block here; allow other slots to be used immediately.
                     if not self.inpaint_stopped_event.is_set():
-                        logger.debug(f"[翻译] 串行模式：等待当前批次完成")
-                        await task
-                        running_tasks.discard(task)
+                        logger.debug("[翻译] 串行模式：等待当前批次完成（或修复线程停止事件）")
+
+                        wait_inpaint_stop = asyncio.create_task(self.inpaint_stopped_event.wait())
+                        try:
+                            done, pending = await asyncio.wait(
+                                {task, wait_inpaint_stop},
+                                return_when=asyncio.FIRST_COMPLETED,
+                            )
+                        finally:
+                            if not wait_inpaint_stop.done():
+                                wait_inpaint_stop.cancel()
+                                try:
+                                    await wait_inpaint_stop
+                                except asyncio.CancelledError:
+                                    pass
+
+                        # If the batch task finished first, remove it from running_tasks.
+                        # If inpaint stopped first, keep the task running (occupies only one slot) and continue.
+                        if task in done:
+                            await task
+                            running_tasks.discard(task)
                 
             except Exception as e:
                 logger.error(f"[翻译线程] 错误: {e}")
