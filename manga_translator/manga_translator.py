@@ -2017,33 +2017,56 @@ class MangaTranslator:
         if self.context_size <= 0:
             return ""
 
-        # 使用指定页面索引之前的页面作为上下文
+        trans_pages = self.all_page_translations or []
+        orig_pages = self._original_page_texts or []
+
         if current_page_index is not None:
-            available_pages = self.all_page_translations[:current_page_index] if self.all_page_translations else []
-        else:
-            # 使用所有已完成的页面
-            available_pages = self.all_page_translations or []
+            trans_pages = trans_pages[:current_page_index]
+            orig_pages = orig_pages[:current_page_index]
 
-        if not available_pages:
+        max_len = max(len(trans_pages), len(orig_pages))
+        if max_len == 0:
             return ""
 
-        # 筛选出有句子的页面
-        non_empty_pages = [
-            page for page in available_pages
-            if any(sent.strip() for sent in page.values())
-        ]
-        # 实际要用的页数
-        pages_used = min(self.context_size, len(non_empty_pages))
-        if pages_used == 0:
-            return ""
-        tail = non_empty_pages[-pages_used:]
+        if len(trans_pages) < max_len:
+            trans_pages = trans_pages + ([{}] * (max_len - len(trans_pages)))
+        if len(orig_pages) < max_len:
+            orig_pages = orig_pages + ([{}] * (max_len - len(orig_pages)))
 
-        # 拼接翻译结果作为上下文
+        # Prefer translations, and fall back to originals when translations are missing.
+        selected_pages = []
+        for i in range(max_len):
+            t_page = trans_pages[i] or {}
+            o_page = orig_pages[i] or {}
+
+            has_translation = any(str(sent).strip() for sent in t_page.values() if sent is not None)
+            has_original = any(str(sent).strip() for sent in o_page.values() if sent is not None)
+
+            if has_translation:
+                selected_pages.append(t_page)
+            elif has_original:
+                selected_pages.append(o_page)
+
+        if not selected_pages:
+            return ""
+
+        pages_used = min(self.context_size, len(selected_pages))
+        if pages_used <= 0:
+            return ""
+
+        tail = selected_pages[-pages_used:]
+
         lines = []
         for page in tail:
             for sent in page.values():
-                if sent.strip():
-                    lines.append(sent.strip())
+                if sent is None:
+                    continue
+                s = str(sent).strip()
+                if s:
+                    lines.append(s)
+
+        if not lines:
+            return ""
 
         numbered = [f"<|{i+1}|>{s}" for i, s in enumerate(lines)]
         return "Here are the previous translation results for reference:\n" + "\n".join(numbered)
@@ -2054,14 +2077,25 @@ class MangaTranslator:
 
         # 计算实际要使用的上下文页数和跳过的空页数
         # Calculate the actual number of context pages to use and empty pages to skip
-        done_pages = self.all_page_translations
-        if self.context_size > 0 and done_pages:
-            pages_expected = min(self.context_size, len(done_pages))
-            non_empty_pages = [
-                page for page in done_pages
-                if any(sent.strip() for sent in page.values())
-            ]
-            pages_used = min(self.context_size, len(non_empty_pages))
+        done_trans_pages = self.all_page_translations
+        done_orig_pages = self._original_page_texts
+        max_done = max(len(done_trans_pages), len(done_orig_pages))
+
+        if self.context_size > 0 and max_done > 0:
+            pages_expected = min(self.context_size, max_done)
+
+            non_empty_count = 0
+            for i in range(max_done):
+                trans_page = done_trans_pages[i] if i < len(done_trans_pages) else {}
+                orig_page = done_orig_pages[i] if i < len(done_orig_pages) else {}
+
+                has_translation = any(str(sent).strip() for sent in trans_page.values() if sent is not None)
+                has_original = any(str(sent).strip() for sent in orig_page.values() if sent is not None)
+
+                if has_translation or has_original:
+                    non_empty_count += 1
+
+            pages_used = min(self.context_size, non_empty_count)
             skipped = pages_expected - pages_used
         else:
             pages_used = skipped = 0
@@ -4075,6 +4109,11 @@ class MangaTranslator:
                                 page_trans[region.text] = region.translation
                         self.all_page_translations.append(page_trans)
                         logger.debug(f"[Batch Context] Saved {len(page_trans)} translations for next batch context")
+
+                        page_original_texts = {i: (r.text_raw if hasattr(r, "text_raw") else r.text)
+                                              for i, r in enumerate(ctx.text_regions)}
+                        self._original_page_texts.append(page_original_texts)
+                        logger.debug(f"[Batch Context] Saved {len(page_original_texts)} original texts for next batch context")
                         
                 # Prune history to prevent memory leak
                 self._prune_context_history()
@@ -4475,14 +4514,25 @@ class MangaTranslator:
                 translator.set_cancel_check_callback(self._cancel_check_callback)
 
             # 为所有翻译器构建和设置文本上下文（包括HQ翻译器）
-            done_pages = self.all_page_translations
-            if self.context_size > 0 and done_pages:
-                pages_expected = min(self.context_size, len(done_pages))
-                non_empty_pages = [
-                    page for page in done_pages
-                    if any(sent.strip() for sent in page.values())
-                ]
-                pages_used = min(self.context_size, len(non_empty_pages))
+            done_trans_pages = self.all_page_translations
+            done_orig_pages = self._original_page_texts
+            max_done = max(len(done_trans_pages), len(done_orig_pages))
+
+            if self.context_size > 0 and max_done > 0:
+                pages_expected = min(self.context_size, max_done)
+
+                non_empty_count = 0
+                for i in range(max_done):
+                    trans_page = done_trans_pages[i] if i < len(done_trans_pages) else {}
+                    orig_page = done_orig_pages[i] if i < len(done_orig_pages) else {}
+
+                    has_translation = any(str(sent).strip() for sent in trans_page.values() if sent is not None)
+                    has_original = any(str(sent).strip() for sent in orig_page.values() if sent is not None)
+
+                    if has_translation or has_original:
+                        non_empty_count += 1
+
+                pages_used = min(self.context_size, non_empty_count)
                 skipped = pages_expected - pages_used
             else:
                 pages_used = skipped = 0
@@ -4492,7 +4542,7 @@ class MangaTranslator:
 
             # 构建上下文（简化版，不使用批次内上下文）
             prev_ctx = self._build_prev_context(
-                use_original_text=False,  # 始终使用翻译结果作为上下文
+                use_original_text=False,  # 优先使用译文，无译文回退原文
                 current_page_index=page_index,
                 batch_index=None,  # 不使用批次内上下文
                 batch_original_texts=None
