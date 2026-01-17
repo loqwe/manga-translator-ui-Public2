@@ -934,6 +934,7 @@ class MainAppLogic(QObject):
                     "gpt_config": self._t("label_gpt_config"),
                     "high_quality_prompt_path": self._t("label_high_quality_prompt_path"),
                     "extract_glossary": self._t("label_extract_glossary"),
+                    "use_stream": self._t("label_use_stream"),
                     "use_mocr_merge": self._t("label_use_mocr_merge"),
                     "ocr": self._t("label_ocr"),
                     "use_hybrid_ocr": self._t("label_use_hybrid_ocr"),

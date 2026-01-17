@@ -12,8 +12,8 @@
       "interval_ms": 500,
       "log_expanded": false
     },
-    "window_x": 274,
-    "window_y": 594,
+    "window_x": 282,
+    "window_y": 413,
     "window_width": 1300,
     "window_height": 758,
     "window_maximized": false
@@ -28,6 +28,7 @@
     "gpt_config": "examples/gpt_config-example.yaml",
     "high_quality_prompt_path": "dict/prompt_example.json",
     "extract_glossary": true,
+    "use_stream": true,
     "attempts": -1
   },
   "ocr": {

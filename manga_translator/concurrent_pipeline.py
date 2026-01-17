@@ -607,10 +607,29 @@ class ConcurrentPipeline:
                 '504', '520', '522', '523', '524', 'cloudflare', 'cf-error'
             ])
 
+            translator_obj = getattr(self.translator, 'translator', None)
+            use_stream = bool(getattr(translator_obj, 'use_stream', False))
+
+            is_stream_connection_reset_error = False
+            if use_stream:
+                err_type_l = error_type.lower()
+                is_stream_connection_reset_error = (
+                    'remoteprotocolerror' in err_type_l or
+                    any(kw in error_msg for kw in [
+                        'remoteprotocolerror',
+                        'peer closed connection',
+                        'incomplete message body',
+                        'connection reset',
+                        'reset by peer',
+                        'server disconnected',
+                    ])
+                )
+
             # 更细分：超时错误（不做阻塞式整批重试，直接进入延迟队列）
             is_timeout_error = (
                 'timeout' in error_msg or 'timed out' in error_msg or
-                'readtimeout' in error_type.lower() or 'timeout' in error_type.lower()
+                'readtimeout' in error_type.lower() or 'timeout' in error_type.lower() or
+                is_stream_connection_reset_error
             )
             
             # 检测401认证错误
@@ -637,7 +656,14 @@ class ConcurrentPipeline:
             
             # 超时错误：直接进入延迟队列（避免在主翻译槽位里卡住），并拆分为单张重试
             if is_timeout_error:
-                logger.warning(f"[翻译] 请求超时，将 {len(batch)} 张图片放入延迟队列（拆分为单张重试，不做整批重试）")
+                if is_stream_connection_reset_error:
+                    logger.warning(
+                        f"[翻译] 流式连接中断({error_type})，将 {len(batch)} 张图片放入延迟队列（拆分为单张重试，不做整批重试）"
+                    )
+                else:
+                    logger.warning(
+                        f"[翻译] 请求超时，将 {len(batch)} 张图片放入延迟队列（拆分为单张重试，不做整批重试）"
+                    )
                 for ctx, config in batch:
                     self.retry_queue.append((ctx, config, 'timeout_error'))
                 return

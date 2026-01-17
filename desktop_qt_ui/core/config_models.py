@@ -12,6 +12,7 @@ class TranslatorSettings(BaseModel):
     gpt_config: Optional[str] = "examples/gpt_config-example.yaml"
     high_quality_prompt_path: Optional[str] = "dict/prompt_example.json"
     extract_glossary: bool = False
+    use_stream: bool = False  # 流式输出开关，默认关闭
     # max_requests_per_minute 已移至预设配置 (MAX_REQUESTS_PER_MINUTE 环境变量)
     attempts: int = -1  # 翻译重试次数，-1 表示无限重试
     

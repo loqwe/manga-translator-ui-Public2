@@ -58,6 +58,7 @@ class UsageLogRecord:
     preset: str
     model: str
     duration_s: float
+    first_byte_s: Optional[float]  # 首字节时间（秒）
     stream: bool
     input_tokens: Optional[int]
     output_tokens: Optional[int]
@@ -212,6 +213,10 @@ def _load_usage_records_from_db(limit: int = 500) -> tuple[List[UsageLogRecord],
             except Exception:
                 pass
 
+            # Determine if stream mode based on first_byte_ms presence (must be positive)
+            is_stream = fb_ms is not None and fb_ms > 0
+            first_byte_s = (float(fb_ms) / 1000.0) if (fb_ms is not None and fb_ms > 0) else None
+
             records.append(
                 UsageLogRecord(
                     time_str=time_str_disp,
@@ -219,7 +224,8 @@ def _load_usage_records_from_db(limit: int = 500) -> tuple[List[UsageLogRecord],
                     preset=preset or '',
                     model=model or '',
                     duration_s=(float(dur_ms) if dur_ms is not None else 0.0) / 1000.0,
-                    stream=False,
+                    first_byte_s=first_byte_s,
+                    stream=is_stream,
                     input_tokens=_int_or_none(str(p_tok) if p_tok is not None else ''),
                     output_tokens=_int_or_none(str(c_tok) if c_tok is not None else ''),
                     status=status or '',
@@ -518,10 +524,26 @@ class UsageLogStyledDelegate(QStyledItemDelegate):
                 bg = self._badge._colors['dur_ok_bg']
                 fg = self._badge._colors['dur_ok_fg']
 
-            badges = [
-                {'text': f"{rec.duration_s:.0f}s", 'bg': bg, 'fg': fg},
-                {'text': '非流' if not rec.stream else '流式', 'bg': QColor('#f8fafc'), 'fg': QColor('#5c6b82')},
-            ]
+            badges = []
+            # 首字节时间（仅流式且为正数时显示）- 独立颜色分级
+            if rec.first_byte_s is not None and rec.first_byte_s > 0:
+                if rec.first_byte_s >= 10:
+                    fb_bg = self._badge._colors['dur_bad_bg']
+                    fb_fg = self._badge._colors['dur_bad_fg']
+                elif rec.first_byte_s >= 5:
+                    fb_bg = self._badge._colors['dur_warn_bg']
+                    fb_fg = self._badge._colors['dur_warn_fg']
+                else:
+                    fb_bg = self._badge._colors['dur_ok_bg']
+                    fb_fg = self._badge._colors['dur_ok_fg']
+                badges.append({'text': f"{rec.first_byte_s:.1f} s", 'bg': fb_bg, 'fg': fb_fg})
+            # 总时间
+            badges.append({'text': f"{rec.duration_s:.1f} s", 'bg': self._badge._colors['token_bg'], 'fg': self._badge._colors['token_fg']})
+            # 流式/非流标签
+            if rec.stream:
+                badges.append({'text': '流', 'bg': QColor('#e0f2fe'), 'fg': QColor('#0369a1')})
+            else:
+                badges.append({'text': '非流', 'bg': QColor('#f3e8ff'), 'fg': QColor('#7c3aed')})
         elif col == UsageLogTableModel.COL_STATUS:
             align = 'center'
             st_raw = (rec.status or '').strip()
@@ -771,11 +793,13 @@ class UsageLogDialog(QDialog):
             rec = self.model.record_at(src_index.row())
             if rec is None:
                 continue
+            fb_part = f"{rec.first_byte_s:.1f}s/" if rec.first_byte_s is not None else ''
+            stream_part = ' 流' if rec.stream else ''
             row = [
                 rec.time_str,
                 rec.preset,
                 rec.model,
-                f"{rec.duration_s:.1f}s {'非流' if not rec.stream else '流式'}",
+                f"{fb_part}{rec.duration_s:.1f}s{stream_part}",
                 '' if rec.input_tokens is None else str(rec.input_tokens),
                 '' if rec.output_tokens is None else str(rec.output_tokens),
                 rec.status,

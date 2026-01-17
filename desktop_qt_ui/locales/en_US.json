@@ -72,6 +72,7 @@
       "label_gpt_config": "GPT Config File",
       "label_high_quality_prompt_path": "Custom Prompt",
       "label_extract_glossary": "Auto Extract Glossary",
+      "label_use_stream": "Stream Output",
       "label_use_mocr_merge": "Merge MangaOCR Result",  "label_ocr": "OCR Model",
   "label_use_hybrid_ocr": "Enable Hybrid OCR",
   "label_secondary_ocr": "Secondary OCR",

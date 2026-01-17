@@ -120,6 +120,7 @@ class OpenAIHighQualityTranslator(CommonTranslator):
         self.model = os.getenv('OPENAI_MODEL', "gpt-4o")
         self.max_tokens = None  # 不限制，使用模型默认最大值
         self.temperature = 0.1
+        self.use_stream = False  # 流式输出开关，默认关闭
         self._MAX_REQUESTS_PER_MINUTE = 0  # 默认无限制
         # 使用全局时间戳,跨实例共享
         if self.model not in OpenAIHighQualityTranslator._GLOBAL_LAST_REQUEST_TS:
@@ -165,6 +166,12 @@ class OpenAIHighQualityTranslator(CommonTranslator):
         if user_api_model:
             self.model = user_api_model
             self.logger.info(f"[UserAPIKey] Using user-provided model: {user_api_model}")
+        
+        # 从配置中读取流式输出开关
+        use_stream = getattr(args, 'use_stream', None)
+        if use_stream is not None:
+            self.use_stream = use_stream
+            self.logger.info(f"[Stream] Stream mode: {'enabled' if use_stream else 'disabled'}")
         
         # 如果 API Key 或 Base URL 变化，重建客户端
         if need_rebuild_client:
@@ -486,24 +493,58 @@ This is an incorrect response because it includes extra text and explanations.
                 if self.max_tokens is not None:
                     api_params["max_tokens"] = self.max_tokens
 
+                # 主日志：记录流式开关状态（每个批次首轮仅记录一次）
+                if retry_attempt == 0 and local_attempt == 1:
+                    self.logger.info(f"[Stream] use_stream={self.use_stream}")
+
                 # AI_METRICS: 记录请求开始时间
                 send_ts = self._now_iso()
                 start_perf = time.perf_counter()
                 response = None
                 ai_metrics_status = "error"
+                first_byte_ms = None  # 流式模式首字节耗时
+                result_text = None  # 用于存储流式或非流式的结果
+                stream_usage = None  # 流式模式的 usage 信息
 
                 try:
-                    response = await self.client.chat.completions.create(**api_params)
-                    
-                    # 根据 finish_reason 粗分状态
-                    finish_reason = None
-                    try:
-                        if response and getattr(response, 'choices', None):
-                            finish_reason = response.choices[0].finish_reason
-                    except Exception:
+                    if self.use_stream:
+                        # 流式输出模式
+                        api_params["stream"] = True
+                        api_params["stream_options"] = {"include_usage": True}  # 请求返回 usage
+                        stream = await self.client.chat.completions.create(**api_params)
+                        
+                        collected_chunks = []
+                        first_chunk_received = False
+                        
+                        async for chunk in stream:
+                            # 记录首字节时间
+                            if not first_chunk_received:
+                                first_byte_ms = (time.perf_counter() - start_perf) * 1000
+                                first_chunk_received = True
+                            
+                            # 提取内容
+                            if chunk.choices and chunk.choices[0].delta.content:
+                                collected_chunks.append(chunk.choices[0].delta.content)
+                            
+                            # 检查 usage 信息（通常在最后一个 chunk）
+                            if hasattr(chunk, 'usage') and chunk.usage:
+                                stream_usage = chunk.usage
+                        
+                        result_text = "".join(collected_chunks).strip()
+                        ai_metrics_status = "ok" if result_text else "error"
+                    else:
+                        # 非流式输出模式（原有逻辑）
+                        response = await self.client.chat.completions.create(**api_params)
+                        
+                        # 根据 finish_reason 粗分状态
                         finish_reason = None
-                    
-                    ai_metrics_status = "content_filter" if finish_reason == 'content_filter' else "ok"
+                        try:
+                            if response and getattr(response, 'choices', None):
+                                finish_reason = response.choices[0].finish_reason
+                        except Exception:
+                            finish_reason = None
+                        
+                        ai_metrics_status = "content_filter" if finish_reason == 'content_filter' else "ok"
 
                 except (asyncio.TimeoutError, TimeoutError):
                     ai_metrics_status = "timeout"
@@ -520,7 +561,8 @@ This is an incorrect response because it includes extra text and explanations.
                 finally:
                     recv_ts = self._now_iso()
                     duration_ms = (time.perf_counter() - start_perf) * 1000
-                    usage = getattr(response, 'usage', None) if response is not None else None
+                    # 流式模式使用 stream_usage，非流式使用 response.usage
+                    usage = stream_usage if self.use_stream else (getattr(response, 'usage', None) if response is not None else None)
                     rid = getattr(response, 'id', None) if response is not None else None
                     self.log_ai_metrics(
                         model_name=self.model,
@@ -529,6 +571,8 @@ This is an incorrect response because it includes extra text and explanations.
                         recv_ts=recv_ts,
                         duration_ms=duration_ms,
                         usage=usage,
+                        stream=self.use_stream,
+                        first_byte_ms=first_byte_ms,
                         extra={'request_id': rid}
                     )
                 
@@ -536,16 +580,23 @@ This is an incorrect response because it includes extra text and explanations.
                 if self._MAX_REQUESTS_PER_MINUTE > 0:
                     OpenAIHighQualityTranslator._GLOBAL_LAST_REQUEST_TS[self._last_request_ts_key] = time.time()
 
-                # 验证响应对象是否有效
-                validate_openai_response(response, self.logger)
+                # 初始化 finish_reason，流式模式默认为 'stop'
+                finish_reason = 'stop' if self.use_stream else None
 
-                # 检查成功条件：有内容就尝试处理，后续会有质量检查
-                finish_reason = response.choices[0].finish_reason if (hasattr(response, 'choices') and response.choices) else None
-                has_content = response.choices and response.choices[0].message.content
-                
-                if has_content:
-                    result_text = response.choices[0].message.content.strip()
+                # 非流式模式：验证响应对象并提取内容
+                if not self.use_stream:
+                    # 验证响应对象是否有效
+                    validate_openai_response(response, self.logger)
+
+                    # 检查成功条件：有内容就尝试处理，后续会有质量检查
+                    finish_reason = response.choices[0].finish_reason if (hasattr(response, 'choices') and response.choices) else None
+                    has_content = response.choices and response.choices[0].message.content
                     
+                    if has_content:
+                        result_text = response.choices[0].message.content.strip()
+                
+                # 统一处理：流式和非流式模式都使用 result_text
+                if result_text:
                     # 统一的编码清理（处理UTF-16-LE等编码问题）
                     from .common import sanitize_text_encoding
                     result_text = sanitize_text_encoding(result_text)

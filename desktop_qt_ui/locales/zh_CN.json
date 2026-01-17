@@ -72,6 +72,7 @@
     "label_gpt_config": "GPT 配置文件",
     "label_high_quality_prompt_path": "自定义提示词",
     "label_extract_glossary": "自动提取新术语",
+    "label_use_stream": "流式输出",
     "label_use_mocr_merge": "合并 MangaOCR 结果",
   "label_ocr": "OCR模型",
   "label_use_hybrid_ocr": "启用混合OCR",

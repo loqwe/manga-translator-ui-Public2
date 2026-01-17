@@ -1,0 +1,2942 @@
+[
+  {
+    "hash": "7b0dc53",
+    "msg": "fix: ONNX inpainting pad_size 8->64 避免FFT维度不匹配 (168 vs 169)"
+  },
+  {
+    "hash": "e0345ea",
+    "msg": "修复命令行日志缓冲问题"
+  },
+  {
+    "hash": "eaa3a8a",
+    "msg": "优化 Qt 界面日志刷新频率"
+  },
+  {
+    "hash": "1117779",
+    "msg": "更新 v2.0.8 更新日志"
+  },
+  {
+    "hash": "f25a0e6",
+    "msg": "更新 v2.0.8 更新日志：添加 ignore_bubble 修复说明"
+  },
+  {
+    "hash": "3433813",
+    "msg": "移除 mask_refinement 中的 ignore_bubble 过滤逻辑"
+  },
+  {
+    "hash": "0c526e9",
+    "msg": "修复 PaddleOCR 的 ignore_bubble 过滤问题"
+  },
+  {
+    "hash": "638dbfe",
+    "msg": "更新 v2.0.8 更新日志"
+  },
+  {
+    "hash": "fd67074",
+    "msg": "修复: ONNX修复模型添加日志输出 & 解决日志输出缓冲卡住问题"
+  },
+  {
+    "hash": "efaed38",
+    "msg": "发布 v2.0.8: 修复 OpenAI Cloudflare 拦截问题和语法错误"
+  },
+  {
+    "hash": "83e9130",
+    "msg": "优化删除提醒：使用更醒目的警告提示"
+  },
+  {
+    "hash": "3b53f9f",
+    "msg": "修复 launch.py 中 continue 语法错误"
+  },
+  {
+    "hash": "b582249",
+    "msg": "锁定 AMD ROCm PyTorch 版本到 2.9.0+rocm7.10.0a20251031"
+  },
+  {
+    "hash": "c401baf",
+    "msg": "fix: 修复脚本1同步逻辑缺少清理macOS脚本的问题"
+  },
+  {
+    "hash": "e348eda",
+    "msg": "扩展忽略版本包列表：添加 accelerate, timm, kornia, spandrel, open_clip_torch"
+  },
+  {
+    "hash": "78b8cd4",
+    "msg": "修复依赖安装逻辑：transformers 和 xformers 忽略版本限制以避免兼容性问题"
+  },
+  {
+    "hash": "bdeff14",
+    "msg": "fix: 完整更新后重新读取最新的依赖文件"
+  },
+  {
+    "hash": "f895351",
+    "msg": "fix: PyTorch 相关包安装时忽略版本锁定"
+  },
+  {
+    "hash": "401093a",
+    "msg": "fix: 锁定 xformers 版本防止覆盖 torch 版本"
+  },
+  {
+    "hash": "c753c19",
+    "msg": "fix: 修复重建环境时 PyTorch 不安装的 bug"
+  },
+  {
+    "hash": "9e1a1b9",
+    "msg": "修复预设管理配置混淆问题 v2.0.7"
+  },
+  {
+    "hash": "e48d5c1",
+    "msg": "修复httpx版本冲突：升级到>=0.28.1以满足google-genai依赖要求"
+  },
+  {
+    "hash": "3cf780a",
+    "msg": "fix: 调整anyio依赖顺序，解决Docker构建冲突"
+  },
+  {
+    "hash": "d2c4a53",
+    "msg": "v2.0.7: 修复编辑器换行问题，优化保存JSON性能，修复依赖冲突"
+  },
+  {
+    "hash": "f80f411",
+    "msg": "fix: 修复PaddleOCR-VL模型加载参数名，避免dtype序列化错误"
+  },
+  {
+    "hash": "6e41f2c",
+    "msg": "chore: 更新版本号到v2.0.7"
+  },
+  {
+    "hash": "66d84ac",
+    "msg": "v2.0.7: Qt UI编辑器保存JSON时自动更新inpainted图片"
+  },
+  {
+    "hash": "715f393",
+    "msg": "Merge pull request #55 from homoSollers/main"
+  },
+  {
+    "hash": "347034d",
+    "msg": "Merge branch 'hgmzhn:main' into main"
+  },
+  {
+    "hash": "e34a12c",
+    "msg": "修正macOS运行更新脚本时检测设备返回cpu的错误，增加对Apple Silicon的检测支持并使依赖的更新也自动匹配requirements_metal.txt。"
+  },
+  {
+    "hash": "f2cc74e",
+    "msg": "feat: 完善 macOS 安装流程和跨平台文件清理"
+  },
+  {
+    "hash": "6638dca",
+    "msg": "Merge pull request #54 from homoSollers/main"
+  },
+  {
+    "hash": "9ae3134",
+    "msg": "fix: 修复onnxruntime 1.20.1版本preload_dlls警告"
+  },
+  {
+    "hash": "6db6cbf",
+    "msg": "chore: 恢复onnxruntime-gpu到1.23.2版本以支持preload_dlls功能"
+  },
+  {
+    "hash": "2999f78",
+    "msg": "fix: 修复Qt编辑器导出CMYK模式图片失败和回退onnxruntime版本"
+  },
+  {
+    "hash": "500c00d",
+    "msg": "fix: 修复CMYK模式图片无法保存为PNG的问题，回退onnxruntime-gpu到1.20.1"
+  },
+  {
+    "hash": "9eba50a",
+    "msg": "chore: 回退 onnxruntime-gpu 版本到 1.20.1"
+  },
+  {
+    "hash": "b74e2c5",
+    "msg": "docs: 将v2.0.7的修复内容整合到v2.0.6更新日志"
+  },
+  {
+    "hash": "3fdf462",
+    "msg": "fix: 修复PSD导出时无法找到inpainted图片的问题"
+  },
+  {
+    "hash": "c22bc2a",
+    "msg": "fix: 修复Qt编辑器导出PSD文件路径错误导致文件丢失的问题 (v2.0.7)"
+  },
+  {
+    "hash": "b4913f9",
+    "msg": "chore: 升级 onnxruntime-gpu 到 1.23.2"
+  },
+  {
+    "hash": "93ff3c0",
+    "msg": "fix: 修复渲染时透视变换矩阵计算失败导致崩溃的问题"
+  },
+  {
+    "hash": "b880e3a",
+    "msg": "feat: 新增 PaddleOCR-VL-For-Manga OCR 模型支持"
+  },
+  {
+    "hash": "6d2d2c2",
+    "msg": "fix: 替换翻译模式支持修复后直接粘贴"
+  },
+  {
+    "hash": "c2c1cde",
+    "msg": "更新v2.0.6更新日志：添加OpenAI新模型闪退修复说明"
+  },
+  {
+    "hash": "0c8b451",
+    "msg": "fix: 修复OpenAI翻译器max_tokens=null导致新模型报错的问题"
+  },
+  {
+    "hash": "2fb191d",
+    "msg": "更新v2.0.6更新日志"
+  },
+  {
+    "hash": "80489ab",
+    "msg": "修复替换翻译模式：1.修复无字图输出原图 2.修复ctd_replace导入错误 3.增加蒙版膨胀配置"
+  },
+  {
+    "hash": "2879618",
+    "msg": "修复并优化替换翻译模式的蒙版膨胀参数"
+  },
+  {
+    "hash": "166425f",
+    "msg": "更新v2.0.6更新日志：添加PSD导出修复说明"
+  },
+  {
+    "hash": "17343ef",
+    "msg": "修复：Qt编辑器导出图片时未导出PSD文件的问题"
+  },
+  {
+    "hash": "a49a0c7",
+    "msg": "feat: 添加替换翻译专用CTD检测模块，修复none.py"
+  },
+  {
+    "hash": "3dd357c",
+    "msg": "使用原版complete_mask替换简化算法"
+  },
+  {
+    "hash": "c81d4a1",
+    "msg": "优化步骤5.5：只过滤小区域，不过滤孤立区域"
+  },
+  {
+    "hash": "2957c3d",
+    "msg": "增强蒙版修复：添加DenseCRF精炼和filter_masks过滤"
+  },
+  {
+    "hash": "17cec3c",
+    "msg": "优化替换翻译直接粘贴模式蒙版处理"
+  },
+  {
+    "hash": "a695dbb",
+    "msg": "Update macOS_1_首次安装.sh"
+  },
+  {
+    "hash": "ee2752d",
+    "msg": "Update macOS_1_首次安装.sh"
+  },
+  {
+    "hash": "379e0df",
+    "msg": "Update requirements_metal.txt"
+  },
+  {
+    "hash": "07a37fb",
+    "msg": "Update macOS_3_检查更新并启动.sh"
+  },
+  {
+    "hash": "7dc0259",
+    "msg": "Update macOS_1_首次安装.sh"
+  },
+  {
+    "hash": "3b86ed5",
+    "msg": "feat: 为 macOS Apple Silicon 引入 支持Metal GPU 加速的安装和运行脚本，并更新文档、提供macOS应用图标。"
+  },
+  {
+    "hash": "c303a4d",
+    "msg": "隐藏 Qt UI 专属参数（替换翻译模式相关）在 Web UI 中"
+  },
+  {
+    "hash": "f9bd698",
+    "msg": "优化替换翻译模式的蒙版处理算法"
+  },
+  {
+    "hash": "b33e85f",
+    "msg": "优化替换翻译模式修复模型为none时的蒙版处理：添加连通区域扩散算法"
+  },
+  {
+    "hash": "d57a7cd",
+    "msg": "优化替换翻译模式下修复模型为none时的蒙版处理：添加连通区域扩散算法"
+  },
+  {
+    "hash": "74da91c",
+    "msg": "更新v2.0.5相关功能和配置"
+  },
+  {
+    "hash": "a3de807",
+    "msg": "修复替换翻译模式下修复模型为none时蒙版过大的问题"
+  },
+  {
+    "hash": "0376946",
+    "msg": "Bump version to v2.0.5"
+  },
+  {
+    "hash": "768d674",
+    "msg": "v2.0.5: 修复多个关键bug"
+  },
+  {
+    "hash": "e8441a7",
+    "msg": "v2.0.5: 修复多个功能问题和优化内存管理"
+  },
+  {
+    "hash": "45d8992",
+    "msg": "fix: 修复依赖安装逻辑避免死锁和重复安装"
+  },
+  {
+    "hash": "6179e3c",
+    "msg": "perf: 优化并行流水线图片类型处理和蒙版筛选"
+  },
+  {
+    "hash": "9941840",
+    "msg": "chore: bump version to v2.0.4"
+  },
+  {
+    "hash": "acdea2b",
+    "msg": "refactor: 移除包完整性检查功能"
+  },
+  {
+    "hash": "ec22c73",
+    "msg": "chore: 删除 remaining_issues.txt"
+  },
+  {
+    "hash": "1aadff9",
+    "msg": "fix: 在子进程中检测PyTorch版本，避免DLL占用问题"
+  },
+  {
+    "hash": "a4fd93b",
+    "msg": "修复重复安装PyTorch问题：在重装模式下跳过requirements中的PyTorch包，避免冲突"
+  },
+  {
+    "hash": "700fcb7",
+    "msg": "优化修复模式：分批卸载依赖避免命令行过长，使用Requirement对象准确提取包名"
+  },
+  {
+    "hash": "06ca4cf",
+    "msg": "修复UnboundLocalError：删除函数内部的cv2重复导入，避免局部变量作用域冲突"
+  },
+  {
+    "hash": "fba6e88",
+    "msg": "新增功能：显示缺失依赖列表、选择性安装缺失包、添加修复模式（强制同步代码+重装所有依赖）"
+  },
+  {
+    "hash": "17a2ee8",
+    "msg": "添加依赖包完整性检查：检测包是否损坏并提示重新安装，优化检查流程提示信息"
+  },
+  {
+    "hash": "022bfdc",
+    "msg": "增强代码更新检查：同时检查版本号和Git提交，确保检测到所有代码变更"
+  },
+  {
+    "hash": "4b4bd6a",
+    "msg": "优化依赖检查：对于精确版本要求(==)，如果已安装更新版本则认为满足，避免不必要的降级"
+  },
+  {
+    "hash": "e0f00e6",
+    "msg": "修复依赖检查：忽略PyTorch版本号中的本地标识符(如+cu128)进行版本比较"
+  },
+  {
+    "hash": "e860cc0",
+    "msg": "优化完整更新逻辑：添加总体检查功能，先检查代码和依赖状态再执行更新"
+  },
+  {
+    "hash": "d3cde2d",
+    "msg": "启用高级气泡检测并优化阈值映射"
+  },
+  {
+    "hash": "f0bfae0",
+    "msg": "修复替换翻译模式调试图和直接粘贴范围问题"
+  },
+  {
+    "hash": "fe9c15e",
+    "msg": "fix: 修复特殊模式保存JSON时无法获取图片尺寸的问题"
+  },
+  {
+    "hash": "c6d88a8",
+    "msg": "chore: 更新版本号到 v2.0.3"
+  },
+  {
+    "hash": "95492cd",
+    "msg": "docs: 添加代码质量优化到v2.0.3更新日志"
+  },
+  {
+    "hash": "bc41e37",
+    "msg": "refactor: 使用pyflakes静态分析修复272个代码质量问题"
+  },
+  {
+    "hash": "9e14f63",
+    "msg": "修复: Mask 优化分块切割索引越界错误"
+  },
+  {
+    "hash": "30139d4",
+    "msg": "启用翻译完成后模型缓存清理 + 修复批量翻译状态标记bug"
+  },
+  {
+    "hash": "220ff80",
+    "msg": "回退: 恢复 YOLO OBB 输入尺寸为 640"
+  },
+  {
+    "hash": "b216b2d",
+    "msg": "优化: YOLO OBB 检测器输入分辨率提升到 1280"
+  },
+  {
+    "hash": "d40a611",
+    "msg": "优化: 所有特殊模式的内存和显存管理优化"
+  },
+  {
+    "hash": "0aa6f2a",
+    "msg": "fix: 大图 mask refinement 内存溢出 - 添加智能分块处理"
+  },
+  {
+    "hash": "9abc96f",
+    "msg": "为 model_paddleocr.py 添加 GPU 清理"
+  },
+  {
+    "hash": "d3b35e9",
+    "msg": "重构 OCR 模块 GPU 清理逻辑"
+  },
+  {
+    "hash": "18fd790",
+    "msg": "完善 OCR 模块 use_gpu 属性修复"
+  },
+  {
+    "hash": "93125fe",
+    "msg": "修复 OCR 模块 use_gpu 属性未初始化错误"
+  },
+  {
+    "hash": "d5f7ec9",
+    "msg": "更新版本号为v2.0.2"
+  },
+  {
+    "hash": "a182066",
+    "msg": "文档更新：在命令行和开发相关文档中添加虚拟环境激活说明"
+  },
+  {
+    "hash": "0449bd2",
+    "msg": "优化YOLO OBB检测器：简化CUDA降级逻辑，修复空patch导致的resize错误"
+  },
+  {
+    "hash": "13108b4",
+    "msg": "更新QQ群信息为1079089991"
+  },
+  {
+    "hash": "945c7f9",
+    "msg": "v2.0.2: ONNX Runtime 推理优化和 UI 改进"
+  },
+  {
+    "hash": "1db302d",
+    "msg": "优化: 调整图像合成参数，降低文字边缘锐度，添加高斯模糊柔化边缘"
+  },
+  {
+    "hash": "3d4b63d",
+    "msg": "chore: 添加ui20260102测试目录到.gitignore"
+  },
+  {
+    "hash": "a0b00fd",
+    "msg": "优化: 替换翻译模式升级图像合成算法，使用色阶调整+正片叠底融合提升文字质量"
+  },
+  {
+    "hash": "09871f9",
+    "msg": "禁用主页下拉菜单的滚轮事件"
+  },
+  {
+    "hash": "014c1ea",
+    "msg": "补充 openai_hq 和 gemini_hq 翻译器配置"
+  },
+  {
+    "hash": "52a3c9a",
+    "msg": "v2.0.2: 修复 Photoshop 兼容性和优化密钥验证"
+  },
+  {
+    "hash": "ceaa21e",
+    "msg": "修复编辑器中所有直接访问 _regions 私有属性的地方"
+  },
+  {
+    "hash": "e541e24",
+    "msg": "修复编辑器删除区域时的 AttributeError：使用 get_regions() 方法"
+  },
+  {
+    "hash": "a3d8cfc",
+    "msg": "添加 enable_template_alignment 配置项到示例配置文件"
+  },
+  {
+    "hash": "b5ffd44",
+    "msg": "在 Web UI 中屏蔽 enable_template_alignment 选项（仅 Qt UI 替换翻译模式使用）"
+  },
+  {
+    "hash": "59e539e",
+    "msg": "修复替换翻译模式的修复逻辑：两种模式都先修复生肉图再处理文字"
+  },
+  {
+    "hash": "c577764",
+    "msg": "添加替换翻译模式的模板匹配对齐功能"
+  },
+  {
+    "hash": "30cf9da",
+    "msg": "chore: 添加新建文件夹到gitignore"
+  },
+  {
+    "hash": "4b05c11",
+    "msg": "fix: 修正ignore_bubble阈值映射，0.5对应旧版本固定值"
+  },
+  {
+    "hash": "502647e",
+    "msg": "feat: 改进ignore_bubble功能，阈值改为0-1范围"
+  },
+  {
+    "hash": "589c9a2",
+    "msg": "fix: 修复ignore_bubble过滤逻辑导致的索引错误"
+  },
+  {
+    "hash": "cb2cc78",
+    "msg": "feat: 为所有OCR模型添加ignore_bubble支持"
+  },
+  {
+    "hash": "a67ec5a",
+    "msg": "docs: 更新使用教程，添加替换翻译模式说明"
+  },
+  {
+    "hash": "906e9b0",
+    "msg": "refactor: 简化替换翻译模式的调试日志，只保留必要信息"
+  },
+  {
+    "hash": "39e9a18",
+    "msg": "fix: CLI模式也强制禁用替换翻译等特殊模式的并行处理"
+  },
+  {
+    "hash": "a05c5ad",
+    "msg": "fix: UI层强制禁用替换翻译等特殊模式的并行处理"
+  },
+  {
+    "hash": "8071d50",
+    "msg": "debug: 添加替换翻译模式查找翻译图的调试日志"
+  },
+  {
+    "hash": "314ad1e",
+    "msg": "feat: 添加替换翻译模式和相关功能"
+  },
+  {
+    "hash": "1a8f6fa",
+    "msg": "feat: 添加编辑器鼠标滚轮快捷键功能"
+  },
+  {
+    "hash": "70e21b8",
+    "msg": "fix: 优化模型下载机制，添加超时和自动清理功能"
+  },
+  {
+    "hash": "2053697",
+    "msg": "发布 v2.0.1 更新：修复翻译完成提示、导出稳定性和PSD角度问题"
+  },
+  {
+    "hash": "97aaf87",
+    "msg": "fix: 修复翻译完成提示框和导出图片稳定性问题"
+  },
+  {
+    "hash": "a7d664a",
+    "msg": "docs: 添加 v2.0.1 更新日志"
+  },
+  {
+    "hash": "6d640c6",
+    "msg": "修复 PaddleOCR 超大文本区域处理和导入错误"
+  },
+  {
+    "hash": "2e86434",
+    "msg": "将 PaddleOCR 修复合并到 v2.0.0 更新日志"
+  },
+  {
+    "hash": "faeb1d8",
+    "msg": "添加 v2.0.1 更新日志"
+  },
+  {
+    "hash": "3ddd503",
+    "msg": "修复 PaddleOCR 旋转裁剪时超过 OpenCV 尺寸限制的问题"
+  },
+  {
+    "hash": "a20d7a6",
+    "msg": "feat: 编辑器支持未翻译图片编辑和HEIC格式"
+  },
+  {
+    "hash": "fb755b2",
+    "msg": "Fix: PSD export line breaks/names, Ui progress crash"
+  },
+  {
+    "hash": "0e86499",
+    "msg": "修复PSD导出字体路径问题：psd_font不再受render.font_path影响，未设置时使用PS默认字体"
+  },
+  {
+    "hash": "eb33af9",
+    "msg": "修复渲染线程中的模块导入错误"
+  },
+  {
+    "hash": "02374b6",
+    "msg": "feat: 添加离线翻译权限和优化内存管理"
+  },
+  {
+    "hash": "fbaec7d",
+    "msg": "修复超大图片渲染崩溃：使用局部区域渲染绕过OpenCV 32767像素限制"
+  },
+  {
+    "hash": "0c57491",
+    "msg": "fix: 修复超大图片渲染崩溃问题，优化显存分配"
+  },
+  {
+    "hash": "28efe03",
+    "msg": "移除 config-example.json 的追踪"
+  },
+  {
+    "hash": "9e3148a",
+    "msg": "优化切割逻辑和检测器性能"
+  },
+  {
+    "hash": "fb70a62",
+    "msg": "v2.0.0: 清理离线翻译器残余代码和优化检测器逻辑"
+  },
+  {
+    "hash": "4f084b0",
+    "msg": "修复: 在 GPU 版本打包配置中添加 pydensecrf.eigen 隐式导入"
+  },
+  {
+    "hash": "31706a2",
+    "msg": "feat: 添加内存清理模块，支持保留模型或完全卸载，由models_ttl控制"
+  },
+  {
+    "hash": "bf5ece7",
+    "msg": "chore: 将CUDA版本从cu130改为cu128"
+  },
+  {
+    "hash": "176095d",
+    "msg": "修复: 删除tracemalloc内存快照代码以减少内存消耗"
+  },
+  {
+    "hash": "e61d32b",
+    "msg": "fix: 锁定 CPU 版本 torch 为 2.8.0"
+  },
+  {
+    "hash": "7765e47",
+    "msg": "fix: 锁定 torch 版本为 2.8.0 以解决 DLL 初始化失败问题"
+  },
+  {
+    "hash": "70398b9",
+    "msg": "优化批量渲染内存管理 - 每渲染完一张立即清理中间数据"
+  },
+  {
+    "hash": "fc1b4b9",
+    "msg": "优化内存管理 - 渲染后立即清理图像数据并添加Docker内存限制"
+  },
+  {
+    "hash": "826eca0",
+    "msg": "修复服务器端禁用参数时的类型转换问题 - 支持枚举类型自动转换"
+  },
+  {
+    "hash": "6f2aa5e",
+    "msg": "修复OCR引擎类型兼容性问题 - 支持字符串和枚举类型"
+  },
+  {
+    "hash": "45f6b54",
+    "msg": "fix(server): 修复Docker环境下翻译完成后线程内存不清理的问题"
+  },
+  {
+    "hash": "64350c0",
+    "msg": "feat(web): 为权限编辑器添加35个缺失的配置项"
+  },
+  {
+    "hash": "1a2fd5c",
+    "msg": "docs: 更新清理说明，明确保留Python和Git配置文件"
+  },
+  {
+    "hash": "d027ea5",
+    "msg": "docs: 添加清理功能提醒说明"
+  },
+  {
+    "hash": "372f3a4",
+    "msg": "docs: 明确说明安装脚本保存目录为安装根目录"
+  },
+  {
+    "hash": "013d28a",
+    "msg": "安装脚本：添加清理前的确认提示，防止误删用户数据"
+  },
+  {
+    "hash": "a102759",
+    "msg": "更新 Docker 镜像配置：同时推送到 Docker Hub 和 GHCR，更新相关文档"
+  },
+  {
+    "hash": "7c848f4",
+    "msg": "修复 README 徽章中文显示问题"
+  },
+  {
+    "hash": "47d4091",
+    "msg": "优化低分辨率图片文字渲染质量"
+  },
+  {
+    "hash": "6bd61fa",
+    "msg": "修复依赖安装问题：调整 PyTorch 源配置，确保 torch 从正确源下载，其他包从 PyPI 安装"
+  },
+  {
+    "hash": "991bda0",
+    "msg": "修复依赖版本和 PyInstaller 配置：更新 aiofiles 到 25.1.0，移除不存在的隐藏导入"
+  },
+  {
+    "hash": "75c8968",
+    "msg": "修复 Docker 构建：添加 pydensecrf 编译所需的 Eigen 库依赖"
+  },
+  {
+    "hash": "5c6f69d",
+    "msg": "发布 v1.9.9 版本：修复批量翻译上下文丢失问题，优化并发流水线"
+  },
+  {
+    "hash": "1b5d59d",
+    "msg": "更新配置示例和并发管道代码"
+  },
+  {
+    "hash": "64a4690",
+    "msg": "更新: v1.9.9 更新日志 - 添加 torchsummary 和 Shapely 错误修复"
+  },
+  {
+    "hash": "2456486",
+    "msg": "修复: 处理 Shapely TopologyException 几何计算错误"
+  },
+  {
+    "hash": "56b1c65",
+    "msg": "修复: torchsummary 应从 PyPI 镜像源安装而非 PyTorch 源"
+  },
+  {
+    "hash": "8835157",
+    "msg": "修复: 移除 torchsummary 版本限制以解决安装失败问题"
+  },
+  {
+    "hash": "eb98044",
+    "msg": "修复编辑器中文路径图片加载失败问题"
+  },
+  {
+    "hash": "a01f55c",
+    "msg": "文档更新: 调整README结构，添加支持作者信息"
+  },
+  {
+    "hash": "35b4757",
+    "msg": "优化: PaddleOCR 取色性能优化，改为批量处理方式"
+  },
+  {
+    "hash": "9d46a07",
+    "msg": "修复编辑器和并发流水线的多个bug"
+  },
+  {
+    "hash": "0070420",
+    "msg": "更新 v1.9.9 更新日志：添加依赖安装优化说明"
+  },
+  {
+    "hash": "4aa6c5e",
+    "msg": "扩展 PyTorch 包列表，支持从 cu128 源下载所有相关依赖"
+  },
+  {
+    "hash": "0109130",
+    "msg": "修改 requirements 文件：删除 extra-index-url 并移除 xformers 版本限制"
+  },
+  {
+    "hash": "8db06c6",
+    "msg": "更新 v1.9.9 更新日志 - 修正上色模块修复描述"
+  },
+  {
+    "hash": "7274c76",
+    "msg": "修复并行模式禁用时图片加载问题 - 当用户启用并行但因特殊模式（如仅上色）导致并行被禁用时，自动加载图片"
+  },
+  {
+    "hash": "9f3b50f",
+    "msg": "修复并发模式禁用时图片加载问题 - 当特殊模式（如仅上色）禁用并发时，自动加载文件路径为PIL Image对象"
+  },
+  {
+    "hash": "8118598",
+    "msg": "添加调试信息以诊断上色模块参数类型问题"
+  },
+  {
+    "hash": "8f618c5",
+    "msg": "修复并发模式下上色失败问题 - 移除 _run_colorizer 中的 **ctx 展开，避免参数冲突"
+  },
+  {
+    "hash": "025d06f",
+    "msg": "修复CPU版PyTorch索引源配置"
+  },
+  {
+    "hash": "1dc1198",
+    "msg": "修复安装脚本conda检查环境时卡住的问题"
+  },
+  {
+    "hash": "7ea96cb",
+    "msg": "更新PyTorch依赖配置: GPU改用cu128，移除版本限制"
+  },
+  {
+    "hash": "6e3769e",
+    "msg": "v1.9.9: 优化MangaJaNai超分模型加载和安装脚本"
+  },
+  {
+    "hash": "7a45701",
+    "msg": "更新日志：添加.env编辑切换预设未保存的bug修复"
+  },
+  {
+    "hash": "d30e89f",
+    "msg": "v1.9.8: 修复高分辨率检测蒙版错位、新增编辑器JSON保存、优化文本渲染"
+  },
+  {
+    "hash": "fc20e32",
+    "msg": "文档更新：将'高质量翻译提示词'改名为'自定义提示词'，明确适用于OpenAI/Gemini/OpenAI HQ/Gemini HQ四个翻译器"
+  },
+  {
+    "hash": "1ddc3cb",
+    "msg": "修复翻译完成后进入编辑器的多个问题 - 文件列表显示错误、导出失败、图像关闭错误"
+  },
+  {
+    "hash": "299479f",
+    "msg": "修复翻译完成后进入编辑器时文件列表显示错误 - 应显示翻译后的文件而非源文件"
+  },
+  {
+    "hash": "f77145d",
+    "msg": "修复导出时'Operation on closed image'错误 - 在返回结果前复制图像避免共享底层数据"
+  },
+  {
+    "hash": "eb51d71",
+    "msg": "修复翻译时 NoneType 错误和优化检查逻辑"
+  },
+  {
+    "hash": "63c6bc4",
+    "msg": "fix: 修复预设管理相关问题"
+  },
+  {
+    "hash": "50769aa",
+    "msg": "发布 v1.9.7 版本"
+  },
+  {
+    "hash": "6f99c00",
+    "msg": "优化并发流水线错误处理机制"
+  },
+  {
+    "hash": "d3dbdf7",
+    "msg": "移除调试日志，保持代码简洁"
+  },
+  {
+    "hash": "9f97440",
+    "msg": "精简v1.9.7更新日志，保持简洁"
+  },
+  {
+    "hash": "db2dc8b",
+    "msg": "更新v1.9.7更新日志"
+  },
+  {
+    "hash": "09f165a",
+    "msg": "改进mangajanai彩图检测算法，提高准确性"
+  },
+  {
+    "hash": "cd283a2",
+    "msg": "添加详细的调试日志以诊断超分倍率乘法类型错误"
+  },
+  {
+    "hash": "2841e1a",
+    "msg": "优化断句算法性能，修复大规模断句卡顿问题"
+  },
+  {
+    "hash": "c3d3bf6",
+    "msg": "移除渲染调试日志"
+  },
+  {
+    "hash": "2abac67",
+    "msg": "移除渲染调试日志"
+  },
+  {
+    "hash": "7b962e4",
+    "msg": "改进断句优化算法：分层策略(小n用穷举,中n用采样,大n用贪心)"
+  },
+  {
+    "hash": "0980622",
+    "msg": "优化断句算法：从O(2^n)暴力枚举改为O(n^2)贪心算法"
+  },
+  {
+    "hash": "7bae3d8",
+    "msg": "修复断句优化导致的性能问题：限制最多10个断句标记"
+  },
+  {
+    "hash": "40f2e94",
+    "msg": "将渲染调试日志级别改为INFO以便追踪卡顿位置"
+  },
+  {
+    "hash": "ee34a25",
+    "msg": "添加渲染阶段的调试日志以定位卡顿问题"
+  },
+  {
+    "hash": "7d2f796",
+    "msg": "修复apply_dictionary函数缺少return语句导致文本变成None"
+  },
+  {
+    "hash": "4ecc728",
+    "msg": "修复OCR空文本导致的AttributeError错误"
+  },
+  {
+    "hash": "a684fb4",
+    "msg": "优化日志系统：文件日志始终记录DEBUG级别，控制台根据配置调整"
+  },
+  {
+    "hash": "553e331",
+    "msg": "添加 v1.9.7 更新日志"
+  },
+  {
+    "hash": "2477a12",
+    "msg": "添加 parse_upscale_ratio 辅助函数，修复超分倍率字符串运算错误"
+  },
+  {
+    "hash": "16d7152",
+    "msg": "增强超分倍率解析，支持realcugan格式(2x-conservative等)"
+  },
+  {
+    "hash": "4ccd5e0",
+    "msg": "修复超分倍率解析错误，支持多种格式(x2/x4/DAT2 x4等)"
+  },
+  {
+    "hash": "1c59df7",
+    "msg": "修复多个关键错误：API响应验证、类型检查、图片加载验证"
+  },
+  {
+    "hash": "6daab00",
+    "msg": "添加详细的错误追踪信息以便调试"
+  },
+  {
+    "hash": "954f1cf",
+    "msg": "修复自然排序中的类型比较错误，使用元组确保类型安全"
+  },
+  {
+    "hash": "fdc320a",
+    "msg": "修复文件排序时字符串和整数比较错误"
+  },
+  {
+    "hash": "1b2b97e",
+    "msg": "修复.env文件保存格式问题，统一使用双引号包裹所有值"
+  },
+  {
+    "hash": "fd8f48d",
+    "msg": "改进线程池清理机制"
+  },
+  {
+    "hash": "d5badc0",
+    "msg": "修复JSON解析错误和Qt线程警告"
+  },
+  {
+    "hash": "53b8ac5",
+    "msg": "修复修复线程无法正常退出的问题：当图片没有文本时修复线程会一直等待"
+  },
+  {
+    "hash": "b8b32ea",
+    "msg": "修复dump_image函数中alpha通道尺寸不匹配的问题"
+  },
+  {
+    "hash": "6559b2c",
+    "msg": "添加 manga-ocr 依赖库: fire, fugashi, jaconv, pyperclip, unidic_lite"
+  },
+  {
+    "hash": "e2b45f1",
+    "msg": "修复静态分析发现的代码问题：删除未使用的变量和导入，修复无占位符的f-string，修复重复导入"
+  },
+  {
+    "hash": "74281d8",
+    "msg": "修复静态分析发现的代码问题：删除未使用的变量和导入，修复无占位符的f-string"
+  },
+  {
+    "hash": "6197473",
+    "msg": "更新文档和打包配置文件"
+  },
+  {
+    "hash": "c1fa283",
+    "msg": "修复文件排序时字符串和整数比较错误"
+  },
+  {
+    "hash": "f729b02",
+    "msg": "取消跟踪 gen_scripts.py"
+  },
+  {
+    "hash": "ca79899",
+    "msg": "忽略 manga_translator_work 工作目录"
+  },
+  {
+    "hash": "f243ad7",
+    "msg": "将 build_utils 移动到 packaging 目录下"
+  },
+  {
+    "hash": "982ab95",
+    "msg": "Revert \"忽略 build_utils 目录\""
+  },
+  {
+    "hash": "184ee8a",
+    "msg": "忽略 build_utils 目录"
+  },
+  {
+    "hash": "119e743",
+    "msg": "修复 MangaJaNai 放大器图像类型处理问题"
+  },
+  {
+    "hash": "a2365f7",
+    "msg": "清理无用的 manga_ocr 数据文件收集代码"
+  },
+  {
+    "hash": "a2c40b7",
+    "msg": "v1.9.6: 新增API配置管理功能 - 预设管理、API测试、获取模型列表"
+  },
+  {
+    "hash": "a0effa9",
+    "msg": "文档: 更新v1.9.6更新日志，添加UTF-16-LE编码修复说明"
+  },
+  {
+    "hash": "7f625eb",
+    "msg": "修复: 添加统一的文本编码清理功能，解决UTF-16-LE解码错误"
+  },
+  {
+    "hash": "ab6ceb9",
+    "msg": "更新配置示例文件"
+  },
+  {
+    "hash": "3250f31",
+    "msg": "修复 MangaJaNai 超分模型在并发模式下的类型错误"
+  },
+  {
+    "hash": "ab2840f",
+    "msg": "改进覆盖检测预处理跳过提醒功能"
+  },
+  {
+    "hash": "ec8166b",
+    "msg": "v1.9.6: 移除manga-ocr依赖，添加ModelScope备用下载，优化下载速度监控"
+  },
+  {
+    "hash": "a9cd88b",
+    "msg": "修复：完善关闭覆盖模式下的跳过检测逻辑"
+  },
+  {
+    "hash": "f6e20c2",
+    "msg": "docs: 完善文档说明和提示词示例"
+  },
+  {
+    "hash": "99ff25e",
+    "msg": "feat: 添加术语提取提示词配置和多项功能优化"
+  },
+  {
+    "hash": "cd36813",
+    "msg": "fix: 修复Qt UI中竖排内横排匹配省略号的问题"
+  },
+  {
+    "hash": "ce527fa",
+    "msg": "fix: 修复竖排内横排匹配省略号的问题"
+  },
+  {
+    "hash": "0f0682f",
+    "msg": "改进: 使用更通用的方式清理JSON前的无关内容"
+  },
+  {
+    "hash": "18f599c",
+    "msg": "修复: 清理AI响应中的单独json标记行"
+  },
+  {
+    "hash": "31d4de9",
+    "msg": "改进: 优化JSON解析的正则提取逻辑，添加json5依赖"
+  },
+  {
+    "hash": "1f1f9d1",
+    "msg": "改进: 增强JSON解析容错能力，支持格式错误的JSON修复"
+  },
+  {
+    "hash": "c3c5cb4",
+    "msg": "修复: 改进JSON响应解析逻辑，避免格式错误的JSON被按行分割"
+  },
+  {
+    "hash": "ccd9167",
+    "msg": "修复: AotInpainter和LamaMPEInpainter的_load方法添加**kwargs参数"
+  },
+  {
+    "hash": "322869b",
+    "msg": "fix: 修复 ONNX Runtime 内存问题并添加强制使用 PyTorch 选项"
+  },
+  {
+    "hash": "61c89f2",
+    "msg": "移除翻译器模型卸载逻辑（翻译器为API调用无需卸载）"
+  },
+  {
+    "hash": "9b26a48",
+    "msg": "优化模型卸载逻辑：仅在切换翻译器时卸载旧模型"
+  },
+  {
+    "hash": "b8840c7",
+    "msg": "修复翻译完成后模型未卸载的问题，添加自动卸载逻辑释放内存"
+  },
+  {
+    "hash": "a009641",
+    "msg": "修复ImageQt不支持LA模式图像导致的崩溃问题"
+  },
+  {
+    "hash": "e449606",
+    "msg": "feat: 添加文本过滤列表功能和其他优化"
+  },
+  {
+    "hash": "1d6d902",
+    "msg": "fix: 捕获 PyTorch 安装损坏时的 OSError"
+  },
+  {
+    "hash": "67f48c3",
+    "msg": "feat: v1.9.6 - MangaJaNai超分模型 + JSON翻译格式 + launch.py支持--index-url"
+  },
+  {
+    "hash": "87f5552",
+    "msg": "Merge pull request #39 from zzqsld/fix/requirements-gpu-cu129-index"
+  },
+  {
+    "hash": "0ebcdd6",
+    "msg": "fix: OpenAI API 空响应处理 + 解除 PIL 图片大小限制"
+  },
+  {
+    "hash": "7d2f964",
+    "msg": "fix: 支持 requirements 文件中的 --extra-index-url 参数，torch 相关包从 PyTorch 官方源下载"
+  },
+  {
+    "hash": "4f14906",
+    "msg": "fix(requirements_gpu): use PyTorch CUDA 12.9 index as primary and PyPI as fallback; drop +cu129 local tags so pip resolves official CUDA wheels"
+  },
+  {
+    "hash": "3c4b031",
+    "msg": "v1.9.5: 优化并行模式、图片序列号，提高编辑器稳定性"
+  },
+  {
+    "hash": "cc65bfe",
+    "msg": "fix: 依赖安装失败时从失败的包开始切换镜像重试，而不是跳到下一个包"
+  },
+  {
+    "hash": "6794d3d",
+    "msg": "fix: 编辑器导出和停止翻译按钮状态优化"
+  },
+  {
+    "hash": "b3562c0",
+    "msg": "优化编辑器稳定性，修复并行模式超分和上色不生效的bug"
+  },
+  {
+    "hash": "b6be590",
+    "msg": "修复白框拖动逻辑：先检测手柄再处理选择，避免进入移动模式"
+  },
+  {
+    "hash": "6e3df2d",
+    "msg": "添加并行模式"
+  },
+  {
+    "hash": "4db0911",
+    "msg": "fix: 添加目标语言强调，防止DeepSeek被中文示例误导"
+  },
+  {
+    "hash": "155c197",
+    "msg": "fix: 移除 Accept-Encoding 头修复 UTF-8 解码错误"
+  },
+  {
+    "hash": "b007577",
+    "msg": "fix: 修复脚本4环境激活回退逻辑"
+  },
+  {
+    "hash": "b74f9cd",
+    "msg": "移除DeepL翻译器说明"
+  },
+  {
+    "hash": "3fee967",
+    "msg": "更新设置文档：添加输出到原图目录和水平居中说明"
+  },
+  {
+    "hash": "7e6f22e",
+    "msg": "更新设置文档：添加输出到原图目录、CLI内存重启、水平居中说明"
+  },
+  {
+    "hash": "89f23f4",
+    "msg": "版本更新到 v1.9.4"
+  },
+  {
+    "hash": "099ce17",
+    "msg": "添加 v1.9.4 更新日志"
+  },
+  {
+    "hash": "5bdcbcf",
+    "msg": "异步化编辑器加载，清理调试日志"
+  },
+  {
+    "hash": "0052504",
+    "msg": "feat: 添加AVIF格式支持和导出状态检测功能"
+  },
+  {
+    "hash": "38a07b7",
+    "msg": "fix: 添加pip多镜像源回退机制，修复Git检测逻辑"
+  },
+  {
+    "hash": "0bc30d9",
+    "msg": "更新高质量提示词文档说明"
+  },
+  {
+    "hash": "9efba0d",
+    "msg": "更新API配置文档和添加打赏码"
+  },
+  {
+    "hash": "cac16d2",
+    "msg": "fix: 自动添加 safe.directory 解决 Git 所有权检查问题"
+  },
+  {
+    "hash": "2bd7a14",
+    "msg": "fix: 修复.gitignore导致models目录被忽略的问题"
+  },
+  {
+    "hash": "d0af550",
+    "msg": "fix: 将相对导入改为绝对导入，修复Docker模块导入错误"
+  },
+  {
+    "hash": "2c0980e",
+    "msg": "refactor: 将 server 模块所有相对导入改为绝对导入"
+  },
+  {
+    "hash": "7175ff0",
+    "msg": "fix: 将 repositories 的相对导入改为绝对导入，修复 Docker 环境导入问题"
+  },
+  {
+    "hash": "0013a26",
+    "msg": "fix: 添加根目录 .dockerignore 文件"
+  },
+  {
+    "hash": "694adfb",
+    "msg": "chore: 清理服务器代码中未使用的导入和变量"
+  },
+  {
+    "hash": "9d31580",
+    "msg": "fix: 修复 history_service.py 中 logger 未定义的问题"
+  },
+  {
+    "hash": "e7c62a9",
+    "msg": "fix: 修复 PromptResource 导入路径错误"
+  },
+  {
+    "hash": "d96f3e2",
+    "msg": "fix: 添加 PromptResource 和 FontResource 模型，修复 Docker 导入错误"
+  },
+  {
+    "hash": "f7f0624",
+    "msg": "chore: 清理未使用的导入和变量，修复 QGraphicsScene 未定义错误"
+  },
+  {
+    "hash": "dcff5a2",
+    "msg": "fix: 修复翻译完成闪退、进度条变灰、日志文件不写入等问题"
+  },
+  {
+    "hash": "f39d34b",
+    "msg": "feat: 将脚本4更新维护功能移至Python，添加--maintenance参数"
+  },
+  {
+    "hash": "b22ae8b",
+    "msg": "feat: 将脚本4更新维护功能移至Python，添加--maintenance参数"
+  },
+  {
+    "hash": "31dc34d",
+    "msg": "fix: 修复多个文件的 try-except 缩进问题"
+  },
+  {
+    "hash": "664eecf",
+    "msg": "fix: 修复脚本4更新代码时缺少fetch步骤"
+  },
+  {
+    "hash": "7c47cad",
+    "msg": "fix: 修复 editor_controller.py 语法错误 - 移除多余的 try 块"
+  },
+  {
+    "hash": "20ab504",
+    "msg": "v1.9.3: Web UI管理系统重构, Qt UI预设功能, 编辑器稳定性和内存优化"
+  },
+  {
+    "hash": "2085f0a",
+    "msg": "fix: 过滤LM Studio等本地推理模型的<think>标签输出"
+  },
+  {
+    "hash": "a9a15a0",
+    "msg": "feat(yolo_obb): 添加长图分割检测逻辑，与主检测器一致"
+  },
+  {
+    "hash": "533272f",
+    "msg": "修复：处理没有文字的图片时的保存错误"
+  },
+  {
+    "hash": "09258ae",
+    "msg": "refactor: 统一load_text模式的TXT导入JSON预处理到翻译器入口"
+  },
+  {
+    "hash": "4b815c3",
+    "msg": "文档：添加Docker快速启动命令"
+  },
+  {
+    "hash": "bfcbd46",
+    "msg": "修复Dockerfile：移除会覆盖fonts和dict目录的mkdir命令"
+  },
+  {
+    "hash": "b48a11f",
+    "msg": "修复GitHub Actions：移除不存在的resources目录"
+  },
+  {
+    "hash": "38b5385",
+    "msg": "文档：统一使用latest-cpu/latest-gpu标签"
+  },
+  {
+    "hash": "e8773cc",
+    "msg": "更新文档：使用正确的Docker镜像地址"
+  },
+  {
+    "hash": "944ceb1",
+    "msg": "修复m2m100翻译器：延迟加载ctranslate2，解决Docker容器启动错误"
+  },
+  {
+    "hash": "c5597fb",
+    "msg": "修复Docker镜像标签：自动推送latest-cpu/latest-gpu标签"
+  },
+  {
+    "hash": "d2d8ad4",
+    "msg": "修复Qt UI配置保存：强制min_box_area_ratio为0"
+  },
+  {
+    "hash": "504e83b",
+    "msg": "v1.9.2: 修复 ctranslate2 在容器环境中的加载问题，采用延迟导入策略"
+  },
+  {
+    "hash": "2c54774",
+    "msg": "docs: 添加 Docker 使用指南，更新翻译器"
+  },
+  {
+    "hash": "0469b78",
+    "msg": "docs: 添加 Docker 使用指南"
+  },
+  {
+    "hash": "3a98b1e",
+    "msg": "fix: 更新主程序"
+  },
+  {
+    "hash": "7ce9733",
+    "msg": "fix: 添加磁盘空间清理步骤，解决 GitHub Actions 空间不足问题"
+  },
+  {
+    "hash": "099e9b6",
+    "msg": "fix: 移除不存在的 python3.12-distutils 包"
+  },
+  {
+    "hash": "b6357c4",
+    "msg": "fix: 仅在推送标签时触发 Docker 构建，格式化 Dockerfile"
+  },
+  {
+    "hash": "56afff8",
+    "msg": "fix: GPU 版本添加 python3.12-distutils 并使用 get-pip.py 安装 pip"
+  },
+  {
+    "hash": "de0a637",
+    "msg": "fix: 设置 Docker 构建为非交互式模式，避免 tzdata 配置提示"
+  },
+  {
+    "hash": "8041fe9",
+    "msg": "fix: 移除预编译 wheel 下载，增加构建超时时间到 120 分钟"
+  },
+  {
+    "hash": "ae7ba31",
+    "msg": "fix: 修复 Docker 构建中 pydensecrf 安装问题，改为从源码编译"
+  },
+  {
+    "hash": "441c8de",
+    "msg": "Docker: 修复 GPU 版本 Python 3.12 安装"
+  },
+  {
+    "hash": "bb3b071",
+    "msg": "Docker: 修复 COPY 命令语法错误"
+  },
+  {
+    "hash": "0817e02",
+    "msg": "Docker: 在 Actions 中下载 pydensecrf wheel"
+  },
+  {
+    "hash": "482defb",
+    "msg": "Docker: 修复 wheel 文件名问题"
+  },
+  {
+    "hash": "86bbd03",
+    "msg": "Docker: 修复 pydensecrf 过滤逻辑"
+  },
+  {
+    "hash": "4980868",
+    "msg": "Docker: 添加 pydensecrf 安装回退机制"
+  },
+  {
+    "hash": "7ef3ce6",
+    "msg": "Docker: 使用预编译的 pydensecrf wheel 加速构建"
+  },
+  {
+    "hash": "22586ef",
+    "msg": "Release v1.9.2: 编辑器增强、检测优化、Web服务器修复"
+  },
+  {
+    "hash": "62c6888",
+    "msg": "v1.9.2: 优化文档和Docker部署配置"
+  },
+  {
+    "hash": "26bd5b7",
+    "msg": "fix: 修复编辑器视图文件夹树显示问题，添加空文件夹自动删除功能"
+  },
+  {
+    "hash": "f08612f",
+    "msg": "feat: 添加 Docker 支持和 GitHub Actions 自动构建"
+  },
+  {
+    "hash": "2d270d0",
+    "msg": "feat: 支持通过环境变量自动设置管理员密码"
+  },
+  {
+    "hash": "2dc1af2",
+    "msg": "feat: 添加管理员密码首次设置和更改功能"
+  },
+  {
+    "hash": "64784ff",
+    "msg": "完善conda检测逻辑: 添加多重检测方法和本地Miniconda支持"
+  },
+  {
+    "hash": "c356973",
+    "msg": "添加用户提示：环境创建失败时询问是否尝试修复"
+  },
+  {
+    "hash": "127d9c7",
+    "msg": "添加conda环境创建失败时的自动修复: 重置channels配置"
+  },
+  {
+    "hash": "e450a19",
+    "msg": "移除Qt UI启动时抑制错误输出的代码，便于调试"
+  },
+  {
+    "hash": "54a01b8",
+    "msg": "修复conda环境创建错误: 添加缓存清理和版本通配符"
+  },
+  {
+    "hash": "c02a105",
+    "msg": "优化文件夹递归查找和排序逻辑"
+  },
+  {
+    "hash": "7cd779b",
+    "msg": "fix: 修复detect_size属性名错误，优化最小框过滤日志"
+  },
+  {
+    "hash": "ac71e1d",
+    "msg": "fix: 修复textline_merge中detect_size属性名错误"
+  },
+  {
+    "hash": "5a3a6f3",
+    "msg": "docs: 移动更新日志到doc文件夹"
+  },
+  {
+    "hash": "24ad7fa",
+    "msg": "docs: 修正升级说明"
+  },
+  {
+    "hash": "071d7e1",
+    "msg": "docs: 添加v1.9.1更新日志"
+  },
+  {
+    "hash": "4145849",
+    "msg": "v1.9.1: 添加仅修复模式，修复编辑器文件管理bug"
+  },
+  {
+    "hash": "1e67469",
+    "msg": "优化文件列表功能：修复删除按钮bug，添加Star趋势图"
+  },
+  {
+    "hash": "ec57b5b",
+    "msg": "更新检测和翻译逻辑"
+  },
+  {
+    "hash": "8eba047",
+    "msg": "优化批量翻译内存管理和日志显示"
+  },
+  {
+    "hash": "0646149",
+    "msg": "fix: 修复打包后翻译文件路径问题"
+  },
+  {
+    "hash": "e1f37fa",
+    "msg": "feat: 完善多语言支持和UI优化"
+  },
+  {
+    "hash": "2d015e4",
+    "msg": "更新v1.9.0更新日志"
+  },
+  {
+    "hash": "c239fae",
+    "msg": "修复导出模式的内存清理问题"
+  },
+  {
+    "hash": "2be6817",
+    "msg": "更新INSTALLATION.md：推荐使用高质量翻译器"
+  },
+  {
+    "hash": "97cfc9e",
+    "msg": "更新文档：明确AMD GPU支持范围和推荐翻译器"
+  },
+  {
+    "hash": "319b863",
+    "msg": "修复递归文件夹排序问题"
+  },
+  {
+    "hash": "3de9bd9",
+    "msg": "v1.9.0: 优化overwrite逻辑和CLI文件处理顺序"
+  },
+  {
+    "hash": "f09789d",
+    "msg": "修复文件夹选择对话框hover状态文字不可见问题"
+  },
+  {
+    "hash": "8b14702",
+    "msg": "优化overwrite=False时的文件跳过逻辑"
+  },
+  {
+    "hash": "11ffd26",
+    "msg": "更新 v1.9.0 更新日志"
+  },
+  {
+    "hash": "e0b44a5",
+    "msg": "修复编辑器描边宽度实时更新问题"
+  },
+  {
+    "hash": "af32e3e",
+    "msg": "优化内存占用和错误处理"
+  },
+  {
+    "hash": "88b1c93",
+    "msg": "docs: 在使用教程中添加模型文件网盘下载链接"
+  },
+  {
+    "hash": "a734a69",
+    "msg": "v1.9.0: 修复YOLO检测器参数传递问题并优化AMD GPU支持"
+  },
+  {
+    "hash": "7f27025",
+    "msg": "修复命令行模式和优化性能"
+  },
+  {
+    "hash": "5c40e04",
+    "msg": "Merge pull request #27 from jiujiu532/feature/config-import-export-v3"
+  },
+  {
+    "hash": "3e618c5",
+    "msg": "feat: 添加配置导入导出功能"
+  },
+  {
+    "hash": "3c54d30",
+    "msg": "添加 QQ 交流群信息到 README"
+  },
+  {
+    "hash": "bf1b61b",
+    "msg": "更新到 v1.9.0 版本"
+  },
+  {
+    "hash": "b2bfdcb",
+    "msg": "更新依赖配置和文档"
+  },
+  {
+    "hash": "a24bc66",
+    "msg": "修复FileItemWidget初始化代码缺失问题"
+  },
+  {
+    "hash": "70bbad2",
+    "msg": "优化文件列表缩略图加载：改为多线程异步加载"
+  },
+  {
+    "hash": "69c987b",
+    "msg": "修复几何编辑模式下的QPointF未定义错误"
+  },
+  {
+    "hash": "6ed1de9",
+    "msg": "优化翻译任务线程管理：防止线程泄漏和资源冲突"
+  },
+  {
+    "hash": "c1ae1d7",
+    "msg": "修复inpainted缓存和JSON保存逻辑：确保save_text参数正确控制保存行为"
+  },
+  {
+    "hash": "8e9928e",
+    "msg": "修复Qt编辑器原文显示问题：将'点击编辑原文'标签替换为原文文本框"
+  },
+  {
+    "hash": "330d539",
+    "msg": "fix: 修复所有 subprocess 调用的编码问题"
+  },
+  {
+    "hash": "9f8e593",
+    "msg": "fix: 修复 Windows GBK 环境下 subprocess 编码错误"
+  },
+  {
+    "hash": "2662be7",
+    "msg": "chore: 将 originals 目录添加到 .gitignore 并取消跟踪"
+  },
+  {
+    "hash": "8dd3c37",
+    "msg": "feat: 添加文件列表拖放支持和极端长宽比图片切割修复功能"
+  },
+  {
+    "hash": "1468dbf",
+    "msg": "docs: 更新README命令行示例，只保留web和local模式"
+  },
+  {
+    "hash": "f64938f",
+    "msg": "docs: 修正README中的命令行调用方式"
+  },
+  {
+    "hash": "bb1d857",
+    "msg": "fix: 修复速率限制bug并添加日志"
+  },
+  {
+    "hash": "36e759c",
+    "msg": "fix: 抑制 xformers Triton 警告和调试日志"
+  },
+  {
+    "hash": "a07859f",
+    "msg": "Release v1.8.9: Bug 修复、功能增强和文档更新"
+  },
+  {
+    "hash": "aff3225",
+    "msg": "fix: 修复 API 服务器错误并添加临时文件清理功能"
+  },
+  {
+    "hash": "49308da",
+    "msg": "fix: 修复旋转检测时 mask 为 tuple 导致的错误"
+  },
+  {
+    "hash": "930eeaf",
+    "msg": "fix: 修复翻译结果为空时的错误处理"
+  },
+  {
+    "hash": "d1c4ceb",
+    "msg": "fix: 修复 web 模式缺少 nonce 和 start_instance 属性的错误"
+  },
+  {
+    "hash": "87d2c9b",
+    "msg": "fix: 修复 web 模式命令行参数未生效的问题"
+  },
+  {
+    "hash": "2a2e765",
+    "msg": "feat: API 未传入 config 时自动使用默认配置文件"
+  },
+  {
+    "hash": "cf277a6",
+    "msg": "feat: 添加 --retry-attempts 参数和修复检测调试图片错误"
+  },
+  {
+    "hash": "a546de5",
+    "msg": "feat: 为 web 模式添加 --models-ttl 参数支持"
+  },
+  {
+    "hash": "ddd29df",
+    "msg": "Add server API support and update dependencies"
+  },
+  {
+    "hash": "798367a",
+    "msg": "feat: 添加可配置的最小检测框面积占比阈值"
+  },
+  {
+    "hash": "7ecdf72",
+    "msg": "feat: 多项UI和功能优化"
+  },
+  {
+    "hash": "49edf0a",
+    "msg": "修复配置文件读取和UI样式优化"
+  },
+  {
+    "hash": "94de573",
+    "msg": "Release v1.8.8: 新增主题样式、优化编辑器、更新文档"
+  },
+  {
+    "hash": "a5bfac7",
+    "msg": "docs: 限制 README 主页图片显示宽度为 600px"
+  },
+  {
+    "hash": "86a3351",
+    "msg": "docs: 更新 README 开头图片，使用主页截图并居中显示"
+  },
+  {
+    "hash": "c4d1949",
+    "msg": "调整检测框面积过滤阈值从0.02%到0.1%"
+  },
+  {
+    "hash": "ba5eea9",
+    "msg": "v1.8.7 - 优化翻译导入功能和文件夹收藏功能"
+  },
+  {
+    "hash": "a03c920",
+    "msg": "修复收藏功能：添加favorite_folders字段到配置模型"
+  },
+  {
+    "hash": "069ca98",
+    "msg": "v1.8.7 - 移除调试日志，优化翻译导入功能"
+  },
+  {
+    "hash": "dfc7824",
+    "msg": "v1.8.7 - 移除调试日志，优化翻译导入功能"
+  },
+  {
+    "hash": "80dc00b",
+    "msg": "修复语法错误：移除多余的try和except语句"
+  },
+  {
+    "hash": "ffa12c5",
+    "msg": "支持紧凑JSON格式的翻译文件解析"
+  },
+  {
+    "hash": "c51c08b",
+    "msg": "修复正则表达式无法匹配translated字段的问题"
+  },
+  {
+    "hash": "0296c9d",
+    "msg": "修复导出原文时translated字段为空的问题"
+  },
+  {
+    "hash": "0172ce2",
+    "msg": "修复解析空翻译内容时正则表达式匹配失败的问题"
+  },
+  {
+    "hash": "deb054d",
+    "msg": "添加导入翻译并渲染模式下自动导入TXT翻译的功能"
+  },
+  {
+    "hash": "1786924",
+    "msg": "修复导入翻译并渲染时文字不显示的问题"
+  },
+  {
+    "hash": "d3a43f8",
+    "msg": "fix: 使用ctypes直接调用WSAStartup并添加详细调试日志"
+  },
+  {
+    "hash": "ae6c2c1",
+    "msg": "fix: 改进Windows Socket初始化方法修复WSAStartup错误"
+  },
+  {
+    "hash": "eba5a34",
+    "msg": "feat: 添加文件夹收藏功能和修复Windows asyncio错误"
+  },
+  {
+    "hash": "e55436a",
+    "msg": "清理临时文件"
+  },
+  {
+    "hash": "ca1ef4b",
+    "msg": "重构批量处理逻辑并修复导出原文模式"
+  },
+  {
+    "hash": "dd2da16",
+    "msg": "修复文件夹对话框地址栏布局重叠问题，添加点击空白区域自动关闭输入框功能"
+  },
+  {
+    "hash": "60d557e",
+    "msg": "feat: 全新的资源管理器风格文件夹选择对话框 (v1.8.7)"
+  },
+  {
+    "hash": "4619eab",
+    "msg": "fix: 清理未注册的conda环境目录"
+  },
+  {
+    "hash": "24dcb33",
+    "msg": "fix: 修复环境检测ERRORLEVEL判断问题"
+  },
+  {
+    "hash": "66cb87b",
+    "msg": "refactor: 使用goto标签重构环境检查逻辑"
+  },
+  {
+    "hash": "e6206ed",
+    "msg": "fix: 修复环境检测误匹配问题"
+  },
+  {
+    "hash": "7959d61",
+    "msg": "fix: 优化环境激活失败处理逻辑"
+  },
+  {
+    "hash": "ff93849",
+    "msg": "fix: 修复步骤1环境检查和激活失败处理逻辑"
+  },
+  {
+    "hash": "afd98c4",
+    "msg": "feat: AMD PyTorch版本锁定和更新模式支持"
+  },
+  {
+    "hash": "41daa41",
+    "msg": "fix: 修复多项文本渲染和翻译问题"
+  },
+  {
+    "hash": "d2f34ab",
+    "msg": "fix: 修复竖排内横排的三个核心问题"
+  },
+  {
+    "hash": "29e9dce",
+    "msg": "fix: 修复步骤4脚本的旧版环境激活逻辑"
+  },
+  {
+    "hash": "3ac7b30",
+    "msg": "fix: 移除手动PATH激活时的python版本检查，确保旧版环境能正常启动"
+  },
+  {
+    "hash": "273b714",
+    "msg": "feat: v1.8.6 版本更新及多项优化"
+  },
+  {
+    "hash": "aff2832",
+    "msg": "fix: 步骤2/3/4支持命名环境和路径环境"
+  },
+  {
+    "hash": "30ff945",
+    "msg": "fix: 增强环境检查输出可见性"
+  },
+  {
+    "hash": "462a05f",
+    "msg": "refactor: 移除调试日志，简化输出信息"
+  },
+  {
+    "hash": "a0f4b25",
+    "msg": "fix: 优化环境创建逻辑，避免不必要的用户提示"
+  },
+  {
+    "hash": "661f59e",
+    "msg": "refactor: 简化环境创建逻辑，只使用命名环境"
+  },
+  {
+    "hash": "e84ab30",
+    "msg": "fix: 修复conda编码错误导致环境检测失败的问题"
+  },
+  {
+    "hash": "e3d7668",
+    "msg": "fix: 修复脚本1检测conda时闪退的问题"
+  },
+  {
+    "hash": "a717fe1",
+    "msg": "重构: 移除内存泄露调试代码，更新gitignore忽略用户文件"
+  },
+  {
+    "hash": "442abac",
+    "msg": "fix(realcugan): 添加最小尺寸检查避免padding错误"
+  },
+  {
+    "hash": "56f6f5d",
+    "msg": "fix: 修复RealCUGAN小尺寸图像padding错误"
+  },
+  {
+    "hash": "5b837ce",
+    "msg": "修复批处理脚本路径问题"
+  },
+  {
+    "hash": "27132f0",
+    "msg": "docs: 完善v1.8.5更新日志"
+  },
+  {
+    "hash": "22385df",
+    "msg": "fix: 添加ONNX推理自动降级机制，支持编辑器导出超分和上色"
+  },
+  {
+    "hash": "22079c4",
+    "msg": "添加 v1.8.5 更新日志"
+  },
+  {
+    "hash": "a9c68c9",
+    "msg": "更新版本到 v1.8.5"
+  },
+  {
+    "hash": "1ddfef5",
+    "msg": "修复多个UI问题并清理测试文件"
+  },
+  {
+    "hash": "4e99efb",
+    "msg": "添加批量选择文件夹功能"
+  },
+  {
+    "hash": "d2580c7",
+    "msg": "修复编辑器功能和inpainting模块"
+  },
+  {
+    "hash": "bd22493",
+    "msg": "fix: 修复GIT命令路径包含空格时的引号问题"
+  },
+  {
+    "hash": "ac55927",
+    "msg": "fix: 修复所有启动脚本的环境激活逻辑和gen_scripts编码问题，重新生成所有bat文件"
+  },
+  {
+    "hash": "5878d61",
+    "msg": "fix: 修复所有启动脚本的环境激活逻辑和gen_scripts编码问题"
+  },
+  {
+    "hash": "2e028de",
+    "msg": "fix: 修复步骤4激活环境逻辑，使用MINICONDA_ROOT变量支持中文路径"
+  },
+  {
+    "hash": "0d94dd2",
+    "msg": "fix: 更新代码前先执行 git fetch，避免 reset 失败"
+  },
+  {
+    "hash": "106204c",
+    "msg": "fix: 修复更新检查时的 UTF-8 编码错误"
+  },
+  {
+    "hash": "1b88331",
+    "msg": "feat: 添加可配置描边宽度设置，修复智能缩放算法单行判断问题 (v1.8.4)"
+  },
+  {
+    "hash": "49b0a62",
+    "msg": "Update documentation: Add Real-CUGAN support and new features"
+  },
+  {
+    "hash": "b9f0e15",
+    "msg": "Add Chinese localization for Real-CUGAN model names in Qt UI - Add display mapping for Real-CUGAN models (2倍/3倍/4倍, 保守/降噪1x/2x/3x/Pro) - Change denoise level labels from English to Chinese - Improve user experience for Chinese users"
+  },
+  {
+    "hash": "c0cc2c4",
+    "msg": "Fix Upscale Only mode by initializing ctx.img_colorized - Initialize ctx.img_colorized = ctx.input in Upscale Only mode - Makes flow consistent with batch/HQ processing - Remove defensive None checks in realcugan.py (no longer needed)"
+  },
+  {
+    "hash": "697d671",
+    "msg": "Add defensive checks for None images in Real-CUGAN upscaler - Skip None images in batch processing - Log errors when None images are encountered - Prevent AttributeError when processing invalid images"
+  },
+  {
+    "hash": "1606b05",
+    "msg": "Fix Real-CUGAN architecture import by adding realcugan_arch module - Add manga_translator/upscaling/realcugan_arch/ with upcunet_v3.py model architecture - Simplify import using relative imports from realcugan_arch module - Remove debug logging - Fix incorrect path usage (models/ is for weights, not Python code)"
+  },
+  {
+    "hash": "d3b9204",
+    "msg": "Fix Real-CUGAN module import using BASE_PATH for correct path resolution"
+  },
+  {
+    "hash": "3bc7783",
+    "msg": "Add debug logging for Real-CUGAN module loading to diagnose import issues"
+  },
+  {
+    "hash": "a02e23b",
+    "msg": "Fix Real-CUGAN module import using importlib for more reliable loading"
+  },
+  {
+    "hash": "b1d848a",
+    "msg": "Fix Real-CUGAN model loading and download issues - Fix pro model state_dict wrapper structure - Fix model import path from models.RealCUGAN - Fix download logic to only download selected model instead of all models"
+  },
+  {
+    "hash": "b9fab7a",
+    "msg": "Fix Real-CUGAN pro model loading issue - handle state_dict wrapper structure"
+  },
+  {
+    "hash": "e88b0ea",
+    "msg": "添加config-example.json的修改"
+  },
+  {
+    "hash": "9e13133",
+    "msg": "v1.8.3: 优化检测和翻译功能"
+  },
+  {
+    "hash": "ec44311",
+    "msg": "修复pip缓存清理：移除错误的venv激活，直接用python清理"
+  },
+  {
+    "hash": "0d28be2",
+    "msg": "修复nvidia-smi CUDA版本检测：改用解析nvidia-smi完整输出"
+  },
+  {
+    "hash": "a4d834b",
+    "msg": "修复conda命令调用导致脚本退出的问题"
+  },
+  {
+    "hash": "f282917",
+    "msg": "改用直接goto跳转而不是if判断"
+  },
+  {
+    "hash": "a3c5201",
+    "msg": "修复Conda检测后跳转逻辑"
+  },
+  {
+    "hash": "2446339",
+    "msg": "修复conda检测后继续执行并移除调试输�"
+  },
+  {
+    "hash": "f9f24b7",
+    "msg": "恢复中文路径提示并移除多余调试输出"
+  },
+  {
+    "hash": "03452a1",
+    "msg": "重写中文路径提示逻辑，使用 goto 分支避免误触发"
+  },
+  {
+    "hash": "79db8ae",
+    "msg": "简化if语法：去除双引号和空格"
+  },
+  {
+    "hash": "fcdfef5",
+    "msg": "增强调试：修改if语法为双引号格式，添加更多DEBUG输出"
+  },
+  {
+    "hash": "55e36b1",
+    "msg": "修复ERRORLEVEL检查逻辑，使用errorlevel代替!ERRORLEVEL!"
+  },
+  {
+    "hash": "0903a53",
+    "msg": "添加调试日志以诊断路径检测问题"
+  },
+  {
+    "hash": "cd51615",
+    "msg": "修复步骤1-首次安装.bat中的格式显示问题"
+  },
+  {
+    "hash": "58b9673",
+    "msg": "fix: 使用延迟变量展开修复判断问题"
+  },
+  {
+    "hash": "eb82c36",
+    "msg": "fix: 改进PowerShell路径检测"
+  },
+  {
+    "hash": "4b01018",
+    "msg": "revert: 移除调试日志"
+  },
+  {
+    "hash": "ff0bea1",
+    "msg": "feat: 添加调试日志"
+  },
+  {
+    "hash": "e9d401e",
+    "msg": "fix: 修复路径空格导致的误检测"
+  },
+  {
+    "hash": "9ab573d",
+    "msg": "feat: 优先检测系统全局Conda"
+  },
+  {
+    "hash": "0ef6dfe",
+    "msg": "fix: 避免脚本文件名干扰路径检测"
+  },
+  {
+    "hash": "b63c69a",
+    "msg": "fix: 修复中文路径检测误报问题"
+  },
+  {
+    "hash": "2c6f2ed",
+    "msg": "fix: 改回之前的Miniconda路径"
+  },
+  {
+    "hash": "5d3775a",
+    "msg": "feat: 智能处理中文路径"
+  },
+  {
+    "hash": "2f03581",
+    "msg": "feat: 全面改进Conda环境激活和中文路径处理"
+  },
+  {
+    "hash": "53ba23b",
+    "msg": "fix: 改进中文路径检测和处理"
+  },
+  {
+    "hash": "6bb4413",
+    "msg": "feat: 统一所有脚本的conda激活方式"
+  },
+  {
+    "hash": "59fe177",
+    "msg": "fix: 抑制conda激活时的路径警告"
+  },
+  {
+    "hash": "6bd0a60",
+    "msg": "fix: 使用Python 3.12版本的Miniconda"
+  },
+  {
+    "hash": "53ded4f",
+    "msg": "fix: 修正中文路径提示信息"
+  },
+  {
+    "hash": "0d54614",
+    "msg": "feat: 自动处理中文路径问题"
+  },
+  {
+    "hash": "be45c9a",
+    "msg": "fix: 修复pip缓存清理使用conda环境"
+  },
+  {
+    "hash": "ae6b2f9",
+    "msg": "fix: 自动接受Conda服务条款"
+  },
+  {
+    "hash": "acafbea",
+    "msg": "fix: 修正Miniconda安装路径显示和清理逻辑"
+  },
+  {
+    "hash": "64e300a",
+    "msg": "fix: 强制使用本地Miniconda，不允许使用系统Python"
+  },
+  {
+    "hash": "3cd1bde",
+    "msg": "fix: 优先使用本地Miniconda确保Python 3.12"
+  },
+  {
+    "hash": "9ab724e",
+    "msg": "feat: 改用Miniconda并安装到项目目录"
+  },
+  {
+    "hash": "68fe843",
+    "msg": "revert: 恢复原有的运行方式"
+  },
+  {
+    "hash": "6aefedc",
+    "msg": "fix: 修复desktop_qt_ui/main.py的导入路径"
+  },
+  {
+    "hash": "79ec595",
+    "msg": "fix: 修复启动脚本的模块导入问题"
+  },
+  {
+    "hash": "4c6f0d1",
+    "msg": "fix: 修复便携版Python解压路径问题"
+  },
+  {
+    "hash": "35a2c79",
+    "msg": "feat: 添加便携版Python支持，无需预装Python"
+  },
+  {
+    "hash": "95ef8b3",
+    "msg": "fix: 移除 requirements_amd.txt 中的 numpy 显式声明"
+  },
+  {
+    "hash": "6524702",
+    "msg": "chore: 添加 pydensecrf 到 .gitignore"
+  },
+  {
+    "hash": "b1a6df0",
+    "msg": "fix: 修复numpy版本约束导致的PyTorch依赖冲突"
+  },
+  {
+    "hash": "4aa2d63",
+    "msg": "feat(v1.8.2): 修复AMD GPU支持和Lama Large模型自动下载"
+  },
+  {
+    "hash": "5c3793e",
+    "msg": "fix: 更新RX 9000系列为实际发布型号"
+  },
+  {
+    "hash": "c6a7d6a",
+    "msg": "docs: 添加 v1.8.2 更新日志"
+  },
+  {
+    "hash": "628d34f",
+    "msg": "v1.8.2: 添加 AMD ROCm GPU 支持"
+  },
+  {
+    "hash": "96f1866",
+    "msg": "clean: 删除白框编辑的调试日志"
+  },
+  {
+    "hash": "7e7af29",
+    "msg": "docs: 添加重构工作总结文档"
+  },
+  {
+    "hash": "0a968ed",
+    "msg": "debug: 添加文本框拖动详细调试日志"
+  },
+  {
+    "hash": "1db299b",
+    "msg": "fix: 真正修复文本框拖动后位置不更新的bug"
+  },
+  {
+    "hash": "5c0c81b",
+    "msg": "fix: 修复文本框拖动后位置不更新的bug"
+  },
+  {
+    "hash": "14c595c",
+    "msg": "refactor: 完成缓存变量迁移到ResourceManager"
+  },
+  {
+    "hash": "eb91835",
+    "msg": "refactor: 完成区域管理迁移到ResourceManager"
+  },
+  {
+    "hash": "70a8443",
+    "msg": "fix: 添加Optional导入"
+  },
+  {
+    "hash": "6cbd09b",
+    "msg": "fix: 导出JobPriority类"
+  },
+  {
+    "hash": "b49dcf4",
+    "msg": "fix: 修复相对导入错误，使用绝对导入"
+  },
+  {
+    "hash": "4f570b7",
+    "msg": "refactor: 完成图片和蒙版管理迁移到ResourceManager"
+  },
+  {
+    "hash": "49524b9",
+    "msg": "refactor: 添加资源访问辅助方法，开始迁移图片访问"
+  },
+  {
+    "hash": "5a87b29",
+    "msg": "refactor: 实现新的异步任务和资源管理系统"
+  },
+  {
+    "hash": "da3f4b1",
+    "msg": "fix: 修复多个编辑器bug - 导出direction验证错误、清空列表后卡死、移除文件画布清空问题"
+  },
+  {
+    "hash": "c39cb6d",
+    "msg": "Release v1.8.1: Add Spanish OCR, RealCUGAN upscaling, upscale-only mode and tile size config"
+  },
+  {
+    "hash": "886e72b",
+    "msg": "Update version check and maintenance script"
+  },
+  {
+    "hash": "0c9abc8",
+    "msg": "Update version check and requirements files"
+  },
+  {
+    "hash": "bf246ae",
+    "msg": "feat: 更新依赖并调整 PyTorch 安装逻辑"
+  },
+  {
+    "hash": "c0c29f2",
+    "msg": "feat: 优化 PyTorch 安装和环境检测逻辑"
+  },
+  {
+    "hash": "6c30ce3",
+    "msg": "Update for v1.8.0"
+  },
+  {
+    "hash": "9b61857",
+    "msg": "Release v1.8.0"
+  },
+  {
+    "hash": "b3cb897",
+    "msg": "更新版本检查脚本"
+  },
+  {
+    "hash": "b06afe1",
+    "msg": "更新打包脚本、依赖文件和安装批处理文件"
+  },
+  {
+    "hash": "e760a23",
+    "msg": "更新文件并准备版本 v1.7.9"
+  },
+  {
+    "hash": "2dcb431",
+    "msg": "追踪 .bat 文件并更新 .gitignore"
+  },
+  {
+    "hash": "5615558",
+    "msg": "更新文件并准备版本 v1.7.9"
+  },
+  {
+    "hash": "77add9a",
+    "msg": "Update packaging files again"
+  },
+  {
+    "hash": "2b24322",
+    "msg": "Update config and packaging files"
+  },
+  {
+    "hash": "a40a27a",
+    "msg": "Update config-example.json"
+  },
+  {
+    "hash": "3ba9335",
+    "msg": "Update packaging scripts"
+  },
+  {
+    "hash": "bebc3af",
+    "msg": "Update files and documentation"
+  },
+  {
+    "hash": "4d3c102",
+    "msg": "Commit remaining modified files to trigger action."
+  },
+  {
+    "hash": "e45b400",
+    "msg": "Update version to 1.7.7 and changelog, clear absolute paths in config example."
+  },
+  {
+    "hash": "745d03a",
+    "msg": "更新了批处理文件"
+  },
+  {
+    "hash": "1a47697",
+    "msg": "更新了批处理文件"
+  },
+  {
+    "hash": "d5ceef9",
+    "msg": "feat: 鏇存柊鑴氭湰涓哄己鍒跺悓姝ユā寮? - 淇敼鏇存柊浠ｇ爜鍔熻兘浣跨敤 git reset --hard origin/main - 瀹屾暣鏇存柊涔熼噰鐢ㄥ己鍒跺悓姝ユā寮? - 娣诲姞纭鎻愮ず闃叉璇搷浣?- 瑙ｅ喅鏈湴淇敼瀵艰嚧鐨?git pull 澶辫触闂"
+  },
+  {
+    "hash": "9697e8d",
+    "msg": "Track .spec files and update .gitignore"
+  },
+  {
+    "hash": "04d334e",
+    "msg": "浣跨敤闀滃儚绔欎竴閿畨瑁卲ydensecrf棰勭紪璇憌heel"
+  },
+  {
+    "hash": "59e0e8b",
+    "msg": "Update code after resolving conflicts"
+  },
+  {
+    "hash": "18c4623",
+    "msg": "Remove models folder from tracking and resolve merge conflicts"
+  },
+  {
+    "hash": "749d534",
+    "msg": "Update code"
+  },
+  {
+    "hash": "92abb45",
+    "msg": "Initial commit: manga-translator-ui-package"
+  },
+  {
+    "hash": "b86b72f",
+    "msg": "refactor: 优化启动脚本及UI切换逻辑"
+  },
+  {
+    "hash": "f823a24",
+    "msg": "fix: Update installation script logic"
+  },
+  {
+    "hash": "9f8860c",
+    "msg": "refactor: Untrack gen_scripts.py"
+  },
+  {
+    "hash": "9ea2991",
+    "msg": "feat: Track .bat files"
+  },
+  {
+    "hash": "334cf5c",
+    "msg": "refactor: Untrack models directory and remove MangaStudio_Data files"
+  },
+  {
+    "hash": "bed5787",
+    "msg": "docs: Move README files to doc directory"
+  },
+  {
+    "hash": "a6de6ad",
+    "msg": "refactor: Remove unused files and update mechanism"
+  },
+  {
+    "hash": "6d192de",
+    "msg": "# Changelog v1.7.6"
+  },
+  {
+    "hash": "e89d8ed",
+    "msg": "feat: 本地未提交内容批量提交"
+  },
+  {
+    "hash": "92069cd",
+    "msg": "docs: 更新日志 v1.7.6"
+  },
+  {
+    "hash": "36004fe",
+    "msg": "fix: Set cli.verbose to false in config-example.json"
+  },
+  {
+    "hash": "32ce2bc",
+    "msg": "feat: Update config example, add v1.7.5 changelog, and apply various fixes/improvements"
+  },
+  {
+    "hash": "02d9a1d",
+    "msg": "Update rendering logic and example config"
+  },
+  {
+    "hash": "93c9551",
+    "msg": "chore: bump version to 1.7.4"
+  },
+  {
+    "hash": "cc65e44",
+    "msg": "feat(v1.7.4): AI line break auto optimization feature"
+  },
+  {
+    "hash": "2f63b46",
+    "msg": "Merge pull request #11 from hgmzhn/ci/actions-add-release-tag-workflow-dispatch"
+  },
+  {
+    "hash": "fb3f780",
+    "msg": "ci(workflows): add release event trigger and manual dispatch for build workflow"
+  },
+  {
+    "hash": "bafd342",
+    "msg": "Delete .github/workflows/python-publish.yml"
+  },
+  {
+    "hash": "d61bf21",
+    "msg": "3"
+  },
+  {
+    "hash": "2b5ac73",
+    "msg": "Merge pull request #8 from hgmzhn/fix/github-actions-changelog-delimiter"
+  },
+  {
+    "hash": "e96f650",
+    "msg": "fix(ci): robust multi-line changelog output in GitHub Actions"
+  },
+  {
+    "hash": "1ede076",
+    "msg": "Update changelog for v1.7.3"
+  },
+  {
+    "hash": "1209165",
+    "msg": "feat: Untrack font file and add specific font to gitignore"
+  },
+  {
+    "hash": "e0f9c67",
+    "msg": "feat: Add .cursor to gitignore and update other files"
+  },
+  {
+    "hash": "4a31831",
+    "msg": "feat: 鍗曟枃鏈鐙珛瀛椾綋璁剧疆鍔熻兘 v1.7.1"
+  },
+  {
+    "hash": "5cef66e",
+    "msg": "fix: 淇缂栬緫鍣ㄥ瓧浣撳鍑洪棶棰?v1.7.1"
+  },
+  {
+    "hash": "a1323bb",
+    "msg": "fix: specify xformers version for gpu build"
+  },
+  {
+    "hash": "409db7d",
+    "msg": "fix: specify xformers version to avoid build failure"
+  },
+  {
+    "hash": "3e69a3f",
+    "msg": "fix: 淇workflow鏋勫缓澶辫触 - 绉婚櫎鍗曠嫭瀹夎tufup閬垮厤渚濊禆鍐茬獊"
+  },
+  {
+    "hash": "91f1bd5",
+    "msg": "fix: workflow涓紭鍏堝畨瑁卼ufup浠ラ伩鍏嶄緷璧栭棶棰? 娣诲姞v1.7.0 CHANGELOG"
+  },
+  {
+    "hash": "1049c28",
+    "msg": "v1.7.0: 淇浠呬笂鑹叉ā寮忔壒澶勭悊澶辫触闂"
+  },
+  {
+    "hash": "f5f7b84",
+    "msg": "release: version 1.7.0"
+  },
+  {
+    "hash": "34e595e",
+    "msg": "v1.6.8: 修复文本合并距离计算+禁用openai日志打印"
+  },
+  {
+    "hash": "87c5b76",
+    "msg": "release: version 1.6.8"
+  },
+  {
+    "hash": "282f8c0",
+    "msg": "docs: 完善路径配置说明，详细介绍提示词路径和模版文件位置"
+  },
+  {
+    "hash": "4a0293a",
+    "msg": "docs: 在JSON示例中添加省略号，更直观地展示分组概念"
+  },
+  {
+    "hash": "23d568f",
+    "msg": "docs: 修正JSON格式示例，添加缺失的逗号"
+  },
+  {
+    "hash": "eac2c7d",
+    "msg": "docs: 完善自定义导出原文模版说明，明确重复机制"
+  },
+  {
+    "hash": "1ec4797",
+    "msg": "docs: 完善快速开始说明，添加GPU关闭和输出目录设置步骤"
+  },
+  {
+    "hash": "5e8b431",
+    "msg": "docs: 修正可执行文件名为 app.exe"
+  },
+  {
+    "hash": "264be1e",
+    "msg": "Release v1.6.7 - 修复多个重要bug"
+  },
+  {
+    "hash": "6900c96",
+    "msg": "feat(v1.6.6): 添加画布拖动、日志显示和MOCR镜像下载"
+  },
+  {
+    "hash": "b99c111",
+    "msg": "feat: 增加AI断句居中、字体缩放、Gemini/OpenAI断句支持等功能 (v1.6.5)"
+  },
+  {
+    "hash": "7e34cdd",
+    "msg": "Release v1.6.3 - 添加 PaddleOCR 支持"
+  },
+  {
+    "hash": "d26827b",
+    "msg": "Fix-debounced-save-exception-handling"
+  },
+  {
+    "hash": "b406a1f",
+    "msg": "Release-version-1.6.0"
+  },
+  {
+    "hash": "8144320",
+    "msg": "Release version 1.6.0"
+  },
+  {
+    "hash": "7c6f2eb",
+    "msg": "Release version 1.6.1"
+  },
+  {
+    "hash": "56dbd3e",
+    "msg": "Release version 1.6.1"
+  },
+  {
+    "hash": "f5d7cf7",
+    "msg": "build: Update .gitignore and untrack files"
+  },
+  {
+    "hash": "dac32a0",
+    "msg": "Merge branch 'main' of https://github.com/hgmzhn/manga-translator-ui"
+  },
+  {
+    "hash": "f1df2d5",
+    "msg": "build: Untrack mypy.ini"
+  },
+  {
+    "hash": "cd148e6",
+    "msg": "Delete desktop_qt_ui/mypy.ini"
+  },
+  {
+    "hash": "4416e56",
+    "msg": "v1.6.0"
+  },
+  {
+    "hash": "a152952",
+    "msg": "trigger action 1.5.1"
+  },
+  {
+    "hash": "bf79d9e",
+    "msg": "ci: Download models from release assets instead of LFS"
+  },
+  {
+    "hash": "a9eaaea",
+    "msg": "fix(repo): Untrack fonts from LFS and fix editor mode"
+  },
+  {
+    "hash": "7305ff2",
+    "msg": "feat: Update project to version 1.5.0 and sync configurations"
+  },
+  {
+    "hash": "9c6f401",
+    "msg": "feat: Refactor mask editor UI and fix visibility"
+  },
+  {
+    "hash": "86624a8",
+    "msg": "修复: 修复编辑器预览、竖排内横排及智能缩放等多个渲染问题"
+  },
+  {
+    "hash": "145573c",
+    "msg": "feat: 重新启用高质量翻译流程的排版调试信息显示"
+  },
+  {
+    "hash": "810b302",
+    "msg": "fix: 修复调试日志级别配置，启用排版调试信息显示"
+  },
+  {
+    "hash": "eaf9e13",
+    "msg": "feat: 添加详细的排版模式调试功能"
+  },
+  {
+    "hash": "56132ae",
+    "msg": "Add user-requested files to .gitignore"
+  },
+  {
+    "hash": "388d0d6",
+    "msg": "版本1.4.3 重新触发action"
+  },
+  {
+    "hash": "ee1c268",
+    "msg": "版本1.4.2内容修复了高质量提示词没有生效的bug 然后修复了蒙版遮罩参数没有生效的bug"
+  },
+  {
+    "hash": "5c48028",
+    "msg": "feat: Refactor prompts and config for v1.4.2"
+  },
+  {
+    "hash": "84ddb2d",
+    "msg": "feat: 添加占位符和强制换行"
+  },
+  {
+    "hash": "8e4d53b",
+    "msg": "Update various files"
+  },
+  {
+    "hash": "b7b0037",
+    "msg": "Update version to 1.4.1 and remove absolute path from config-example.json"
+  },
+  {
+    "hash": "e498aa7",
+    "msg": "fix: 修复编辑器导出图片时文本颜色变黑的bug"
+  },
+  {
+    "hash": "ecfec7a",
+    "msg": "fix: 修复非HQ批量模式下不保存结果的bug"
+  },
+  {
+    "hash": "e30ffc0",
+    "msg": "fix: 修复因缩进错误导致的程序崩溃 (IndentationError)"
+  },
+  {
+    "hash": "29d95a1",
+    "msg": "fix: 修复overwrite参数不生效的bug"
+  },
+  {
+    "hash": "c72901f",
+    "msg": "fix: 适配打包环境的更多配置文件路径"
+  },
+  {
+    "hash": "c88e569",
+    "msg": "fix: 修复导出文件格式不生效的bug"
+  },
+  {
+    "hash": "983b540",
+    "msg": "fix: 适配打包环境的导出翻译模版路径"
+  },
+  {
+    "hash": "3eaffbf",
+    "msg": "refactor: 使用相对路径处理提示词配置并优化UI显示"
+  },
+  {
+    "hash": "37cbfae",
+    "msg": "fix(ci): Correct indentation of 7-Zip install step"
+  },
+  {
+    "hash": "56cd3c4",
+    "msg": "ci: Restore 7-Zip installation for release packaging"
+  },
+  {
+    "hash": "00d446a",
+    "msg": "feat: Add custom prompt feature and fix updater URL"
+  },
+  {
+    "hash": "f378a21",
+    "msg": "feat: 为高质量翻译添加动态自定义提示词功能"
+  },
+  {
+    "hash": "6d292cd",
+    "msg": "feat(1.4.0): 更新高质量翻译流程并修复多个Bug"
+  },
+  {
+    "hash": "a601e41",
+    "msg": "feat(1.4.0): 更新高质量翻译流程并修复多个Bug"
+  },
+  {
+    "hash": "aeccc9b",
+    "msg": "fix(actions): Optimize build workflow and fix disk space issue"
+  },
+  {
+    "hash": "45b01e5",
+    "msg": "ci: Add cleanup step to free disk space during release"
+  },
+  {
+    "hash": "e53e015",
+    "msg": "fix(build): Add missing imports for custom package logic"
+  },
+  {
+    "hash": "c35760c",
+    "msg": "fix(build): Refactor package_updates to handle variants correctly"
+  },
+  {
+    "hash": "c9a5107",
+    "msg": "fix(build): Remove 'v' prefix from version string for tufup compatibility"
+  },
+  {
+    "hash": "fcbc69b",
+    "msg": "fix: Correct .gitattributes and use LFS for models"
+  },
+  {
+    "hash": "7f46377",
+    "msg": "fix: Use version suffix to create distinct TUF packages for CPU and GPU"
+  },
+  {
+    "hash": "c111353",
+    "msg": "fix: Fix gh-pages deployment by recursively excluding large files"
+  },
+  {
+    "hash": "0b7cda4",
+    "msg": "Update workflow and requirements"
+  },
+  {
+    "hash": "5730b13",
+    "msg": "ci: Explicitly add Google dependencies"
+  },
+  {
+    "hash": "6372c29",
+    "msg": "ci: Ensure TUF base package is not deleted before release"
+  },
+  {
+    "hash": "9fe398b",
+    "msg": "fix(build): Use correct 'add_bundle' method for tufup"
+  },
+  {
+    "hash": "4ebf309",
+    "msg": "fix(build): Correct tufup method calls and logic for patch-only updates"
+  },
+  {
+    "hash": "dbcc699",
+    "msg": "refactor(update): Implement patch-only update logic for clients"
+  },
+  {
+    "hash": "fed1f24",
+    "msg": "fix(build): implement final simplified update strategy"
+  },
+  {
+    "hash": "22ea413",
+    "msg": "fix(ci): correctly handle large TUF assets via splitting"
+  },
+  {
+    "hash": "c889efd",
+    "msg": "fix(ci): prevent download step from failing if release not found"
+  },
+  {
+    "hash": "e61238b",
+    "msg": "fix(ci): correct indentation in workflow file"
+  },
+  {
+    "hash": "076b1f9",
+    "msg": "fix(ci): correct YAML syntax error in workflow"
+  },
+  {
+    "hash": "b51c282",
+    "msg": "ci(build): restore TUF private keys from secrets"
+  },
+  {
+    "hash": "c166eab",
+    "msg": "fix(build): rename tufup assets externally to support variants"
+  },
+  {
+    "hash": "8a42da1",
+    "msg": "fix(build): add custom parser for tufup versioning"
+  },
+  {
+    "hash": "cc7d4dd",
+    "msg": "fix(build): ensure keys directory exists before tufup runs"
+  },
+  {
+    "hash": "9f193e3",
+    "msg": "fix(build): definitively fix local TUF repository loading"
+  },
+  {
+    "hash": "4974d4d",
+    "msg": "fix: Handle TUF variants and improve repo loading"
+  },
+  {
+    "hash": "acb5496",
+    "msg": "chore: add debug logging to build_packages.py"
+  },
+  {
+    "hash": "7360210",
+    "msg": "ci: Test with Python 3.12"
+  },
+  {
+    "hash": "34a4900",
+    "msg": "fix: Skip patch creation to avoid tufup error"
+  },
+  {
+    "hash": "0fb7f00",
+    "msg": "docs: Add GPL-3.0 license"
+  },
+  {
+    "hash": "c850762",
+    "msg": "CI: Copy VERSION file into app bundle"
+  },
+  {
+    "hash": "1051da0",
+    "msg": "Merge pull request #2 from hgmzhn/fix/build-script-and-submodule"
+  },
+  {
+    "hash": "f308345",
+    "msg": "Fix: Correct build script, remove invalid submodule, and ignore temp directory"
+  },
+  {
+    "hash": "22689f0",
+    "msg": "Fix: Force UTF-8 encoding in build script"
+  },
+  {
+    "hash": "6a11431",
+    "msg": "Fix: Improve encoding handling in build script"
+  },
+  {
+    "hash": "c426678",
+    "msg": "feat: Incorporate text wrapping fix, build process improvements, and general code updates"
+  },
+  {
+    "hash": "cf1db7a",
+    "msg": "Fix: Use dynamic paths in spec files for data collection"
+  },
+  {
+    "hash": "26c2055",
+    "msg": "feat: Implement updater/launcher pattern for robust auto-updates"
+  },
+  {
+    "hash": "54b4ed4",
+    "msg": "Fix: Correct command in GitHub Actions workflow"
+  },
+  {
+    "hash": "5b8c53d",
+    "msg": "release: v1.3.0"
+  },
+  {
+    "hash": "9afff8e",
+    "msg": "Feat: Overhaul build and update system with tufup and GitHub Actions"
+  },
+  {
+    "hash": "2449163",
+    "msg": "refactor: 移除 googletrans 依赖及其所有相关实现"
+  },
+  {
+    "hash": "decb2ff",
+    "msg": "fix(ci): Correctly strip 'v' prefix from tag name"
+  },
+  {
+    "hash": "745f505",
+    "msg": "fix(ci): Use extra-index-url and fix patch file format"
+  },
+  {
+    "hash": "40df2a3",
+    "msg": "fix(ci): Pass version tag to build script"
+  },
+  {
+    "hash": "4473ee7",
+    "msg": "Bump version to 1.3.0"
+  },
+  {
+    "hash": "54c38d0",
+    "msg": "fix(deps): 为 googletrans 添加补丁并从 git 安装 pydensecrf"
+  },
+  {
+    "hash": "a4a95fb",
+    "msg": "fix(ci): 更新 actions 并修复 spec 文件路径"
+  },
+  {
+    "hash": "f0f6a30",
+    "msg": "refactor: 统一依赖管理并指定PyTorch版本"
+  },
+  {
+    "hash": "0f57d20",
+    "msg": "feat: 集成 tufup 自动更新框架并完成项目清理"
+  },
+  {
+    "hash": "0493153",
+    "msg": "ci: 实现更新文件的自动上传"
+  },
+  {
+    "hash": "59f372f",
+    "msg": "refactor: 将打包和更新脚本合二为一并实现自动化"
+  },
+  {
+    "hash": "9965c0f",
+    "msg": "refactor: 将版本号集中到 VERSION 文件中管理"
+  },
+  {
+    "hash": "c9e1a9e",
+    "msg": "feat: 添加用于处理双版本更新的打包脚本"
+  },
+  {
+    "hash": "6d9015f",
+    "msg": "feat: 集成PyUpdater自动更新并重构编辑器流程"
+  },
+  {
+    "hash": "db45936",
+    "msg": "更新示例配置文件"
+  },
+  {
+    "hash": "fd1cb1f",
+    "msg": "\\\"feat: add inpainting model with LFS management and other updates\\\""
+  },
+  {
+    "hash": "eca6584",
+    "msg": "修复TXT导出/导入功能：将逻辑移到主流程避免独立进程问题"
+  },
+  {
+    "hash": "e70e51c",
+    "msg": "Merge branch 'main' of https://github.com/hgmzhn/manga-translator-ui"
+  },
+  {
+    "hash": "8de1db0",
+    "msg": "\"停止跟踪备份文件并更新.gitignore\""
+  },
+  {
+    "hash": "e76c1a2",
+    "msg": "Delete manga-translator-gpu.spec.bak"
+  },
+  {
+    "hash": "2df786d",
+    "msg": "\"更新代码：包含桌面UI组件、配置文件和依赖项的修改\""
+  },
+  {
+    "hash": "528eaf9",
+    "msg": "Merge branch 'main' of https://github.com/hgmzhn/manga-translator-ui"
+  },
+  {
+    "hash": "124f2f8",
+    "msg": "feat(ui): Improve settings UI and update documentation"
+  },
+  {
+    "hash": "094cd97",
+    "msg": "修复导出功能并完善流程控制"
+  },
+  {
+    "hash": "7b02c24",
+    "msg": "Delete manga-translator-gpu.spec"
+  },
+  {
+    "hash": "18c8807",
+    "msg": "修复打包和本地运行错误"
+  },
+  {
+    "hash": "0cff280",
+    "msg": "更新README：修正措辞，将'安装'改为'支持'，表述更准确"
+  },
+  {
+    "hash": "d57eff1",
+    "msg": "更新README：移除CUDA 11.8版本说明，明确GPU版本要求CUDA 12.x"
+  },
+  {
+    "hash": "8917041",
+    "msg": "更新README：添加一键包使用说明和预编译版本的优势介绍"
+  },
+  {
+    "hash": "9fc4051",
+    "msg": "Merge branch 'main' of https://github.com/hgmzhn/manga-translator-ui"
+  },
+  {
+    "hash": "2e82538",
+    "msg": "修复Git配置：更新.gitignore忽略.env文件，优化Git LFS配置只跟踪大文件；添加桌面UI组件代码"
+  },
+  {
+    "hash": "4eff8d5",
+    "msg": "修复Git LFS配置：移除不合理的文件类型跟踪，只保留真正的大文件（模型、字体文件）使用LFS"
+  },
+  {
+    "hash": "a1d1443",
+    "msg": "Delete .env"
+  },
+  {
+    "hash": "5d4de2d",
+    "msg": "sync: 强制同步本地所有文件"
+  },
+  {
+    "hash": "c357c02",
+    "msg": "fix: 确保打包脚本在 Python 3.10 虚拟环境中运行"
+  },
+  {
+    "hash": "e1bc2b7",
+    "msg": "chore: 从仓库中移除 Python 缓存文件"
+  },
+  {
+    "hash": "dee11ae",
+    "msg": "feat: 添加 PyInstaller 打包配置以创建一键安装包"
+  },
+  {
+    "hash": "421ad77",
+    "msg": "feat: 改进依赖安装和启动脚本"
+  },
+  {
+    "hash": "73861b9",
+    "msg": "feat: Initial project structure with LFS"
+  },
+  {
+    "hash": "839a772",
+    "msg": "Initial commit"
+  }
+]

@@ -241,6 +241,8 @@ class TranslatorConfig(BaseModel):
     """Path to a JSON file containing custom prompts for high-quality translation."""
     extract_glossary: bool = False
     """Automatically extract new terms to glossary (requires high_quality_prompt_path)"""
+    use_stream: bool = False
+    """Enable stream output mode for supported translators (e.g. openai_hq)"""
     translator_chain: Optional[str] = None
     """Output of one translator goes in another. Example: --translator-chain "openai:JPN;gemini:ENG"."""
     selective_translation: Optional[str] = None
