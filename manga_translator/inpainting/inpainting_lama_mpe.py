@@ -198,10 +198,9 @@ class LamaMPEInpainter(OfflineInpainter):
             del self.model
 
     async def _infer(self, image: np.ndarray, mask: np.ndarray, config: InpainterConfig, inpainting_size: int = 1024, verbose: bool = False) -> np.ndarray:
-        # ✅ ONNX推理（lamampe.onnx 包含完整的 MPE 支持：4个输入 image, mask, rel_pos, direct）
+        # ✅ ONNX推理（lamampe.onnx实际是Lama Large，不含MPE），失败时自动降级到PyTorch
         if hasattr(self, 'backend') and self.backend == 'onnx':
             try:
-                # 调用包含MPE的ONNX推理
                 return await self._infer_onnx(image, mask, inpainting_size, verbose)
             except Exception as e:
                 self.logger.warning(f'ONNX推理失败（{str(e)[:100]}），本次降级到PyTorch')
@@ -292,7 +291,7 @@ class LamaMPEInpainter(OfflineInpainter):
         return ans
     
     async def _infer_onnx(self, image: np.ndarray, mask: np.ndarray, inpainting_size: int = 1024, verbose: bool = False) -> np.ndarray:
-        """ONNX推理方法（包含MPE计算）- 采用Rust策略：padding而非resize"""
+        """ONNX推理方法（包含MPE计算）"""
         img_original = np.copy(image)
         mask_original = np.copy(mask)
         mask_original[mask_original < 127] = 0
@@ -300,8 +299,6 @@ class LamaMPEInpainter(OfflineInpainter):
         mask_original = mask_original[:, :, None]
         
         height, width, c = image.shape
-        
-        # 步骤1: 保持宽高比缩放（如果需要）
         if max(image.shape[0: 2]) > inpainting_size:
             image = resize_keep_aspect(image, inpainting_size)
             mask_resized = resize_keep_aspect(mask, inpainting_size)
@@ -310,27 +307,22 @@ class LamaMPEInpainter(OfflineInpainter):
             mask_resized = mask
             mask_original_resized = mask_original
         
-        # 步骤2: Padding到64的倍数（Lama FFT架构需要更大对齐值避免维度不匹配）
-        # 原先 pad_size=8 在某些尺寸下会导致 FFT 中间层维度不匹配（如 168 vs 169）
-        pad_size = 64
+        pad_size = 8
         h, w, c = image.shape
         new_h = h if h % pad_size == 0 else (pad_size - (h % pad_size)) + h
         new_w = w if w % pad_size == 0 else (pad_size - (w % pad_size)) + w
         
-        self.logger.info(f'Inpainting resolution: {new_w}x{new_h}')
-        
-        # ✅ 使用 padding 而非 resize（保持图像不变形）
+        # Padding
         img_pad = np.pad(image, ((0, new_h - h), (0, new_w - w), (0, 0)), mode='symmetric')
         mask_pad_single = np.pad(mask_resized, ((0, new_h - h), (0, new_w - w)), mode='constant', constant_values=0)
-        
-        # 处理 mask_original_resized 的 padding
+        # 根据 mask_original_resized 的维度决定 padding 参数
         if len(mask_original_resized.shape) == 3:
             mask_pad = np.pad(mask_original_resized, ((0, new_h - h), (0, new_w - w), (0, 0)), mode='symmetric')
         else:
             mask_pad = np.pad(mask_original_resized, ((0, new_h - h), (0, new_w - w)), mode='symmetric')
-            mask_pad = mask_pad[:, :, None]
+            mask_pad = mask_pad[:, :, None]  # 扩展为3维
         
-        # 计算MPE输入
+        # ✅ 计算MPE输入（使用padding后的mask）
         rel_pos, direct = load_masked_position_encoding(mask_pad_single)
         
         # 准备输入（0-1归一化）
@@ -340,11 +332,11 @@ class LamaMPEInpainter(OfflineInpainter):
         mask_input = mask_pad.astype(np.float32)[:, :, 0:1]
         mask_input = np.transpose(mask_input, (2, 0, 1))[None, ...]  # [1, 1, H, W]
         
-        # MPE输入格式
-        rel_pos_input = rel_pos[None, ...].astype(np.int64)
-        direct_input = direct[None, ...].astype(np.int64)
+        # MPE输入格式：[1, H, W] for rel_pos, [1, H, W, 4] for direct
+        rel_pos_input = rel_pos[None, ...].astype(np.int64)  # [1, H, W]
+        direct_input = direct[None, ...].astype(np.int64)    # [1, H, W, 4]
         
-        # ONNX推理
+        # ONNX推理（4个输入）
         ort_inputs = {
             'image': img.astype(np.float32),
             'mask': mask_input.astype(np.float32),
@@ -354,15 +346,15 @@ class LamaMPEInpainter(OfflineInpainter):
         img_inpainted = self.session.run(None, ort_inputs)[0]
         
         # 后处理
-        img_inpainted = np.transpose(img_inpainted[0], (1, 2, 0))
+        img_inpainted = np.transpose(img_inpainted[0], (1, 2, 0))  # [H, W, 3]
         img_inpainted = (img_inpainted * 255.).astype(np.uint8)
         
-        # 移除 padding
+        # Remove padding
         img_inpainted = img_inpainted[:h, :w, :]
         
-        # 还原到原始尺寸（使用双三次插值，与Rust一致）
+        # Resize back
         if max(height, width) > inpainting_size:
-            img_inpainted = cv2.resize(img_inpainted, (width, height), interpolation=cv2.INTER_CUBIC)
+            img_inpainted = cv2.resize(img_inpainted, (width, height), interpolation=cv2.INTER_LINEAR)
             mask_original_resized = cv2.resize(mask_original_resized, (width, height), interpolation=cv2.INTER_LINEAR)
             if len(mask_original_resized.shape) == 2:
                 mask_original_resized = mask_original_resized[:, :, None]
@@ -388,8 +380,7 @@ class LamaMPEInpainter(OfflineInpainter):
             mask_resized = mask
             mask_original_resized = mask_original
         
-        # Padding到64的倍数（Lama FFT架构需要更大对齐值）
-        pad_size = 64
+        pad_size = 8
         h, w, c = image.shape
         new_h = h if h % pad_size == 0 else (pad_size - (h % pad_size)) + h
         new_w = w if w % pad_size == 0 else (pad_size - (w % pad_size)) + w
@@ -473,7 +464,9 @@ class LamaLargeInpainter(LamaMPEInpainter):
         
         逻辑：
         - 如果是 'onnx' key，只检查 ONNX 文件
-        - 如果是 'model' key：必须确保 .ckpt 文件存在（用于降级）
+        - 如果是 'model' key：
+          - CPU 环境：如果 ONNX 存在，跳过 .ckpt 检查
+          - GPU 环境：必须检查 .ckpt 文件
         """
         # 如果检查的是 onnx key，直接调用父类检查
         if map_key == 'onnx':
@@ -481,9 +474,23 @@ class LamaLargeInpainter(LamaMPEInpainter):
         
         # 如果检查的是 model key（.ckpt）
         if map_key == 'model':
+            onnx_path = self._get_file_path('lamalarge.onnx')
             ckpt_path = self._get_file_path('lama_large_512px.ckpt')
-            # 必须确保 .ckpt 存在，用于 ONNX 失败时降级
-            return os.path.isfile(ckpt_path)
+            
+            # 如果两者都存在，返回 True
+            if os.path.isfile(onnx_path) and os.path.isfile(ckpt_path):
+                return True
+            
+            # 如果只有 ONNX 存在（假设 CPU 环境），返回 True
+            if os.path.isfile(onnx_path):
+                return True
+            
+            # 如果只有 .ckpt 存在，返回 True
+            if os.path.isfile(ckpt_path):
+                return True
+            
+            # 两者都不存在，返回 False（需要下载）
+            return False
         
         return super()._check_downloaded_map(map_key)
 
@@ -508,17 +515,8 @@ class LamaLargeInpainter(LamaMPEInpainter):
                 # ⚠️ 检查备用的 PyTorch 模型是否存在（用于 ONNX 失败时降级）
                 if not os.path.isfile(ckpt_path):
                     self.logger.warning(f'备用 PyTorch 模型不存在: {ckpt_path}')
-                    self.logger.info('正在下载备用 PyTorch 模型...')
-                    try:
-                        # 临时标记为未下载，触发下载
-                        old_downloaded = self._downloaded
-                        self._downloaded = False
-                        await self._download()
-                        self._downloaded = old_downloaded
-                        self.logger.info('备用 PyTorch 模型下载完成')
-                    except Exception as download_error:
-                        self.logger.warning(f'备用模型下载失败: {download_error}')
-                        self.logger.warning('如果 ONNX 推理失败，将无法降级到 PyTorch')
+                    self.logger.warning('如果 ONNX 推理失败，将无法降级到 PyTorch')
+                    self.logger.warning('建议确保打包时包含完整的 models 文件夹')
                 
                 self.logger.info(f'使用ONNX模型（CPU优化）: {onnx_path}')
                 
@@ -584,7 +582,8 @@ class LamaLargeInpainter(LamaMPEInpainter):
                     if not os.path.isfile(ckpt_path):
                         self.logger.error(f'PyTorch 模型文件不存在: {ckpt_path}')
                         self.logger.error('ONNX 推理失败且 PyTorch 模型缺失，无法进行修复')
-                        raise FileNotFoundError(f'模型文件缺失: {ckpt_path}')
+                        self.logger.error('请确保打包时包含了完整的 models 文件夹')
+                        raise FileNotFoundError(f'模型文件缺失: {ckpt_path}，且无法下载（打包环境限制）')
                     self.model = load_lama_mpe(ckpt_path, device='cpu', use_mpe=False, large_arch=True)
                     self.model.eval()
                     if self.device.startswith('cuda') or self.device == 'mps':
@@ -594,7 +593,7 @@ class LamaLargeInpainter(LamaMPEInpainter):
         return await super()._infer(image, mask, config, inpainting_size, verbose)
     
     async def _infer_onnx(self, image: np.ndarray, mask: np.ndarray, inpainting_size: int = 1024, verbose: bool = False) -> np.ndarray:
-        """ONNX专用推理方法 - 采用Rust策略：padding而非resize"""
+        """ONNX专用推理方法"""
         import gc
         
         img_original = None
@@ -612,45 +611,45 @@ class LamaLargeInpainter(LamaMPEInpainter):
             
             height, width, c = image.shape
             
-            # 步骤1: 保持宽高比缩放（如果需要）
-            if max(image.shape[0:2]) > inpainting_size:
-                image = resize_keep_aspect(image, inpainting_size)
-                mask_resized = resize_keep_aspect(mask_original, inpainting_size)
+            # 计算推理尺寸
+            if max(image.shape[0: 2]) > inpainting_size:
+                if height > width:
+                    new_h = inpainting_size
+                    new_w = int(width * new_h / height / 16) * 16
+                else:
+                    new_w = inpainting_size
+                    new_h = int(height * new_w / width / 16) * 16
             else:
-                mask_resized = mask_original
+                new_h = height
+                new_w = width
+            new_h = int(new_h / 16) * 16
+            new_w = int(new_w / 16) * 16
             
-            # 步骤2: Padding到64的倍数（Lama FFT架构需要更大对齐值避免维度不匹配）
-            pad_size = 64
-            h, w, c = image.shape
-            new_h = h if h % pad_size == 0 else (pad_size - (h % pad_size)) + h
-            new_w = w if w % pad_size == 0 else (pad_size - (w % pad_size)) + w
-            
-            self.logger.info(f'Inpainting resolution: {new_w}x{new_h}')
-            
-            # 记录内存使用情况
-            estimated_memory_mb = (new_h * new_w * 3 * 4 * 2) / (1024 * 1024)
+            # 记录内存使用情况（用于调试）
+            estimated_memory_mb = (new_h * new_w * 3 * 4 * 2) / (1024 * 1024)  # 粗略估算
             if verbose:
                 self.logger.debug(f'ONNX推理尺寸: {new_w}x{new_h}, 预估内存: {estimated_memory_mb:.1f}MB')
             
-            # ✅ 使用 padding 而非 resize（保持图像不变形）
-            img_pad = np.pad(image, ((0, new_h - h), (0, new_w - w), (0, 0)), mode='symmetric')
+            image_resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
             
-            # 处理 mask padding
-            if len(mask_resized.shape) == 3:
-                mask_pad = np.pad(mask_resized, ((0, new_h - h), (0, new_w - w), (0, 0)), mode='symmetric')
+            # ✅ 修复：使用mask_original而非mask
+            if new_h == height and new_w == width:
+                mask_resized = mask_original
             else:
-                mask_pad = np.pad(mask_resized, ((0, new_h - h), (0, new_w - w)), mode='symmetric')
-                mask_pad = mask_pad[:, :, None]
+                mask_resized = cv2.resize(mask_original, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+                if len(mask_resized.shape) == 2:
+                    mask_resized = mask_resized[:, :, None]
             
-            # 准备输入（0-1归一化）
-            img = img_pad.astype(np.float32) / 255.0
+            # 准备输入（0-1归一化，匹配ONNX模型）
+            img = image_resized.astype(np.float32) / 255.0
             img = np.transpose(img, (2, 0, 1))[None, ...]  # [1, 3, H, W]
             
-            mask_input = mask_pad.astype(np.float32)[:, :, 0:1]
+            # ✅ 修复：正确处理mask维度
+            mask_input = mask_resized.astype(np.float32)[:, :, 0:1]
             mask_input = np.transpose(mask_input, (2, 0, 1))[None, ...]  # [1, 1, H, W]
             
             # 释放不再需要的中间变量
-            del img_pad, mask_pad
+            del image_resized, mask_resized
             
             # ONNX推理
             ort_inputs = {
@@ -662,43 +661,37 @@ class LamaLargeInpainter(LamaMPEInpainter):
             # 立即释放输入数据
             del img, mask_input, ort_inputs
             
-            # 后处理
-            img_inpainted = np.transpose(img_inpainted[0], (1, 2, 0))
+            # 后处理（0-1反归一化）
+            img_inpainted = np.transpose(img_inpainted[0], (1, 2, 0))  # [H, W, 3]
             img_inpainted = (img_inpainted * 255.).astype(np.uint8)
             
-            # 移除 padding
-            img_inpainted = img_inpainted[:h, :w, :]
+            if new_h != height or new_w != width:
+                img_inpainted = cv2.resize(img_inpainted, (width, height), interpolation=cv2.INTER_LINEAR)
             
-            # 还原到原始尺寸（使用双三次插值，与Rust一致）
-            if max(height, width) > inpainting_size:
-                img_inpainted = cv2.resize(img_inpainted, (width, height), interpolation=cv2.INTER_CUBIC)
-                mask_resized = cv2.resize(mask_resized, (width, height), interpolation=cv2.INTER_LINEAR)
-                if len(mask_resized.shape) == 2:
-                    mask_resized = mask_resized[:, :, None]
-            
-            ans = img_inpainted * mask_resized + img_original * (1 - mask_resized)
+            ans = img_inpainted * mask_original + img_original * (1 - mask_original)
             
             # 清理临时变量
-            del img_original, mask_resized, img_inpainted
+            del img_original, mask_original, img_inpainted
             
-            # 强制垃圾回收
+            # 强制垃圾回收，减少内存碎片
             gc.collect()
             
             return ans
             
         except Exception as e:
-            # 清理所有临时变量
+            # 清理所有临时变量（安全删除）
             for var_name in ['img_original', 'mask_original', 'img', 'mask_input', 'img_inpainted']:
                 if var_name in locals():
                     del locals()[var_name]
             gc.collect()
             
-            # 记录详细错误
+            # 记录详细的错误信息
             self.logger.error(f'ONNX推理异常: {type(e).__name__}: {str(e)}')
             if 'bad allocation' in str(e) or 'allocation' in str(e).lower():
-                self.logger.error('内存分配失败 - 可能是内存碎片化导致')
-                self.logger.error(f'图片尺寸: {image.shape}')
-                self.logger.error('将自动降级到 PyTorch 模式')
+                self.logger.error(f'内存分配失败 - 这可能是内存碎片化导致的')
+                self.logger.error(f'图片尺寸: {image.shape}, 推理尺寸: {new_w}x{new_h}')
+                self.logger.error('这不是总内存不足，而是无法分配连续内存块')
+                self.logger.error('将自动降级到 PyTorch 模式（如果可用）')
             raise
 
 
@@ -784,7 +777,7 @@ class FourierUnit(nn.Module):
             orig_size = x.shape[-2:]
             x = F.interpolate(x, scale_factor=self.spatial_scale_factor, mode=self.spatial_scale_mode, align_corners=False)
 
-        _r_size = x.size()
+        r_size = x.size()
         # (batch, c, h, w/2+1, 2)
         fft_dim = (-3, -2, -1) if self.ffc3d else (-2, -1)
 

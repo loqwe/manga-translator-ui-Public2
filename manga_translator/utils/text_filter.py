@@ -180,3 +180,42 @@ def should_filter(text: str) -> bool:
         True 如果应该过滤，False 否则
     """
     return match_filter(text) is not None
+
+
+def ensure_filter_list_exists() -> None:
+    """
+    确保过滤配置文件存在，如果不存在则创建默认配置
+    
+    在应用启动时调用，保证 watermark_filter.json 存在
+    """
+    config_path = _get_watermark_filter_path()
+    
+    if os.path.exists(config_path):
+        return
+    
+    # Create default config structure
+    default_config = {
+        "groups": [
+            {
+                "name": "示例组",
+                "partial_match_patterns": [],
+                "exact_match_patterns": []
+            }
+        ]
+    }
+    
+    # Ensure directory exists
+    config_dir = os.path.dirname(config_path)
+    if config_dir and not os.path.exists(config_dir):
+        try:
+            os.makedirs(config_dir, exist_ok=True)
+        except OSError as e:
+            logger.warning(f"无法创建过滤配置目录: {config_dir} - {e}")
+            return
+    
+    try:
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(default_config, f, ensure_ascii=False, indent=2)
+        logger.info(f"已创建默认过滤配置文件: {config_path}")
+    except OSError as e:
+        logger.warning(f"无法创建过滤配置文件: {config_path} - {e}")

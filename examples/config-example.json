@@ -12,8 +12,8 @@
       "interval_ms": 500,
       "log_expanded": false
     },
-    "window_x": 483,
-    "window_y": 311,
+    "window_x": 274,
+    "window_y": 594,
     "window_width": 1300,
     "window_height": 758,
     "window_maximized": false
@@ -119,7 +119,7 @@
     "save_quality": 100,
     "batch_size": 3,
     "batch_concurrent": true,
-    "translation_concurrency": 5,
+    "translation_concurrency": 4,
     "inpaint_concurrency": 2,
     "generate_and_export": false,
     "colorize_only": false,

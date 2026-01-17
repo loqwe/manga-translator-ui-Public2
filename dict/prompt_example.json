@@ -35,38 +35,53 @@
           {
             "original": "우진",
             "translation": "宇镇",
-            "lang": "auto"
+            "lang": "ko"
           },
           {
             "original": "한희진",
             "translation": "韩熙珍",
-            "lang": "auto"
+            "lang": "ko"
           },
           {
             "original": "Aria",
-            "translation": "Aria"
+            "translation": "Aria",
+            "lang": "en"
           },
           {
             "original": "신아영",
-            "translation": "申雅英"
+            "translation": "申雅英",
+            "lang": "ko"
           }
         ],
         "Location": [
           {
             "original": "ALPHA UNIVERSITY",
             "translation": "阿尔法大学",
-            "lang": "auto"
+            "lang": "en"
           },
           {
             "original": "청진동해장국",
-            "translation": "清进洞解酒汤"
+            "translation": "清进洞解酒汤",
+            "lang": "ko"
           }
         ],
-        "Org": [],
+        "Org": [
+          {
+            "original": "TEMPLE OF EXQUISITE",
+            "translation": "TEMPLE OF EXQUISITE",
+            "lang": "en"
+          },
+          {
+            "original": "TempleScanEsp.Net",
+            "translation": "TempleScanEsp.Net",
+            "lang": "en"
+          }
+        ],
         "Item": [
           {
             "original": "오나휠",
-            "translation": "飞机杯轮盘"
+            "translation": "飞机杯轮盘",
+            "lang": "ko"
           }
         ],
         "Skill": [],
@@ -105,7 +120,37 @@
         "Creature": []
       },
       "男人配額制": {
-        "Person": [],
+        "Person": [
+          {
+            "original": "선호",
+            "translation": "善浩",
+            "lang": "auto"
+          },
+          {
+            "original": "다랭",
+            "translation": "达棱",
+            "lang": "auto"
+          },
+          {
+            "original": "소원",
+            "translation": "昭媛",
+            "lang": "auto"
+          },
+          {
+            "original": "고은주",
+            "translation": "高恩珠",
+            "lang": "auto"
+          },
+          {
+            "original": "강선호",
+            "translation": "姜善浩",
+            "lang": "auto"
+          },
+          {
+            "original": "유지희",
+            "translation": "柳智希"
+          }
+        ],
         "Location": [],
         "Org": [],
         "Item": [],
@@ -175,7 +220,20 @@
         "Creature": []
       },
       "熟女交换计划": {
-        "Person": [],
+        "Person": [
+          {
+            "original": "은남",
+            "translation": "恩男"
+          },
+          {
+            "original": "지동",
+            "translation": "志东"
+          },
+          {
+            "original": "초아",
+            "translation": "草娥"
+          }
+        ],
         "Location": [],
         "Org": [],
         "Item": [],
@@ -352,11 +410,46 @@
       {
         "original": "우진",
         "translation": "宇镇",
-        "lang": "auto"
+        "lang": "ko"
       },
       {
         "original": "한희진",
         "translation": "韩熙珍",
+        "lang": "ko"
+      },
+      {
+        "original": "Aria",
+        "translation": "Aria",
+        "lang": "en"
+      },
+      {
+        "original": "신아영",
+        "translation": "申雅英",
+        "lang": "ko"
+      },
+      {
+        "original": "선호",
+        "translation": "善浩",
+        "lang": "auto"
+      },
+      {
+        "original": "다랭",
+        "translation": "达棱",
+        "lang": "auto"
+      },
+      {
+        "original": "소원",
+        "translation": "昭媛",
+        "lang": "auto"
+      },
+      {
+        "original": "고은주",
+        "translation": "高恩珠",
+        "lang": "auto"
+      },
+      {
+        "original": "강선호",
+        "translation": "姜善浩",
         "lang": "auto"
       },
       {
@@ -421,30 +514,49 @@
         "translation": "李世镇"
       },
       {
-        "original": "Aria",
-        "translation": "Aria"
+        "original": "은남",
+        "translation": "恩男"
       },
       {
-        "original": "신아영",
-        "translation": "申雅英"
+        "original": "지동",
+        "translation": "志东"
+      },
+      {
+        "original": "초아",
+        "translation": "草娥"
+      },
+      {
+        "original": "유지희",
+        "translation": "柳智希"
       }
     ],
     "Location": [
       {
         "original": "ALPHA UNIVERSITY",
         "translation": "阿尔法大学",
-        "lang": "auto"
+        "lang": "en"
+      },
+      {
+        "original": "청진동해장국",
+        "translation": "清进洞解酒汤",
+        "lang": "ko"
       },
       {
         "original": "STODELS",
         "translation": "STODELS"
-      },
-      {
-        "original": "청진동해장국",
-        "translation": "清进洞解酒汤"
       }
     ],
     "Org": [
+      {
+        "original": "TEMPLE OF EXQUISITE",
+        "translation": "TEMPLE OF EXQUISITE",
+        "lang": "en"
+      },
+      {
+        "original": "TempleScanEsp.Net",
+        "translation": "TempleScanEsp.Net",
+        "lang": "en"
+      },
       {
         "original": "투믹스",
         "translation": "Toomics"
@@ -460,6 +572,11 @@
     ],
     "Item": [
       {
+        "original": "오나휠",
+        "translation": "飞机杯轮盘",
+        "lang": "ko"
+      },
+      {
         "original": "아스모덱",
         "translation": "阿斯莫德",
         "lang": "auto"
@@ -471,10 +588,6 @@
       {
         "original": "히로인 공략노트",
         "translation": "女主角攻略笔记"
-      },
-      {
-        "original": "오나휠",
-        "translation": "飞机杯轮盘"
       }
     ],
     "Skill": [
