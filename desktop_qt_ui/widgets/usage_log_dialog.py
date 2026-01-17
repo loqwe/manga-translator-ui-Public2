@@ -513,11 +513,11 @@ class UsageLogStyledDelegate(QStyledItemDelegate):
             badges = [{'text': rec.model, 'bg': self._badge._colors['model_bg'], 'fg': self._badge._colors['model_fg']}]
         elif col == UsageLogTableModel.COL_DURATION:
             align = 'center'
-            # 用时颜色分级
-            if rec.duration_s >= 120:
+            # 总时间颜色分级
+            if rec.duration_s >= 301:
                 bg = self._badge._colors['dur_bad_bg']
                 fg = self._badge._colors['dur_bad_fg']
-            elif rec.duration_s >= 30:
+            elif rec.duration_s >= 60:
                 bg = self._badge._colors['dur_warn_bg']
                 fg = self._badge._colors['dur_warn_fg']
             else:
