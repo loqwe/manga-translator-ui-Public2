@@ -675,6 +675,8 @@ class ConcurrentPipeline:
             
             # 超时错误：直接进入延迟队列（避免在主翻译槽位里卡住），并拆分为单张重试
             if is_timeout_error:
+                rl_stats = self.rate_limiter.get_stats() if self.rate_limiter else {}
+                inpaint_running = not self.inpaint_stopped_event.is_set()
                 if is_stream_connection_reset_error:
                     logger.warning(
                         f"[翻译] 流式连接中断({error_type})，将 {len(batch)} 张图片放入延迟队列（拆分为单张重试，不做整批重试）"
@@ -683,6 +685,10 @@ class ConcurrentPipeline:
                     logger.warning(
                         f"[翻译] 请求超时，将 {len(batch)} 张图片放入延迟队列（拆分为单张重试，不做整批重试）"
                     )
+                logger.debug(
+                    f"[翻译] 断联诊断: stream={use_stream} inpaint_running={inpaint_running} rl={rl_stats} "
+                    f"batch={len(batch)} error_type={error_type}"
+                )
                 for ctx, config in batch:
                     self.retry_queue.append((ctx, config, 'timeout_error'))
                 return

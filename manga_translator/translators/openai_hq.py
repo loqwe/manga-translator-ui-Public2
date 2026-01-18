@@ -512,27 +512,68 @@ This is an incorrect response because it includes extra text and explanations.
                         # 流式输出模式
                         api_params["stream"] = True
                         api_params["stream_options"] = {"include_usage": True}  # 请求返回 usage
+
+                        # Stream health context (no content logging)
+                        trace_id = f"stream-{int(time.time()*1000)}-{id(self)}-{attempt}"
+                        rl = getattr(ctx, 'rate_limiter', None) if ctx else None
+                        in_expand_window = rl.is_within_expand_window() if rl and hasattr(rl, 'is_within_expand_window') else False
+                        expand_ts = rl.get_last_expand_ts() if rl and hasattr(rl, 'get_last_expand_ts') else 0.0
+                        expand_win = rl.get_expand_window_sec() if rl and hasattr(rl, 'get_expand_window_sec') else 0
+                        self.logger.debug(
+                            f"[STREAM_HEALTH] start id={trace_id} expand_window={in_expand_window} "
+                            f"expand_ts={expand_ts:.3f} window_sec={expand_win} batch={len(batch_data)} "
+                            f"retry={retry_attempt} send_images={send_images}"
+                        )
+
                         stream = await self.client.chat.completions.create(**api_params)
-                        
+
                         collected_chunks = []
                         first_chunk_received = False
-                        
-                        async for chunk in stream:
-                            # 记录首字节时间
-                            if not first_chunk_received:
-                                first_byte_ms = (time.perf_counter() - start_perf) * 1000
-                                first_chunk_received = True
-                            
-                            # 提取内容
-                            if chunk.choices and chunk.choices[0].delta.content:
-                                collected_chunks.append(chunk.choices[0].delta.content)
-                            
-                            # 检查 usage 信息（通常在最后一个 chunk）
-                            if hasattr(chunk, 'usage') and chunk.usage:
-                                stream_usage = chunk.usage
-                        
+
+                        try:
+                            async for chunk in stream:
+                                # 记录首字节时间
+                                if not first_chunk_received:
+                                    first_byte_ms = (time.perf_counter() - start_perf) * 1000
+                                    first_chunk_received = True
+                                    self.logger.debug(
+                                        f"[STREAM_HEALTH] first_chunk id={trace_id} first_byte_ms={first_byte_ms:.1f} "
+                                        f"expand_window={in_expand_window}"
+                                    )
+                                    if first_byte_ms is not None and first_byte_ms >= 40000:
+                                        self.logger.warning(
+                                            f"[STREAM_HEALTH] first_chunk_slow id={trace_id} first_byte_ms={first_byte_ms:.1f} "
+                                            f"threshold_ms=40000 expand_window={in_expand_window}"
+                                        )
+
+                                # 提取内容
+                                if chunk.choices and chunk.choices[0].delta.content:
+                                    collected_chunks.append(chunk.choices[0].delta.content)
+
+                                # 检查 usage 信息（通常在最后一个 chunk）
+                                if hasattr(chunk, 'usage') and chunk.usage:
+                                    stream_usage = chunk.usage
+                        except asyncio.CancelledError as cancel_err:
+                            rl_stats = rl.get_stats() if rl and hasattr(rl, 'get_stats') else {}
+                            self.logger.debug(
+                                f"[STREAM_HEALTH] cancel id={trace_id} expand_window={in_expand_window} "
+                                f"rl={rl_stats} err={type(cancel_err).__name__}"
+                            )
+                            raise
+                        except Exception as stream_err:
+                            rl_stats = rl.get_stats() if rl and hasattr(rl, 'get_stats') else {}
+                            self.logger.debug(
+                                f"[STREAM_HEALTH] error id={trace_id} expand_window={in_expand_window} "
+                                f"rl={rl_stats} err={type(stream_err).__name__}: {stream_err}"
+                            )
+                            raise
+
                         result_text = "".join(collected_chunks).strip()
                         ai_metrics_status = "ok" if result_text else "error"
+                        self.logger.debug(
+                            f"[STREAM_HEALTH] end id={trace_id} status={ai_metrics_status} "
+                            f"chunks={len(collected_chunks)} expand_window={in_expand_window}"
+                        )
                     else:
                         # 非流式输出模式（原有逻辑）
                         response = await self.client.chat.completions.create(**api_params)
@@ -552,6 +593,13 @@ This is an incorrect response because it includes extra text and explanations.
                     raise
 
                 except Exception as e:
+                    rl = getattr(ctx, 'rate_limiter', None) if ctx else None
+                    rl_stats = rl.get_stats() if rl and hasattr(rl, 'get_stats') else {}
+                    in_expand_window = rl.is_within_expand_window() if rl and hasattr(rl, 'is_within_expand_window') else False
+                    self.logger.debug(
+                        f"[STREAM_HEALTH] request_error expand_window={in_expand_window} rl={rl_stats} "
+                        f"batch={len(batch_data)} retry={retry_attempt} err={type(e).__name__}: {e}"
+                    )
                     msg = str(e).lower()
                     if 'rate limit' in msg or 'ratelimit' in msg or '429' in msg:
                         ai_metrics_status = "rate_limit"

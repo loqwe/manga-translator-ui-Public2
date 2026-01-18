@@ -34,7 +34,7 @@ class RateLimiter:
     - 确保每个 acquire 只能被 release 一次
     """
     
-    def __init__(self, concurrency: int = 1, rpm: int = 0, burst: int = None):
+    def __init__(self, concurrency: int = 1, rpm: int = 0, burst: int = None, expand_window_sec: int = 180):
         """
         初始化速率限制器
         
@@ -42,9 +42,12 @@ class RateLimiter:
             concurrency: 最大并发请求数
             rpm: 每分钟最大请求数，0 表示不限制
             burst: 突发容量，默认等于 rpm（允许一开始快速发送 rpm 个请求）
+            expand_window_sec: 扩展槽事件的检测窗口（秒）
         """
         self._concurrency = concurrency
         self._rpm = rpm
+        self._expand_window_sec = max(0, int(expand_window_sec))
+        self._last_expand_ts = 0.0
         
         # 令牌桶状态（仅当 rpm > 0 时启用）
         if rpm > 0:
@@ -191,7 +194,9 @@ class RateLimiter:
         
         old_concurrency = self._concurrency
         self._concurrency = new_concurrency
+        self._last_expand_ts = time.time()
         logger.info(f"[速率限制] 并发数扩展: {old_concurrency} -> {new_concurrency}")
+        logger.debug(f"[速率限制] 扩展槽标记: ts={self._last_expand_ts:.3f}, window={self._expand_window_sec}s")
     
     def update_rpm(self, new_rpm: int):
         """
@@ -328,6 +333,21 @@ class RateLimiter:
         if token_id is not None:
             self.release(token_id)
         return False
+    
+    def get_last_expand_ts(self) -> float:
+        """获取最近一次扩展槽事件时间戳（epoch 秒）"""
+        return float(self._last_expand_ts or 0.0)
+    
+    def get_expand_window_sec(self) -> int:
+        """获取扩展槽检测窗口（秒）"""
+        return int(self._expand_window_sec)
+    
+    def is_within_expand_window(self, ts: float = None) -> bool:
+        """判断给定时间戳是否落在扩展槽事件窗口内"""
+        if not self._last_expand_ts or self._expand_window_sec <= 0:
+            return False
+        now_ts = float(ts if ts is not None else time.time())
+        return abs(now_ts - self._last_expand_ts) <= self._expand_window_sec
     
     def get_stats(self) -> dict:
         """获取当前状态统计"""
