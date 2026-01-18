@@ -152,6 +152,25 @@ def detect_language(text: str) -> str:
     return "auto"
 
 
+def contains_han_chars(text: str) -> bool:
+    """Return True if text contains at least one Han (CJK ideograph) character."""
+    if not text:
+        return False
+
+    for ch in str(text):
+        cp = ord(ch)
+        # CJK Unified Ideographs + Extension A + Compatibility Ideographs + Extensions (supplementary planes)
+        if (
+            (0x3400 <= cp <= 0x4DBF)
+            or (0x4E00 <= cp <= 0x9FFF)
+            or (0xF900 <= cp <= 0xFAFF)
+            or (0x20000 <= cp <= 0x2EBEF)
+        ):
+            return True
+
+    return False
+
+
 class GlossaryFilterDialog(QDialog):
     """术语参考过滤表编辑对话框"""
 
@@ -1306,6 +1325,47 @@ class GlossaryFilterDialog(QDialog):
     
     # ========== 加载/保存方法 ==========
     
+    def _cleanup_non_chinese_translations(self) -> int:
+        """Remove terms whose translation does not contain any Han characters.
+
+        This enforces that translations are Chinese while allowing digits/latin/symbols.
+        """
+        removed = 0
+
+        def _filter_terms_list(items):
+            nonlocal removed
+            if not isinstance(items, list):
+                return []
+
+            kept = []
+            for t in items:
+                if not isinstance(t, dict):
+                    kept.append(t)
+                    continue
+
+                trans = str(t.get('translation') or '').strip()
+                if trans and contains_han_chars(trans):
+                    kept.append(t)
+                else:
+                    removed += 1
+
+            return kept
+
+        # works: {work_name: {cat_key: [term, ...]}}
+        if isinstance(self._works_data, dict):
+            for work_name, work_data in list(self._works_data.items()):
+                if not isinstance(work_data, dict):
+                    continue
+                for cat_key in DEFAULT_CATEGORIES:
+                    work_data[cat_key] = _filter_terms_list(work_data.get(cat_key, []))
+
+        # unassigned: {cat_key: [term, ...]}
+        if isinstance(self._unassigned_data, dict):
+            for cat_key in DEFAULT_CATEGORIES:
+                self._unassigned_data[cat_key] = _filter_terms_list(self._unassigned_data.get(cat_key, []))
+
+        return removed
+
     def _load_glossary(self):
         """从配置文件加载术语"""
         if not self.config_path or not os.path.exists(self.config_path):
@@ -1360,8 +1420,12 @@ class GlossaryFilterDialog(QDialog):
 
                 # ✅ 自动迁移：把 unassigned 中 raw_work_name 可映射到熟肉名的条目转移到对应作品
                 moved = self._auto_migrate_unassigned_by_name_mapping()
-                if moved > 0:
-                    # 直接落盘，避免用户还要手动“无作品→作品”
+
+                # ✅ Clean up terms whose translations are not Chinese
+                removed = self._cleanup_non_chinese_translations()
+
+                if moved > 0 or removed > 0:
+                    # Persist normalized data to disk
                     self._save_to_file()
             else:
                 # 不再支持旧格式（没有 works 结构）
@@ -1569,6 +1633,9 @@ class GlossaryFilterDialog(QDialog):
             return False
         
         try:
+            # Remove terms whose translations are not Chinese (no Han chars)
+            self._cleanup_non_chinese_translations()
+
             # 构建 glossary 数据
             glossary = {
                 "works": self._works_data,

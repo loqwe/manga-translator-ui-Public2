@@ -21,6 +21,25 @@ try:
 except Exception:
     readline = None
 
+
+def contains_han_chars(text: str) -> bool:
+    """Return True if text contains at least one Han (CJK ideograph) character."""
+    if not text:
+        return False
+
+    for ch in str(text):
+        cp = ord(ch)
+        # CJK Unified Ideographs + Extension A + Compatibility Ideographs + Extensions (supplementary planes)
+        if (
+            (0x3400 <= cp <= 0x4DBF)
+            or (0x4E00 <= cp <= 0x9FFF)
+            or (0xF900 <= cp <= 0xFAFF)
+            or (0x20000 <= cp <= 0x2EBEF)
+        ):
+            return True
+
+    return False
+
 VALID_LANGUAGES = {
     'CHS': 'Chinese (Simplified)',
     'CHT': 'Chinese (Traditional)',
@@ -1563,9 +1582,26 @@ def merge_glossary_to_file(file_path: str, new_terms: List[Dict[str, str]]) -> b
     import os
     
     logger.debug(f"[Glossary] 尝试合并 {len(new_terms) if new_terms else 0} 个术语到: {file_path}")
-    
+
+    # Filter out terms whose translations are not Chinese (must contain at least one Han char).
+    filtered_terms: List[Dict[str, str]] = []
+    skipped_non_chinese = 0
+    for term in (new_terms or []):
+        if not isinstance(term, dict):
+            continue
+        translation = str(term.get("translation") or "").strip()
+        if translation and contains_han_chars(translation):
+            filtered_terms.append(term)
+        else:
+            skipped_non_chinese += 1
+
+    if skipped_non_chinese > 0:
+        logger.info(f"[Glossary] Skipped {skipped_non_chinese} terms due to non-Chinese translation (no Han chars)")
+
+    new_terms = filtered_terms
+
     if not new_terms:
-        logger.debug(f"[Glossary] 无术语需要合并")
+        logger.debug(f"[Glossary] No valid terms to merge after filtering")
         return False
 
     try:
@@ -1791,6 +1827,11 @@ def merge_glossary_to_file(file_path: str, new_terms: List[Dict[str, str]]) -> b
                         o = (t.get("original") or "").strip()
                         tr = (t.get("translation") or "").strip()
                         if not o or not tr:
+                            new_src.append(t)
+                            continue
+
+                        # Avoid migrating (and thus persisting) non-Chinese translations.
+                        if not contains_han_chars(tr):
                             new_src.append(t)
                             continue
 
