@@ -189,7 +189,7 @@ class OpenAIHighQualityTranslator(CommonTranslator):
                 default_headers=BROWSER_HEADERS,
                 http_client=httpx.AsyncClient(
                     headers=BROWSER_HEADERS,
-                    timeout=httpx.Timeout(400.0, connect=60.0, read=40.0)  # read=40s 首字节超时
+                    timeout=httpx.Timeout(400.0, connect=60.0, read=60.0)  # read=60s 首字节超时
                 )
             )
     
@@ -536,6 +536,10 @@ This is an incorrect response because it includes extra text and explanations.
                                 if not first_chunk_received:
                                     first_byte_ms = (time.perf_counter() - start_perf) * 1000
                                     first_chunk_received = True
+                                    recv_ts = self._now_iso()
+                                    self.logger.debug(
+                                        f"[STREAM_RECV] first_chunk id={trace_id} recv={recv_ts} first_byte_ms={first_byte_ms:.1f}"
+                                    )
                                     self.logger.debug(
                                         f"[STREAM_HEALTH] first_chunk id={trace_id} first_byte_ms={first_byte_ms:.1f} "
                                         f"expand_window={in_expand_window}"
@@ -570,6 +574,11 @@ This is an incorrect response because it includes extra text and explanations.
 
                         result_text = "".join(collected_chunks).strip()
                         ai_metrics_status = "ok" if result_text else "error"
+                        end_recv_ts = self._now_iso()
+                        total_ms = (time.perf_counter() - start_perf) * 1000
+                        self.logger.debug(
+                            f"[STREAM_RECV] end id={trace_id} recv={end_recv_ts} total_ms={total_ms:.1f}"
+                        )
                         self.logger.debug(
                             f"[STREAM_HEALTH] end id={trace_id} status={ai_metrics_status} "
                             f"chunks={len(collected_chunks)} expand_window={in_expand_window}"
