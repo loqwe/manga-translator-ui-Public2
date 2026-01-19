@@ -83,8 +83,19 @@ class CommonDetector(InfererModule):
         raw_mask = cv2.resize(raw_mask, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
         raw_mask = raw_mask[:old_h, :old_w]
         if mask is not None:
-            mask = cv2.resize(mask, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-            mask = mask[:old_h, :old_w]
+            if isinstance(mask, tuple):
+                resized_masks = []
+                for m in mask:
+                    if m is not None and hasattr(m, 'shape'):
+                        resized = cv2.resize(m, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+                        resized = resized[:old_h, :old_w]
+                        resized_masks.append(resized)
+                    else:
+                        resized_masks.append(m)
+                mask = tuple(resized_masks)
+            else:
+                mask = cv2.resize(mask, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+                mask = mask[:old_h, :old_w]
 
         # Filter out regions within the border and clamp the points of the remaining regions
         new_textlines = []

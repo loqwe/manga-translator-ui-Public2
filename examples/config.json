@@ -12,8 +12,8 @@
       "interval_ms": 500,
       "log_expanded": false
     },
-    "window_x": 282,
-    "window_y": 413,
+    "window_x": 442,
+    "window_y": 227,
     "window_width": 1300,
     "window_height": 758,
     "window_maximized": false
@@ -35,7 +35,7 @@
     "use_mocr_merge": false,
     "ocr": "48px",
     "use_hybrid_ocr": true,
-    "secondary_ocr": "paddleocr",
+    "secondary_ocr": "paddleocr_korean",
     "min_text_length": 0,
     "ignore_bubble": 0.0,
     "prob": 0.1,

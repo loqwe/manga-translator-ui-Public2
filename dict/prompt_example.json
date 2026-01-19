@@ -43,11 +43,6 @@
             "lang": "ko"
           },
           {
-            "original": "Aria",
-            "translation": "Aria",
-            "lang": "en"
-          },
-          {
             "original": "신아영",
             "translation": "申雅英",
             "lang": "ko"
@@ -65,18 +60,7 @@
             "lang": "ko"
           }
         ],
-        "Org": [
-          {
-            "original": "TEMPLE OF EXQUISITE",
-            "translation": "TEMPLE OF EXQUISITE",
-            "lang": "en"
-          },
-          {
-            "original": "TempleScanEsp.Net",
-            "translation": "TempleScanEsp.Net",
-            "lang": "en"
-          }
-        ],
+        "Org": [],
         "Item": [
           {
             "original": "오나휠",
@@ -149,6 +133,14 @@
           {
             "original": "유지희",
             "translation": "柳智希"
+          },
+          {
+            "original": "유리",
+            "translation": "侑莉"
+          },
+          {
+            "original": "시현",
+            "translation": "诗贤"
           }
         ],
         "Location": [],
@@ -193,12 +185,7 @@
           }
         ],
         "Location": [],
-        "Org": [
-          {
-            "original": "투믹스",
-            "translation": "Toomics"
-          }
-        ],
+        "Org": [],
         "Item": [],
         "Skill": [],
         "Creature": []
@@ -267,10 +254,6 @@
             "translation": "咸少非"
           },
           {
-            "original": "CANAPE",
-            "translation": "CANAPE"
-          },
-          {
             "original": "F선향",
             "translation": "F线香"
           },
@@ -296,17 +279,8 @@
             "translation": "李世镇"
           }
         ],
-        "Location": [
-          {
-            "original": "STODELS",
-            "translation": "STODELS"
-          }
-        ],
+        "Location": [],
         "Org": [
-          {
-            "original": "투믹스",
-            "translation": "Toomics"
-          },
           {
             "original": "아스모데",
             "translation": "阿斯莫德"
@@ -344,44 +318,33 @@
     "unassigned": {
       "Person": [
         {
-          "original": "쇼타네암컷",
-          "translation": "正太的雌性",
-          "raw_work_name": "未翻译"
+          "original": "유미",
+          "translation": "由美",
+          "raw_work_name": "无生肉名"
         },
         {
-          "original": "Hoonsang",
-          "translation": "勋尚",
-          "raw_work_name": "longxin"
+          "original": "수헌",
+          "translation": "秀宪",
+          "raw_work_name": "无生肉名"
         },
         {
-          "original": "Yuna",
-          "translation": "宥娜",
-          "raw_work_name": "longxin"
+          "original": "유리",
+          "translation": "由里",
+          "raw_work_name": "无生肉名"
+        },
+        {
+          "original": "김수헌",
+          "translation": "金守宪",
+          "raw_work_name": "无生肉名"
+        },
+        {
+          "original": "누헌",
+          "translation": "修宪",
+          "raw_work_name": "无生肉名"
         }
       ],
       "Location": [],
-      "Org": [
-        {
-          "original": "Toomics",
-          "translation": "Toomics",
-          "lang": "en"
-        },
-        {
-          "original": "은밀한 그림자",
-          "translation": "隐秘的影子",
-          "lang": "ko"
-        },
-        {
-          "original": "MOBY DICK",
-          "translation": "MOBY DICK",
-          "raw_work_name": "longxin"
-        },
-        {
-          "original": "TEMPLE",
-          "translation": "TEMPLE",
-          "raw_work_name": "longxin"
-        }
-      ],
+      "Org": [],
       "Item": [],
       "Skill": [],
       "Creature": []
@@ -418,11 +381,6 @@
         "lang": "ko"
       },
       {
-        "original": "Aria",
-        "translation": "Aria",
-        "lang": "en"
-      },
-      {
         "original": "신아영",
         "translation": "申雅英",
         "lang": "ko"
@@ -453,6 +411,18 @@
         "lang": "auto"
       },
       {
+        "original": "유지희",
+        "translation": "柳智希"
+      },
+      {
+        "original": "유리",
+        "translation": "侑莉"
+      },
+      {
+        "original": "시현",
+        "translation": "诗贤"
+      },
+      {
         "original": "메시아",
         "translation": "弥赛亚"
       },
@@ -469,6 +439,18 @@
         "translation": "李勋"
       },
       {
+        "original": "은남",
+        "translation": "恩男"
+      },
+      {
+        "original": "지동",
+        "translation": "志东"
+      },
+      {
+        "original": "초아",
+        "translation": "草娥"
+      },
+      {
         "original": "서진",
         "translation": "瑞镇"
       },
@@ -483,10 +465,6 @@
       {
         "original": "함소빌",
         "translation": "咸少非"
-      },
-      {
-        "original": "CANAPE",
-        "translation": "CANAPE"
       },
       {
         "original": "F선향",
@@ -512,22 +490,6 @@
       {
         "original": "이세진",
         "translation": "李世镇"
-      },
-      {
-        "original": "은남",
-        "translation": "恩男"
-      },
-      {
-        "original": "지동",
-        "translation": "志东"
-      },
-      {
-        "original": "초아",
-        "translation": "草娥"
-      },
-      {
-        "original": "유지희",
-        "translation": "柳智希"
       }
     ],
     "Location": [
@@ -540,31 +502,9 @@
         "original": "청진동해장국",
         "translation": "清进洞解酒汤",
         "lang": "ko"
-      },
-      {
-        "original": "STODELS",
-        "translation": "STODELS"
       }
     ],
     "Org": [
-      {
-        "original": "TEMPLE OF EXQUISITE",
-        "translation": "TEMPLE OF EXQUISITE",
-        "lang": "en"
-      },
-      {
-        "original": "TempleScanEsp.Net",
-        "translation": "TempleScanEsp.Net",
-        "lang": "en"
-      },
-      {
-        "original": "투믹스",
-        "translation": "Toomics"
-      },
-      {
-        "original": "투믹스",
-        "translation": "Toomics"
-      },
       {
         "original": "아스모데",
         "translation": "阿斯莫德"

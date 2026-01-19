@@ -4,24 +4,15 @@ import asyncio
 # import json
 from typing import List, Dict, Any
 import httpx
-# import openai
-from openai import AsyncOpenAI
 
+from .openai_gateway import DEFAULT_BROWSER_HEADERS, get_openai_client, chat_completions
 from .common import CommonTranslator, VALID_LANGUAGES, parse_json_or_text_response, parse_hq_response, get_glossary_extraction_prompt, merge_glossary_to_file, validate_openai_response
 from .keys import OPENAI_API_KEY, OPENAI_MODEL
 from ..utils import Context
 
 # 浏览器风格的请求头，避免被 CF 拦截
 # 注意：移除 Accept-Encoding 让 httpx 自动处理，避免压缩响应导致的 UTF-8 解码错误
-BROWSER_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,ja;q=0.7",
-    "Connection": "keep-alive",
-    "Sec-Ch-Ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-    "Sec-Ch-Ua-Mobile": "?0",
-    "Sec-Ch-Ua-Platform": '"Windows"',
-}
+BROWSER_HEADERS = DEFAULT_BROWSER_HEADERS
 
 
 def _flatten_prompt_data(data: Any, indent: int = 0) -> str:
@@ -51,10 +42,6 @@ class OpenAITranslator(CommonTranslator):
     支持批量文本翻译，不包含图片处理
     """
     _LANGUAGE_CODE_MAP = VALID_LANGUAGES
-    
-    # 类变量: 跨实例共享的RPM限制时间戳
-    _GLOBAL_LAST_REQUEST_TS = {}  # {model_name: timestamp}
-    
     def __init__(self):
         super().__init__()
         self.client = None
@@ -71,11 +58,7 @@ class OpenAITranslator(CommonTranslator):
         self.max_tokens = None  # 不限制，使用模型默认最大值
         self.temperature = 0.1
         self._MAX_REQUESTS_PER_MINUTE = 0  # 默认无限制
-        # 使用全局时间戳,跨实例共享
-        if self.model not in OpenAITranslator._GLOBAL_LAST_REQUEST_TS:
-            OpenAITranslator._GLOBAL_LAST_REQUEST_TS[self.model] = 0
-        self._last_request_ts_key = self.model
-        self._setup_client()
+        # Client is initialized lazily in async context to bind to the correct event loop.
     
     def set_prev_context(self, context: str):
         """设置多页上下文（用于context_size > 0时）"""
@@ -115,47 +98,21 @@ class OpenAITranslator(CommonTranslator):
             self.model = user_api_model
             self.logger.info(f"[UserAPIKey] Using user-provided model: {user_api_model}")
         
-        # 如果 API Key 或 Base URL 变化，重建客户端
+        # If API Key / Base URL changes, reset the cached client (re-created lazily in async context)
         if need_rebuild_client:
             self.client = None
-            self._setup_client()
     
-    def _setup_client(self):
-        """设置OpenAI客户端"""
-        if not self.client:
-            # 使用浏览器式请求头，避免被 Cloudflare 阻止
-            self.client = AsyncOpenAI(
-                api_key=self.api_key,
-                base_url=self.base_url,
-                default_headers=BROWSER_HEADERS,
-                http_client=httpx.AsyncClient(
-                    headers=BROWSER_HEADERS,
-                    timeout=httpx.Timeout(300.0, connect=60.0)
-                )
-            )
-    
-    async def _cleanup(self):
-        """清理资源"""
+    async def _ensure_client(self):
+        """Ensure a shared OpenAI client is available (do NOT close it in this instance)."""
         if self.client:
-            try:
-                await self.client.close()
-            except Exception:
-                pass  # 忽略清理时的错误
-    
-    def __del__(self):
-        """析构函数，确保资源被清理"""
-        if self.client:
-            try:
-                import asyncio
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # 如果事件循环还在运行，创建清理任务
-                    asyncio.create_task(self._cleanup())
-                elif not loop.is_closed():
-                    # 如果事件循环未关闭，同步执行清理
-                    loop.run_until_complete(self._cleanup())
-            except Exception:
-                pass  # 忽略所有清理错误
+            return
+
+        # The client is shared per event loop; do NOT close it from a translator instance.
+        self.client = await get_openai_client(
+            api_key=self.api_key,
+            base_url=self.base_url,
+            headers=BROWSER_HEADERS,
+        )
     
     def _build_system_prompt(self, source_lang: str, target_lang: str, custom_prompt_json: Dict[str, Any] = None, line_break_prompt_json: Dict[str, Any] = None, retry_attempt: int = 0, retry_reason: str = "", extract_glossary: bool = False) -> str:
         """构建系统提示词"""
@@ -242,8 +199,7 @@ class OpenAITranslator(CommonTranslator):
         if not texts:
             return []
         
-        if not self.client:
-            self._setup_client()
+        await self._ensure_client()
         
         # 初始化重试信息
         retry_attempt = 0
@@ -292,36 +248,26 @@ class OpenAITranslator(CommonTranslator):
             ]
 
             try:
-                # RPM限制
-                if self._MAX_REQUESTS_PER_MINUTE > 0:
-                    import time
-                    now = time.time()
-                    delay = 60.0 / self._MAX_REQUESTS_PER_MINUTE
-                    elapsed = now - OpenAITranslator._GLOBAL_LAST_REQUEST_TS[self._last_request_ts_key]
-                    if elapsed < delay:
-                        sleep_time = delay - elapsed
-                        self.logger.info(f'Ratelimit sleep: {sleep_time:.2f}s')
-                        await asyncio.sleep(sleep_time)
-                
-                # 动态调整温度：质量检查或BR检查失败时提高温度帮助跳出错误模式
+                # Dynamic temperature adjustment: helps escape failure mode after validation retries
                 current_temperature = self._get_retry_temperature(self.temperature, retry_attempt, retry_reason)
                 if retry_attempt > 0 and current_temperature != self.temperature:
                     self.logger.info(f"[重试] 温度调整: {self.temperature} -> {current_temperature}")
-                
-                # 构建API参数，只有当max_tokens有值时才传递（新模型如o1/gpt-4.1不支持null值）
-                api_params = {
-                    "model": self.model,
-                    "messages": messages,
-                    "temperature": current_temperature
-                }
-                if self.max_tokens is not None:
-                    api_params["max_tokens"] = self.max_tokens
 
-                response = await self.client.chat.completions.create(**api_params)
-                
-                # 在API调用成功后立即更新时间戳，确保所有请求（包括重试）都被计入速率限制
-                if self._MAX_REQUESTS_PER_MINUTE > 0:
-                    OpenAITranslator._GLOBAL_LAST_REQUEST_TS[self._last_request_ts_key] = time.time()
+                result = await chat_completions(
+                    api_key=self.api_key,
+                    base_url=self.base_url,
+                    model=self.model,
+                    messages=messages,
+                    temperature=current_temperature,
+                    max_tokens=self.max_tokens,
+                    stream=False,
+                    timeout=httpx.Timeout(300.0, connect=60.0),
+                    max_requests_per_minute=self._MAX_REQUESTS_PER_MINUTE,
+                    headers=BROWSER_HEADERS,
+                    metrics_logger=self.log_ai_metrics,
+                    logger=self.logger,
+                )
+                response = result.response
 
                 # 验证响应对象是否有效
                 validate_openai_response(response, self.logger)

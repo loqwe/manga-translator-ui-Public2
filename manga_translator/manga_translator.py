@@ -199,6 +199,9 @@ class MangaTranslator:
         self._current_image_context = None  # 存储当前处理图片的上下文信息
         self._saved_image_contexts = {}     # 存储批量处理中每个图片的上下文信息
         
+        # Task-level translator cache: {(task_id, translator_key): translator}
+        self._task_translator_cache = {}
+        
         # 日志文件现在由UI层管理，这里不再创建
         self._log_file_path = None
         
@@ -2000,6 +2003,32 @@ class MangaTranslator:
                 for k in keys_to_remove:
                     del self._saved_image_contexts[k]
 
+    def _get_current_task_id(self) -> int:
+        """Return the current asyncio task id, or 0 if not available."""
+        try:
+            task = asyncio.current_task()
+        except Exception:
+            task = None
+        return id(task) if task else 0
+
+    def _get_task_translator(self, translator_key: Translator, factory):
+        """Get or create a translator instance scoped to the current asyncio Task."""
+        task_id = self._get_current_task_id()
+        cache_key = (task_id, translator_key)
+        translator = self._task_translator_cache.get(cache_key)
+        if translator is None:
+            translator = factory()
+            self._task_translator_cache[cache_key] = translator
+        return translator
+
+    def _release_task_translators(self, task_id: int):
+        """Release cached translators for a finished asyncio Task to avoid memory leaks."""
+        if not task_id:
+            return
+        keys_to_delete = [k for k in self._task_translator_cache.keys() if k[0] == task_id]
+        for k in keys_to_delete:
+            self._task_translator_cache.pop(k, None)
+
     def _build_prev_context(self, use_original_text=False, current_page_index=None, batch_index=None, batch_original_texts=None):
         """
         跳过句子数为0的页面，取最近 context_size 个非空页面，拼成：
@@ -2111,7 +2140,7 @@ class MangaTranslator:
         # Special handling for OpenAI translator: inject context
         if config.translator.translator == Translator.openai:
             from .translators.openai import OpenAITranslator
-            translator = OpenAITranslator()
+            translator = self._get_task_translator(Translator.openai, OpenAITranslator)
 
             translator.parse_args(config.translator)
             translator.set_prev_context(prev_ctx)
@@ -3492,6 +3521,10 @@ class MangaTranslator:
                     translated_contexts=translated_contexts,
                     keep_results=True
                 )
+
+                # Release task-scoped translators at the batch boundary.
+                self._release_task_translators(self._get_current_task_id())
+
                 logger.debug(f'[MEMORY] Batch {batch_start//batch_size + 1} cleanup completed')
 
         logger.info(f"Batch translation completed: processed {len(results)} images")
@@ -4448,6 +4481,11 @@ class MangaTranslator:
             results = await asyncio.gather(*tasks, return_exceptions=True)
         except Exception as e:
             logger.error(f"Error in concurrent translation gather: {e}")
+
+            # Best-effort cleanup of task-scoped translators.
+            for t in tasks:
+                self._release_task_translators(id(t))
+
             raise
         
         # 处理结果，检查是否有异常
@@ -4470,6 +4508,11 @@ class MangaTranslator:
                 final_results.append(result)
         
         logger.info(f'Concurrent translation completed: {len(final_results)} images processed')
+
+        # Release task-scoped translators to avoid cache growth in long batch runs.
+        for t in tasks:
+            self._release_task_translators(id(t))
+
         return final_results
 
     async def _batch_translate_texts(self, texts: List[str], config: Config, ctx: Context, batch_contexts: List[Context] = None, page_index: int = None, batch_index: int = None, batch_original_texts: List[dict] = None) -> List[str]:
@@ -4490,24 +4533,30 @@ class MangaTranslator:
 
 
 
-        # 如果是OpenAI翻译器、Gemini翻译器或高质量翻译器，需要处理上下文
+        # If this is an OpenAI/Gemini translator, we need to inject context.
         if config.translator.translator in [Translator.openai, Translator.gemini, Translator.openai_hq, Translator.gemini_hq]:
-            if config.translator.translator == Translator.openai:
+            translator_key = config.translator.translator
+
+            if translator_key == Translator.openai:
                 from .translators.openai import OpenAITranslator
-                translator = OpenAITranslator()
-            elif config.translator.translator == Translator.gemini:
+                translator = self._get_task_translator(Translator.openai, OpenAITranslator)
+            elif translator_key == Translator.gemini:
                 from .translators.gemini import GeminiTranslator
-                translator = GeminiTranslator()
-            elif config.translator.translator == Translator.openai_hq:
+                translator = self._get_task_translator(Translator.gemini, GeminiTranslator)
+            elif translator_key == Translator.openai_hq:
                 from .translators.openai_hq import OpenAIHighQualityTranslator
-                translator = OpenAIHighQualityTranslator()
-            elif config.translator.translator == Translator.gemini_hq:
+                translator = self._get_task_translator(Translator.openai_hq, OpenAIHighQualityTranslator)
+            elif translator_key == Translator.gemini_hq:
                 from .translators.gemini_hq import GeminiHighQualityTranslator
-                translator = GeminiHighQualityTranslator()
+                translator = self._get_task_translator(Translator.gemini_hq, GeminiHighQualityTranslator)
 
             translator.parse_args(config.translator)
             # 注意：-1 表示无限重试，也是有效值
             # 这里不再覆盖 translator.attempts，让配置中的值生效
+
+            # Reset per-call counters that should not leak across batches.
+            if translator_key == Translator.openai_hq and hasattr(translator, '_rate_limit_attempt'):
+                translator._rate_limit_attempt = 0
             
             # 传递取消检查回调给翻译器
             if self._cancel_check_callback:
@@ -4604,11 +4653,11 @@ class MangaTranslator:
         # 确定降级的翻译器
         if config.translator.translator == Translator.openai_hq:
             from .translators.openai import OpenAITranslator
-            fallback_translator = OpenAITranslator()
+            fallback_translator = self._get_task_translator(Translator.openai, OpenAITranslator)
             logger.info(f"[降级翻译] openai_hq → openai，批量处理 {len(texts)} 条文本")
         elif config.translator.translator == Translator.gemini_hq:
             from .translators.gemini import GeminiTranslator
-            fallback_translator = GeminiTranslator()
+            fallback_translator = self._get_task_translator(Translator.gemini, GeminiTranslator)
             logger.info(f"[降级翻译] gemini_hq → gemini，批量处理 {len(texts)} 条文本")
         else:
             # 非HQ翻译器，使用通用调度
@@ -4651,11 +4700,11 @@ class MangaTranslator:
         # 确定降级的翻译器
         if config.translator.translator == Translator.openai_hq:
             from .translators.openai import OpenAITranslator
-            fallback_translator = OpenAITranslator()
+            fallback_translator = self._get_task_translator(Translator.openai, OpenAITranslator)
             logger.info("[降级翻译] openai_hq → openai")
         elif config.translator.translator == Translator.gemini_hq:
             from .translators.gemini import GeminiTranslator
-            fallback_translator = GeminiTranslator()
+            fallback_translator = self._get_task_translator(Translator.gemini, GeminiTranslator)
             logger.info("[降级翻译] gemini_hq → gemini")
         else:
             # 非HQ翻译器，使用通用调度
@@ -5584,6 +5633,9 @@ class MangaTranslator:
                     preprocessed_contexts=preprocessed_contexts,
                     keep_results=True
                 )
+
+                # Release task-scoped translators at the batch boundary.
+                self._release_task_translators(self._get_current_task_id())
                 
                 continue # BUG FIX: Continue to the next batch instead of returning
 
@@ -5664,6 +5716,9 @@ class MangaTranslator:
                 preprocessed_contexts=preprocessed_contexts,
                 keep_results=True
             )
+
+            # Release task-scoped translators at the batch boundary.
+            self._release_task_translators(self._get_current_task_id())
             
             logger.debug(f'[MEMORY] Batch {batch_start//batch_size + 1} cleanup completed (kept translation history for context)')
 

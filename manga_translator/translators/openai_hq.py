@@ -1,6 +1,7 @@
 import os
 import re
 import asyncio
+import time
 import base64
 # import json
 import logging
@@ -9,8 +10,8 @@ from typing import List, Dict, Any
 from PIL import Image
 import httpx
 import openai
-from openai import AsyncOpenAI
 
+from .openai_gateway import DEFAULT_BROWSER_HEADERS, get_openai_client, chat_completions
 from .common import CommonTranslator, VALID_LANGUAGES, draw_text_boxes_on_image, parse_json_or_text_response, merge_glossary_to_file, get_glossary_extraction_prompt, parse_hq_response, validate_openai_response
 from .keys import OPENAI_API_KEY, OPENAI_MODEL
 from ..utils import Context
@@ -21,15 +22,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # 浏览器风格的请求头，避免被 CF 拦截
 # 注意：移除 Accept-Encoding 让 httpx 自动处理，避免压缩响应导致的 UTF-8 解码错误
-BROWSER_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,ja;q=0.7",
-    "Connection": "keep-alive",
-    "Sec-Ch-Ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-    "Sec-Ch-Ua-Mobile": "?0",
-    "Sec-Ch-Ua-Platform": '"Windows"',
-}
+BROWSER_HEADERS = DEFAULT_BROWSER_HEADERS
 
 
 def encode_image_for_openai(image, max_size=1024):
@@ -99,10 +92,6 @@ class OpenAIHighQualityTranslator(CommonTranslator):
     支持多图片批量处理，提供文本框顺序、原文和原图给AI进行更精准的翻译
     """
     _LANGUAGE_CODE_MAP = VALID_LANGUAGES
-    
-    # 类变量: 跨实例共享的RPM限制时间戳
-    _GLOBAL_LAST_REQUEST_TS = {}  # {model_name: timestamp}
-    
     def __init__(self):
         super().__init__()
         self.client = None
@@ -123,11 +112,7 @@ class OpenAIHighQualityTranslator(CommonTranslator):
         self.use_stream = False  # 流式输出开关，默认关闭
         self._MAX_REQUESTS_PER_MINUTE = 0  # 默认无限制
         self._rate_limit_attempt = 0  # 429限速错误独立计数器
-        # 使用全局时间戳,跨实例共享
-        if self.model not in OpenAIHighQualityTranslator._GLOBAL_LAST_REQUEST_TS:
-            OpenAIHighQualityTranslator._GLOBAL_LAST_REQUEST_TS[self.model] = 0
-        self._last_request_ts_key = self.model
-        self._setup_client()
+        # Client is initialized lazily in async context to bind to the correct event loop.
     
     def set_prev_context(self, context: str):
         """设置多页上下文（用于context_size > 0时）"""
@@ -174,47 +159,21 @@ class OpenAIHighQualityTranslator(CommonTranslator):
             self.use_stream = use_stream
             self.logger.info(f"[Stream] Stream mode: {'enabled' if use_stream else 'disabled'}")
         
-        # 如果 API Key 或 Base URL 变化，重建客户端
+        # If API Key / Base URL changes, reset the cached client (re-created lazily in async context)
         if need_rebuild_client:
             self.client = None
-            self._setup_client()
     
-    def _setup_client(self):
-        """设置OpenAI客户端"""
-        if not self.client:
-            # 使用浏览器式请求头，避免被 Cloudflare 阻止
-            self.client = AsyncOpenAI(
-                api_key=self.api_key,
-                base_url=self.base_url,
-                default_headers=BROWSER_HEADERS,
-                http_client=httpx.AsyncClient(
-                    headers=BROWSER_HEADERS,
-                    timeout=httpx.Timeout(400.0, connect=60.0, read=60.0)  # read=60s 首字节超时
-                )
-            )
-    
-    async def _cleanup(self):
-        """清理资源"""
+    async def _ensure_client(self):
+        """Ensure a shared OpenAI client is available (do NOT close it in this instance)."""
         if self.client:
-            try:
-                await self.client.close()
-            except Exception:
-                pass  # 忽略清理时的错误
-    
-    def __del__(self):
-        """析构函数，确保资源被清理"""
-        if self.client:
-            try:
-                import asyncio
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # 如果事件循环还在运行，创建清理任务
-                    asyncio.create_task(self._cleanup())
-                elif not loop.is_closed():
-                    # 如果事件循环未关闭，同步执行清理
-                    loop.run_until_complete(self._cleanup())
-            except Exception:
-                pass  # 忽略所有清理错误
+            return
+
+        # The client is shared per event loop; do NOT close it from a translator instance.
+        self.client = await get_openai_client(
+            api_key=self.api_key,
+            base_url=self.base_url,
+            headers=BROWSER_HEADERS,
+        )
 
     
     def _build_system_prompt(self, source_lang: str, target_lang: str, custom_prompt_json: Dict[str, Any] = None, line_break_prompt_json: Dict[str, Any] = None, retry_attempt: int = 0, retry_reason: str = "", extract_glossary: bool = False) -> str:
@@ -387,8 +346,7 @@ This is an incorrect response because it includes extra text and explanations.
         if not texts:
             return []
         
-        if not self.client:
-            self._setup_client()
+        await self._ensure_client()
         
         # 准备图片
         self.logger.info(f"高质量翻译模式：正在打包 {len(batch_data)} 张图片并发送...")
@@ -469,190 +427,50 @@ This is an incorrect response because it includes extra text and explanations.
             ]
 
             try:
-                # RPM限制
-                import time
-                if self._MAX_REQUESTS_PER_MINUTE > 0:
-                    now = time.time()
-                    delay = 60.0 / self._MAX_REQUESTS_PER_MINUTE
-                    elapsed = now - OpenAIHighQualityTranslator._GLOBAL_LAST_REQUEST_TS[self._last_request_ts_key]
-                    if elapsed < delay:
-                        sleep_time = delay - elapsed
-                        self.logger.info(f'Ratelimit sleep: {sleep_time:.2f}s')
-                        await asyncio.sleep(sleep_time)
-                
-                # 动态调整温度：质量检查或BR检查失败时提高温度帮助跳出错误模式
+                # Dynamic temperature adjustment: helps escape failure mode after validation retries
                 current_temperature = self._get_retry_temperature(self.temperature, retry_attempt, retry_reason)
                 if retry_attempt > 0 and current_temperature != self.temperature:
                     self.logger.info(f"[重试] 温度调整: {self.temperature} -> {current_temperature}")
-                
-                # 构建API参数，只有当max_tokens有值时才传递（新模型如o1/gpt-4.1不支持null值）
-                api_params = {
-                    "model": self.model,
-                    "messages": messages,
-                    "temperature": current_temperature
-                }
-                if self.max_tokens is not None:
-                    api_params["max_tokens"] = self.max_tokens
 
                 # 主日志：记录流式开关状态（每个批次首轮仅记录一次）
                 if retry_attempt == 0 and local_attempt == 1:
                     self.logger.info(f"[Stream] use_stream={self.use_stream}")
 
-                # AI_METRICS: 记录请求开始时间
-                send_ts = self._now_iso()
-                start_perf = time.perf_counter()
-                response = None
-                ai_metrics_status = "error"
-                first_byte_ms = None  # 流式模式首字节耗时
-                result_text = None  # 用于存储流式或非流式的结果
-                stream_usage = None  # 流式模式的 usage 信息
+                stream_options = {"include_usage": True} if self.use_stream else None
+                result = await chat_completions(
+                    api_key=self.api_key,
+                    base_url=self.base_url,
+                    model=self.model,
+                    messages=messages,
+                    temperature=current_temperature,
+                    max_tokens=self.max_tokens,
+                    stream=self.use_stream,
+                    stream_options=stream_options,
+                    timeout=httpx.Timeout(400.0, connect=60.0, read=60.0),
+                    max_requests_per_minute=self._MAX_REQUESTS_PER_MINUTE,
+                    headers=BROWSER_HEADERS,
+                    metrics_logger=self.log_ai_metrics,
+                    logger=self.logger,
+                    extra_metrics={"send_images": send_images, "batch": len(batch_data)},
+                )
 
-                try:
-                    if self.use_stream:
-                        # 流式输出模式
-                        api_params["stream"] = True
-                        api_params["stream_options"] = {"include_usage": True}  # 请求返回 usage
+                response = result.response
+                result_text = result.text
+                has_content = bool(result_text)
+                finish_reason = result.finish_reason
+                if self.use_stream and not finish_reason:
+                    finish_reason = 'stop'
 
-                        # Stream health context (no content logging)
-                        trace_id = f"stream-{int(time.time()*1000)}-{id(self)}-{attempt}"
-                        rl = getattr(ctx, 'rate_limiter', None) if ctx else None
-                        in_expand_window = rl.is_within_expand_window() if rl and hasattr(rl, 'is_within_expand_window') else False
-                        expand_ts = rl.get_last_expand_ts() if rl and hasattr(rl, 'get_last_expand_ts') else 0.0
-                        expand_win = rl.get_expand_window_sec() if rl and hasattr(rl, 'get_expand_window_sec') else 0
-                        self.logger.debug(
-                            f"[STREAM_HEALTH] start id={trace_id} expand_window={in_expand_window} "
-                            f"expand_ts={expand_ts:.3f} window_sec={expand_win} batch={len(batch_data)} "
-                            f"retry={retry_attempt} send_images={send_images}"
-                        )
-
-                        stream = await self.client.chat.completions.create(**api_params)
-
-                        collected_chunks = []
-                        first_chunk_received = False
-
-                        try:
-                            async for chunk in stream:
-                                # 记录首字节时间
-                                if not first_chunk_received:
-                                    first_byte_ms = (time.perf_counter() - start_perf) * 1000
-                                    first_chunk_received = True
-                                    recv_ts = self._now_iso()
-                                    self.logger.debug(
-                                        f"[STREAM_RECV] first_chunk id={trace_id} recv={recv_ts} first_byte_ms={first_byte_ms:.1f}"
-                                    )
-                                    self.logger.debug(
-                                        f"[STREAM_HEALTH] first_chunk id={trace_id} first_byte_ms={first_byte_ms:.1f} "
-                                        f"expand_window={in_expand_window}"
-                                    )
-                                    if first_byte_ms is not None and first_byte_ms >= 40000:
-                                        self.logger.warning(
-                                            f"[STREAM_HEALTH] first_chunk_slow id={trace_id} first_byte_ms={first_byte_ms:.1f} "
-                                            f"threshold_ms=40000 expand_window={in_expand_window}"
-                                        )
-
-                                # 提取内容
-                                if chunk.choices and chunk.choices[0].delta.content:
-                                    collected_chunks.append(chunk.choices[0].delta.content)
-
-                                # 检查 usage 信息（通常在最后一个 chunk）
-                                if hasattr(chunk, 'usage') and chunk.usage:
-                                    stream_usage = chunk.usage
-                        except asyncio.CancelledError as cancel_err:
-                            rl_stats = rl.get_stats() if rl and hasattr(rl, 'get_stats') else {}
-                            self.logger.debug(
-                                f"[STREAM_HEALTH] cancel id={trace_id} expand_window={in_expand_window} "
-                                f"rl={rl_stats} err={type(cancel_err).__name__}"
-                            )
-                            raise
-                        except Exception as stream_err:
-                            rl_stats = rl.get_stats() if rl and hasattr(rl, 'get_stats') else {}
-                            self.logger.debug(
-                                f"[STREAM_HEALTH] error id={trace_id} expand_window={in_expand_window} "
-                                f"rl={rl_stats} err={type(stream_err).__name__}: {stream_err}"
-                            )
-                            raise
-
-                        result_text = "".join(collected_chunks).strip()
-                        ai_metrics_status = "ok" if result_text else "error"
-                        end_recv_ts = self._now_iso()
-                        total_ms = (time.perf_counter() - start_perf) * 1000
-                        self.logger.debug(
-                            f"[STREAM_RECV] end id={trace_id} recv={end_recv_ts} total_ms={total_ms:.1f}"
-                        )
-                        self.logger.debug(
-                            f"[STREAM_HEALTH] end id={trace_id} status={ai_metrics_status} "
-                            f"chunks={len(collected_chunks)} expand_window={in_expand_window}"
-                        )
-                    else:
-                        # 非流式输出模式（原有逻辑）
-                        response = await self.client.chat.completions.create(**api_params)
-                        
-                        # 根据 finish_reason 粗分状态
-                        finish_reason = None
-                        try:
-                            if response and getattr(response, 'choices', None):
-                                finish_reason = response.choices[0].finish_reason
-                        except Exception:
-                            finish_reason = None
-                        
-                        ai_metrics_status = "content_filter" if finish_reason == 'content_filter' else "ok"
-
-                except (asyncio.TimeoutError, TimeoutError):
-                    ai_metrics_status = "timeout"
-                    raise
-
-                except Exception as e:
-                    rl = getattr(ctx, 'rate_limiter', None) if ctx else None
-                    rl_stats = rl.get_stats() if rl and hasattr(rl, 'get_stats') else {}
-                    in_expand_window = rl.is_within_expand_window() if rl and hasattr(rl, 'is_within_expand_window') else False
-                    self.logger.debug(
-                        f"[STREAM_HEALTH] request_error expand_window={in_expand_window} rl={rl_stats} "
-                        f"batch={len(batch_data)} retry={retry_attempt} err={type(e).__name__}: {e}"
+                first_byte_ms = result.first_byte_ms
+                if self.use_stream and first_byte_ms is not None and first_byte_ms >= 40000:
+                    self.logger.warning(
+                        f"[STREAM_HEALTH] first_chunk_slow first_byte_ms={first_byte_ms:.1f} threshold_ms=40000"
                     )
-                    msg = str(e).lower()
-                    if 'rate limit' in msg or 'ratelimit' in msg or '429' in msg:
-                        ai_metrics_status = "rate_limit"
-                    else:
-                        ai_metrics_status = "error"
-                    raise
 
-                finally:
-                    recv_ts = self._now_iso()
-                    duration_ms = (time.perf_counter() - start_perf) * 1000
-                    # 流式模式使用 stream_usage，非流式使用 response.usage
-                    usage = stream_usage if self.use_stream else (getattr(response, 'usage', None) if response is not None else None)
-                    rid = getattr(response, 'id', None) if response is not None else None
-                    self.log_ai_metrics(
-                        model_name=self.model,
-                        status=ai_metrics_status,
-                        send_ts=send_ts,
-                        recv_ts=recv_ts,
-                        duration_ms=duration_ms,
-                        usage=usage,
-                        stream=self.use_stream,
-                        first_byte_ms=first_byte_ms,
-                        extra={'request_id': rid}
-                    )
-                
-                # 在API调用成功后立即更新时间戳，确保所有请求（包括重试）都被计入速率限制
-                if self._MAX_REQUESTS_PER_MINUTE > 0:
-                    OpenAIHighQualityTranslator._GLOBAL_LAST_REQUEST_TS[self._last_request_ts_key] = time.time()
-
-                # 初始化 finish_reason，流式模式默认为 'stop'
-                finish_reason = 'stop' if self.use_stream else None
-
-                # 非流式模式：验证响应对象并提取内容
+                # 非流式模式：验证响应对象（保持与旧逻辑一致）
                 if not self.use_stream:
-                    # 验证响应对象是否有效
                     validate_openai_response(response, self.logger)
 
-                    # 检查成功条件：有内容就尝试处理，后续会有质量检查
-                    finish_reason = response.choices[0].finish_reason if (hasattr(response, 'choices') and response.choices) else None
-                    has_content = response.choices and response.choices[0].message.content
-                    
-                    if has_content:
-                        result_text = response.choices[0].message.content.strip()
-                
                 # 统一处理：流式和非流式模式都使用 result_text
                 if result_text:
                     # 统一的编码清理（处理UTF-16-LE等编码问题）
@@ -945,98 +763,42 @@ This is an incorrect response because it includes extra text and explanations.
                 return translations
         
         # 普通单文本翻译（后备方案）
-        if not self.client:
-            self._setup_client()
+        await self._ensure_client()
         
         try:
-            import time
             simple_prompt = f"Translate the following {from_lang} text to {to_lang}. Provide only the translation:\n\n" + "\n".join(queries)
-            
-            # RPM限制
-            if self._MAX_REQUESTS_PER_MINUTE > 0:
-                now = time.time()
-                delay = 60.0 / self._MAX_REQUESTS_PER_MINUTE
-                elapsed = now - OpenAIHighQualityTranslator._GLOBAL_LAST_REQUEST_TS[self._last_request_ts_key]
-                if elapsed < delay:
-                    sleep_time = delay - elapsed
-                    self.logger.info(f'Ratelimit sleep: {sleep_time:.2f}s')
-                    await asyncio.sleep(sleep_time)
-            
-            # 构建API参数，只有当max_tokens有值时才传递（新模型如o1/gpt-4.1不支持null值）
-            api_params = {
-                "model": self.model,
-                "messages": [{"role": "user", "content": simple_prompt}],
-                "temperature": self.temperature
-            }
-            if self.max_tokens is not None:
-                api_params["max_tokens"] = self.max_tokens
 
-            # AI_METRICS: 记录请求开始时间
-            send_ts = self._now_iso()
-            start_perf = time.perf_counter()
-            response = None
-            ai_metrics_status = "error"
+            result = await chat_completions(
+                api_key=self.api_key,
+                base_url=self.base_url,
+                model=self.model,
+                messages=[{"role": "user", "content": simple_prompt}],
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                stream=False,
+                timeout=httpx.Timeout(400.0, connect=60.0, read=60.0),
+                max_requests_per_minute=self._MAX_REQUESTS_PER_MINUTE,
+                headers=BROWSER_HEADERS,
+                metrics_logger=self.log_ai_metrics,
+                logger=self.logger,
+            )
 
-            try:
-                response = await self.client.chat.completions.create(**api_params)
-                
-                finish_reason = None
-                try:
-                    if response and getattr(response, 'choices', None):
-                        finish_reason = response.choices[0].finish_reason
-                except Exception:
-                    finish_reason = None
-                
-                ai_metrics_status = "content_filter" if finish_reason == 'content_filter' else "ok"
-
-            except (asyncio.TimeoutError, TimeoutError):
-                ai_metrics_status = "timeout"
-                raise
-
-            except Exception as e:
-                msg = str(e).lower()
-                if 'rate limit' in msg or 'ratelimit' in msg or '429' in msg:
-                    ai_metrics_status = "rate_limit"
-                else:
-                    ai_metrics_status = "error"
-                raise
-
-            finally:
-                recv_ts = self._now_iso()
-                duration_ms = (time.perf_counter() - start_perf) * 1000
-                usage = getattr(response, 'usage', None) if response is not None else None
-                rid = getattr(response, 'id', None) if response is not None else None
-                self.log_ai_metrics(
-                    model_name=self.model,
-                    status=ai_metrics_status,
-                    send_ts=send_ts,
-                    recv_ts=recv_ts,
-                    duration_ms=duration_ms,
-                    usage=usage,
-                    extra={'request_id': rid}
-                )
-            
-            # 在API调用成功后立即更新时间戳，确保所有请求（包括重试）都被计入速率限制
-            if self._MAX_REQUESTS_PER_MINUTE > 0:
-                OpenAIHighQualityTranslator._GLOBAL_LAST_REQUEST_TS[self._last_request_ts_key] = time.time()
-            
-            if response.choices and response.choices[0].message.content:
-                result = response.choices[0].message.content.strip()
-                
+            result_text = result.text
+            if result_text:
                 # 统一的编码清理（处理UTF-16-LE等编码问题）
                 from .common import sanitize_text_encoding
-                result = sanitize_text_encoding(result)
-                
+                result_text = sanitize_text_encoding(result_text)
+
                 # 去除 <think>...</think> 标签及内容（LM Studio 等本地模型的思考过程）
-                result = re.sub(r'(</think>)?<think>.*?</think>', '', result, flags=re.DOTALL)
+                result_text = re.sub(r'(</think>)?<think>.*?</think>', '', result_text, flags=re.DOTALL)
                 # 提取 <answer>...</answer> 中的内容（如果存在）
-                answer_match = re.search(r'<answer>(.*?)</answer>', result, flags=re.DOTALL)
+                answer_match = re.search(r'<answer>(.*?)</answer>', result_text, flags=re.DOTALL)
                 if answer_match:
-                    result = answer_match.group(1).strip()
-                
-                translations = result.split('\n')
+                    result_text = answer_match.group(1).strip()
+
+                translations = result_text.split('\\n')
                 translations = [t.strip() for t in translations if t.strip()]
-                
+
                 # Strict validation: must match input count
                 if len(translations) != len(queries):
                     error_msg = f"Translation count mismatch: expected {len(queries)}, got {len(translations)}"
@@ -1044,10 +806,10 @@ This is an incorrect response because it includes extra text and explanations.
                     self.logger.error(f"Queries: {queries}")
                     self.logger.error(f"Translations: {translations}")
                     raise Exception(error_msg)
-                
+
                 return translations
-                
+
         except Exception as e:
             self.logger.error(f"OpenAI翻译出错: {e}")
-        
+
         return queries
