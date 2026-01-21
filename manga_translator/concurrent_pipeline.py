@@ -529,11 +529,18 @@ class ConcurrentPipeline:
                             if batch_start_time is None:
                                 batch_start_time = asyncio.get_event_loop().time()
                             enqueued_total = getattr(self, 'translation_enqueued_total', 0)
-                            logger.info(
-                                f"[收集者] 收集到图片 ({len(pending_batch)}/{self.batch_size})，"
-                                f"累计收集: {collected_total}，累计入队: {enqueued_total}，"
-                                f"翻译队列剩余: {self.translation_queue.qsize()}"
-                            )
+                            if self._target_worker_count == 1:
+                                logger.info(
+                                    f"[收集者] 收集到图片 ({len(pending_batch)}/{self.batch_size})，"
+                                    f"累计收集: {collected_total}，累计入队: {enqueued_total}，"
+                                    f"翻译队列剩余: {self.translation_queue.qsize()}"
+                                )
+                            else:
+                                logger.debug(
+                                    f"[收集者] 收集到图片 ({len(pending_batch)}/{self.batch_size})，"
+                                    f"累计收集: {collected_total}，累计入队: {enqueued_total}，"
+                                    f"翻译队列剩余: {self.translation_queue.qsize()}"
+                                )
                         else:
                             logger.error(f"[收集者] 找不到 {image_name} 的基础上下文")
                     except asyncio.TimeoutError:
@@ -562,9 +569,10 @@ class ConcurrentPipeline:
                 if should_send:
                     enqueued_total = getattr(self, 'translation_enqueued_total', 0)
                     logger.info(
-                        f"[收集者] {reason}，放入批次队列 (本批次: {len(pending_batch)} 张，"
-                        f"累计收集: {collected_total}，累计入队: {enqueued_total}，"
-                        f"翻译队列剩余: {self.translation_queue.qsize()})"
+                        f"[收集者] 将 {len(pending_batch)}/{self.batch_size} 张图片放入批次队列"
+                        f"（worker总数={self._target_worker_count}，累计收集: {collected_total}，"
+                        f"累计入队: {enqueued_total}，翻译队列剩余: {self.translation_queue.qsize()}，"
+                        f"原因: {reason}）"
                     )
                     await batch_queue.put(pending_batch.copy())
                     pending_batch = []
