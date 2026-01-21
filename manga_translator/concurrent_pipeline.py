@@ -380,148 +380,68 @@ class ConcurrentPipeline:
     
     async def _translation_worker(self):
         """
-        翻译工作线程（并发模式）
-        从翻译队列中取出文本，批量翻译
+        翻译工作线程（任务池模式）
         
-        并发逻辑：
-        1. 发送成功（200 OK）后立即发下一个批量，不用等翻译完成
-        2. 翻译线程数 = 同时在运行的翻译任务数（最多同时有 N 个批量在翻译中）
-        3. 修复线程运行时：线程数=1（串行）
-        4. 修复线程停止后：恢复用户配置的线程数
+        架构：
+        1. 收集者协程：从 translation_queue 收集图片，凑够批次后放入 batch_queue
+        2. N 个 worker 协程：各自从 batch_queue 拉取并处理，互不干扰
+        3. 每个 worker 独立运行，一个慢了不影响其他 worker
         """
-        # 让出控制权，确保线程能被调度
         await asyncio.sleep(0)
         
-        logger.info(f"【翻译线程】 启动（并发模式），批量大小: {self.batch_size}，当前线程数: 1（等待修复线程停止），目标线程数: {self.translation_concurrency}，预设RPM: {self.preset_rpm}")
+        logger.info(f"【翻译线程】 启动（任务池模式），批量大小: {self.batch_size}，初始worker数: 1，目标worker数: {self.translation_concurrency}，预设RPM: {self.preset_rpm}")
         
-        # 创建后台任务：等待修复线程停止后恢复翻译并发数
-        restore_concurrency_task = asyncio.create_task(self._wait_for_inpaint_stop())
+        # 内部批次队列（收集者 -> workers）
+        batch_queue: asyncio.Queue = asyncio.Queue()
         
-        # 批次等待超时设置
-        batch_wait_timeout = 90.0  # 最多等待90秒凑满批次
-        batch_start_time = None
-        pending_batch = []  # 待处理的图片
+        # Worker 数量控制
+        self._current_worker_count = 1  # 修复线程运行时只启动1个worker
+        self._target_worker_count = self.translation_concurrency
+        self._workers: List[asyncio.Task] = []
+        self._worker_stop_event = asyncio.Event()  # 通知所有worker停止
         
-        # 跟踪所有运行中的翻译任务
-        running_tasks: set = set()
+        # 启动收集者协程
+        collector_task = asyncio.create_task(
+            self._batch_collector(batch_queue)
+        )
         
-        while not self.stop_workers:
+        # 启动初始worker（修复线程运行时只启动1个）
+        for i in range(self._current_worker_count):
+            worker = asyncio.create_task(
+                self._translation_pool_worker(i, batch_queue)
+            )
+            self._workers.append(worker)
+        logger.info(f"[翻译] 已启动 {self._current_worker_count} 个worker")
+        
+        # 后台任务：等待修复线程停止后扩展worker数量
+        expand_workers_task = asyncio.create_task(
+            self._expand_workers_on_inpaint_stop(batch_queue)
+        )
+        
+        # 等待收集者完成（所有图片都已放入batch_queue）
+        await collector_task
+        
+        # 发送毒丸信号通知所有worker退出
+        # 需要发送足够数量的毒丸（等于当前worker数）
+        current_workers = len(self._workers)
+        logger.info(f"[翻译] 收集完成，发送 {current_workers} 个停止信号...")
+        for _ in range(current_workers):
+            await batch_queue.put(None)
+        
+        # 等待所有worker完成
+        if self._workers:
+            logger.info(f"[翻译] 等待 {len(self._workers)} 个worker完成...")
+            await asyncio.gather(*self._workers, return_exceptions=True)
+        
+        # 取消扩展任务
+        if not expand_workers_task.done():
+            expand_workers_task.cancel()
             try:
-                # 如果发生严重错误，立即退出
-                if self.has_critical_error:
-                    logger.warning(f"【翻译】 检测到严重错误，停止翻译 (已完成 {self.stats['translation']}/{self.total_images})")
-                    break
-                
-                # 清理已完成的任务
-                done_tasks = {t for t in running_tasks if t.done()}
-                for task in done_tasks:
-                    try:
-                        # 获取结果以检查是否有异常
-                        task.result()
-                    except Exception as e:
-                        logger.error(f"[翻译] 并发任务异常: {e}")
-                running_tasks -= done_tasks
-                
-                # 尝试从队列获取图片（非阻塞检查）
-                # 注意：如果pending_batch已达到batch_size，不再继续收集，等待发送
-                if len(pending_batch) < self.batch_size:
-                    try:
-                        image_name, config = await asyncio.wait_for(self.translation_queue.get(), timeout=1.0)
-                        # 从bace_contexts获取ctx
-                        ctx = self.base_contexts.get(image_name)
-                        if ctx:
-                            pending_batch.append((ctx, config))
-                            # 记录批次开始时间
-                            if batch_start_time is None:
-                                batch_start_time = asyncio.get_event_loop().time()
-                            logger.info(f"[翻译] 收集到图片 ({len(pending_batch)}/{self.batch_size})，运行中任务: {len(running_tasks)}")
-                        else:
-                            logger.error(f"[翻译] 找不到 {image_name} 的基础上下文")
-                    except asyncio.TimeoutError:
-                        # 队列暂时为空
-                        pass
-                else:
-                    # pending_batch已满，等待任务完成后再发送
-                    await asyncio.sleep(0.1)
-                
-                # 检查是否所有工作都完成了
-                if self.detection_ocr_done and self.translation_queue.empty() and not pending_batch and not running_tasks:
-                    break
-                
-                # 获取当前允许的最大并发任务数
-                # 修复线程运行时为1，修复线程停止后恢复为用户配置的并发数
-                current_max_concurrency = self.rate_limiter.concurrency
-                
-                # 判断是否应该翻译当前批次
-                should_translate = False
-                reason = ""
-                
-                # 只有当运行中任务数小于当前并发限制时，才能创建新任务
-                can_create_task = len(running_tasks) < current_max_concurrency
-                
-                if can_create_task and len(pending_batch) >= self.batch_size:
-                    # 达到批量大小，立即翻译
-                    should_translate = True
-                    reason = f"批次已满 ({len(pending_batch)}/{self.batch_size})"
-                elif can_create_task and pending_batch and self.detection_ocr_done and self.translation_queue.empty():
-                    # OCR完成了且队列为空，立即翻译剩余批次
-                    should_translate = True
-                    reason = f"OCR完成，翻译剩余 {len(pending_batch)} 张图片"
-                elif can_create_task and pending_batch and batch_start_time:
-                    # 检查是否超时
-                    elapsed = asyncio.get_event_loop().time() - batch_start_time
-                    if elapsed >= batch_wait_timeout:
-                        should_translate = True
-                        reason = f"等待超时({elapsed:.0f}秒)，翻译 {len(pending_batch)} 张图片"
-                
-                if should_translate:
-                    logger.info(f"[翻译] {reason}，创建任务（运行中: {len(running_tasks)}/{current_max_concurrency}）")
-                    # 复制当前批次
-                    batch_to_translate = pending_batch.copy()
-                    # 重置批次状态
-                    pending_batch = []
-                    batch_start_time = None
-                    
-                    # 创建翻译任务
-                    task = asyncio.create_task(self._process_translation_batch(batch_to_translate))
-                    running_tasks.add(task)
-                    
-                    # ✅ While inpaint worker is still running, keep serial behavior.
-                    # But once inpaint is stopped, do NOT block here; allow other slots to be used immediately.
-                    if not self.inpaint_stopped_event.is_set():
-                        logger.debug("[翻译] 串行模式：等待当前批次完成（或修复线程停止事件）")
-
-                        wait_inpaint_stop = asyncio.create_task(self.inpaint_stopped_event.wait())
-                        try:
-                            done, pending = await asyncio.wait(
-                                {task, wait_inpaint_stop},
-                                return_when=asyncio.FIRST_COMPLETED,
-                            )
-                        finally:
-                            if not wait_inpaint_stop.done():
-                                wait_inpaint_stop.cancel()
-                                try:
-                                    await wait_inpaint_stop
-                                except asyncio.CancelledError:
-                                    pass
-
-                        # If the batch task finished first, remove it from running_tasks.
-                        # If inpaint stopped first, keep the task running (occupies only one slot) and continue.
-                        if task in done:
-                            await task
-                            running_tasks.discard(task)
-                
-            except Exception as e:
-                logger.error(f"[翻译线程] 错误: {e}")
-                logger.error(traceback.format_exc())
-                # 不立即停止，继续处理其他批次
+                await expand_workers_task
+            except asyncio.CancelledError:
+                pass
         
-        # 等待所有运行中的任务完成
-        if running_tasks:
-            logger.info(f"[翻译] 等待 {len(running_tasks)} 个运行中的任务完成...")
-            await asyncio.gather(*running_tasks, return_exceptions=True)
-        
-        # ✅ 主队列完成后，处理延迟重试队列（并行执行）
+        # ✅ 主队列完成后，处理延迟重试队列
         if self.retry_queue:
             logger.info(f"[翻译] 主队列已完成，开始处理延迟重试队列 ({len(self.retry_queue)} 张图片)")
             await self._process_retry_queue()
@@ -540,7 +460,7 @@ class ConcurrentPipeline:
         if self.stats['translation'] >= self.total_images:
             logger.info(f"[翻译线程] 所有图片已翻译 ({self.stats['translation']}/{self.total_images})")
         
-        # 清理翻译器客户端（避免 Event loop is closed 警告）
+        # 清理翻译器客户端
         try:
             translator_obj = getattr(self.translator, 'translator', None)
             if translator_obj and hasattr(translator_obj, '_cleanup'):
@@ -549,15 +469,196 @@ class ConcurrentPipeline:
         except Exception as e:
             logger.debug(f"[翻译] 翻译器客户端清理失败: {e}")
         
-        # 取消后台任务（如果它还在运行）
-        if restore_concurrency_task and not restore_concurrency_task.done():
-            restore_concurrency_task.cancel()
-            try:
-                await restore_concurrency_task
-            except asyncio.CancelledError:
-                pass
-        
         logger.info("【翻译线程】 停止")
+    
+    async def _batch_collector(self, batch_queue: asyncio.Queue):
+        """
+        批次收集者：从 translation_queue 收集图片，凑够批次后放入 batch_queue
+        """
+        batch_wait_timeout = 90.0
+        batch_start_time = None
+        pending_batch = []
+        
+        while not self.stop_workers:
+            try:
+                if self.has_critical_error:
+                    logger.warning(f"[收集者] 检测到严重错误，停止收集")
+                    break
+                
+                # 尝试从队列获取图片
+                if len(pending_batch) < self.batch_size:
+                    try:
+                        image_name, config = await asyncio.wait_for(
+                            self.translation_queue.get(), timeout=1.0
+                        )
+                        ctx = self.base_contexts.get(image_name)
+                        if ctx:
+                            pending_batch.append((ctx, config))
+                            if batch_start_time is None:
+                                batch_start_time = asyncio.get_event_loop().time()
+                            logger.info(f"[收集者] 收集到图片 ({len(pending_batch)}/{self.batch_size})")
+                        else:
+                            logger.error(f"[收集者] 找不到 {image_name} 的基础上下文")
+                    except asyncio.TimeoutError:
+                        pass
+                
+                # 检查是否完成
+                if self.detection_ocr_done and self.translation_queue.empty() and not pending_batch:
+                    break
+                
+                # 判断是否应该发送当前批次
+                should_send = False
+                reason = ""
+                
+                if len(pending_batch) >= self.batch_size:
+                    should_send = True
+                    reason = f"批次已满 ({len(pending_batch)}/{self.batch_size})"
+                elif pending_batch and self.detection_ocr_done and self.translation_queue.empty():
+                    should_send = True
+                    reason = f"OCR完成，发送剩余 {len(pending_batch)} 张图片"
+                elif pending_batch and batch_start_time:
+                    elapsed = asyncio.get_event_loop().time() - batch_start_time
+                    if elapsed >= batch_wait_timeout:
+                        should_send = True
+                        reason = f"等待超时({elapsed:.0f}秒)"
+                
+                if should_send:
+                    logger.info(f"[收集者] {reason}，放入批次队列")
+                    await batch_queue.put(pending_batch.copy())
+                    pending_batch = []
+                    batch_start_time = None
+                    
+            except Exception as e:
+                logger.error(f"[收集者] 错误: {e}")
+                logger.error(traceback.format_exc())
+        
+        logger.info("[收集者] 完成")
+    
+    async def _translation_pool_worker(self, worker_id: int, batch_queue: asyncio.Queue):
+        """
+        翻译池worker：独立从 batch_queue 拉取批次并处理
+        
+        每个worker完全独立，一个慢了不影响其他worker
+        """
+        logger.info(f"[Worker-{worker_id}] 启动")
+        processed_count = 0
+        
+        while not self.stop_workers:
+            try:
+                if self.has_critical_error:
+                    logger.warning(f"[Worker-{worker_id}] 检测到严重错误，停止")
+                    break
+                
+                # 从批次队列获取任务（阻塞等待）
+                try:
+                    batch = await asyncio.wait_for(batch_queue.get(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    continue
+                
+                # 毒丸信号：退出
+                if batch is None:
+                    logger.info(f"[Worker-{worker_id}] 收到停止信号，已处理 {processed_count} 个批次")
+                    break
+                
+                # 处理批次（使用速率限制器）
+                logger.info(f"[Worker-{worker_id}] 开始处理批次 ({len(batch)} 张图片)")
+                try:
+                    async with self.rate_limiter:
+                        translated_batch = await self.translator._batch_translate_contexts(
+                            batch, len(batch)
+                        )
+                    
+                    self.stats['translation'] += len(batch)
+                    processed_count += 1
+                    self.rate_limiter.report_success()
+                    
+                    # 立即标记完成并检查是否可渲染
+                    await self._mark_translation_done(translated_batch)
+                    
+                    logger.info(f"[Worker-{worker_id}] 批次完成 (总进度: {self.stats['translation']}/{self.total_images})")
+                    
+                except Exception as e:
+                    # 处理错误（复用现有的错误处理逻辑）
+                    await self._handle_translation_error(batch, e, worker_id)
+                
+                batch_queue.task_done()
+                
+            except Exception as e:
+                logger.error(f"[Worker-{worker_id}] 未捕获错误: {e}")
+                logger.error(traceback.format_exc())
+        
+        logger.info(f"[Worker-{worker_id}] 停止，共处理 {processed_count} 个批次")
+    
+    async def _handle_translation_error(self, batch: List[tuple], error: Exception, worker_id: int):
+        """
+        处理翻译错误（从 _process_translation_batch 提取的错误处理逻辑）
+        """
+        error_msg = str(error).lower()
+        error_type = type(error).__name__
+        
+        # 检测安全限制错误
+        is_safety_error = any(kw in error_msg for kw in [
+            'safety', 'content_filter', 'blocked', 'inappropriate',
+            'violated', 'policy', 'harmful'
+        ])
+        
+        if is_safety_error:
+            # 安全限制：放入延迟重试队列
+            logger.warning(f"[Worker-{worker_id}] 安全限制错误，放入延迟重试队列")
+            for ctx, config in batch:
+                self.retry_queue.append((ctx, config, 'safety_limit'))
+        else:
+            # 其他错误：标记失败
+            logger.error(f"[Worker-{worker_id}] 翻译失败: {error}")
+            for ctx, config in batch:
+                ctx.translation_error = str(error)
+                ctx.success = False
+                self.translation_done[ctx.image_name] = 'FAILED'
+                self.failed_images.append((ctx.image_name, str(error)))
+            self.stats['translation'] += len(batch)
+    
+    async def _expand_workers_on_inpaint_stop(self, batch_queue: asyncio.Queue):
+        """
+        后台任务：等待修复线程停止后扩展worker数量
+        """
+        try:
+            # 等待修复线程停止
+            await self.inpaint_stopped_event.wait()
+            
+            logger.info(f"[扩展] 修复线程已停止，开始扩展worker")
+            
+            # 切换术语缓存策略
+            if not self.glossary_mode_switched:
+                from .translators.glossary_cache import set_translation_concurrency
+                set_translation_concurrency(self.translation_concurrency)
+                self.glossary_mode_switched = True
+                logger.info(f"[扩展] 术语切换为延迟刷新模式")
+            
+            # 扩展速率限制器
+            if not self.rpm_restored:
+                old_concurrency = self.rate_limiter.concurrency
+                if self._target_worker_count > old_concurrency:
+                    self.rate_limiter.expand_concurrency(self._target_worker_count)
+                self.rpm_restored = True
+                logger.info(f"[扩展] 速率限制器扩展: {old_concurrency} -> {self._target_worker_count}")
+            
+            # 启动额外的worker
+            workers_to_add = self._target_worker_count - self._current_worker_count
+            if workers_to_add > 0:
+                logger.info(f"[扩展] 启动 {workers_to_add} 个额外worker")
+                for i in range(workers_to_add):
+                    new_worker_id = self._current_worker_count + i
+                    worker = asyncio.create_task(
+                        self._translation_pool_worker(new_worker_id, batch_queue)
+                    )
+                    self._workers.append(worker)
+                self._current_worker_count = self._target_worker_count
+                logger.info(f"[扩展] worker数量: {self._current_worker_count}")
+                
+        except asyncio.CancelledError:
+            logger.debug("[扩展] 任务被取消")
+        except Exception as e:
+            logger.error(f"[扩展] 错误: {e}")
     
     async def _process_translation_batch(self, batch: List[tuple], retry_count: int = 0, skip_rate_limiter: bool = False):
         """
