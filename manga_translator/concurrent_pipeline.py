@@ -106,6 +106,9 @@ class ConcurrentPipeline:
         
         # 失败图片列表
         self.failed_images = []  # [(image_name, error_msg), ...]
+
+        # Translation queue metrics (for logging/diagnostics)
+        self.translation_enqueued_total = 0  # how many images have been enqueued to translation_queue
         
         # 延迟重试队列（安全限制等错误时，先放入这里，等主队列完成后统一处理）
         self.retry_queue = []  # [(ctx, config, error_type), ...]
@@ -344,7 +347,11 @@ class ConcurrentPipeline:
                 if ctx.text_regions:
                     await self.translation_queue.put((ctx.image_name, config))
                     await self.inpaint_queue.put((ctx.image_name, config))
-                    logger.info(f"[检测+OCR] {ctx.image_name} 已加入翻译队列和修复队列 (翻译队列大小: {self.translation_queue.qsize()})")
+                    self.translation_enqueued_total += 1
+                    logger.info(
+                        f"[检测+OCR] {ctx.image_name} 已加入翻译队列和修复队列 "
+                        f"(翻译队列大小: {self.translation_queue.qsize()}，累计入队: {self.translation_enqueued_total})"
+                    )
                     # 让出控制权，让其他线程有机会运行
                     await asyncio.sleep(0)
                 else:
@@ -418,28 +425,40 @@ class ConcurrentPipeline:
             self._expand_workers_on_inpaint_stop(batch_queue)
         )
         
-        # 等待收集者完成（所有图片都已放入batch_queue）
+        # Wait for the collector to finish (all images have been enqueued into batch_queue).
         await collector_task
-        
-        # 发送毒丸信号通知所有worker退出
-        # 需要发送足够数量的毒丸（等于当前worker数）
-        current_workers = len(self._workers)
-        logger.info(f"[翻译] 收集完成，发送 {current_workers} 个停止信号...")
-        for _ in range(current_workers):
+
+        # Send poison pills to stop all workers.
+        # IMPORTANT: send based on the *target* worker count to avoid deadlocks when
+        # additional workers are spawned later (e.g. after the inpaint worker stops).
+        target_workers = max(int(self._target_worker_count or 1), len(self._workers))
+        logger.info(f"[翻译] 收集完成，发送 {target_workers} 个停止信号...")
+        for _ in range(target_workers):
             await batch_queue.put(None)
-        
-        # 等待所有worker完成
+
+        # Wait for all workers to finish.
+        # NOTE: expand_workers_task may append new workers after the inpaint worker stops,
+        # so we must wait dynamically instead of awaiting a one-time snapshot list.
+        logger.info(f"[翻译] 等待所有worker完成...")
+        while True:
+            pending_workers = [w for w in self._workers if not w.done()]
+            if not pending_workers:
+                # No workers running. Stop late expansion to freeze the worker list,
+                # then re-check once to avoid race conditions.
+                if not expand_workers_task.done():
+                    expand_workers_task.cancel()
+                    try:
+                        await expand_workers_task
+                    except asyncio.CancelledError:
+                        pass
+                    continue
+                break
+
+            await asyncio.wait(pending_workers, return_when=asyncio.FIRST_COMPLETED)
+
+        # Collect worker exceptions (avoid background Task exceptions being unobserved).
         if self._workers:
-            logger.info(f"[翻译] 等待 {len(self._workers)} 个worker完成...")
             await asyncio.gather(*self._workers, return_exceptions=True)
-        
-        # 取消扩展任务
-        if not expand_workers_task.done():
-            expand_workers_task.cancel()
-            try:
-                await expand_workers_task
-            except asyncio.CancelledError:
-                pass
         
         # ✅ 主队列完成后，处理延迟重试队列
         if self.retry_queue:
@@ -478,6 +497,8 @@ class ConcurrentPipeline:
         batch_wait_timeout = 90.0
         batch_start_time = None
         pending_batch = []
+
+        collected_total = 0
         
         while not self.stop_workers:
             try:
@@ -494,9 +515,15 @@ class ConcurrentPipeline:
                         ctx = self.base_contexts.get(image_name)
                         if ctx:
                             pending_batch.append((ctx, config))
+                            collected_total += 1
                             if batch_start_time is None:
                                 batch_start_time = asyncio.get_event_loop().time()
-                            logger.info(f"[收集者] 收集到图片 ({len(pending_batch)}/{self.batch_size})")
+                            enqueued_total = getattr(self, 'translation_enqueued_total', 0)
+                            logger.info(
+                                f"[收集者] 收集到图片 ({len(pending_batch)}/{self.batch_size})，"
+                                f"累计收集: {collected_total}，累计入队: {enqueued_total}，"
+                                f"翻译队列剩余: {self.translation_queue.qsize()}"
+                            )
                         else:
                             logger.error(f"[收集者] 找不到 {image_name} 的基础上下文")
                     except asyncio.TimeoutError:
@@ -523,7 +550,12 @@ class ConcurrentPipeline:
                         reason = f"等待超时({elapsed:.0f}秒)"
                 
                 if should_send:
-                    logger.info(f"[收集者] {reason}，放入批次队列")
+                    enqueued_total = getattr(self, 'translation_enqueued_total', 0)
+                    logger.info(
+                        f"[收集者] {reason}，放入批次队列 (本批次: {len(pending_batch)} 张，"
+                        f"累计收集: {collected_total}，累计入队: {enqueued_total}，"
+                        f"翻译队列剩余: {self.translation_queue.qsize()})"
+                    )
                     await batch_queue.put(pending_batch.copy())
                     pending_batch = []
                     batch_start_time = None
@@ -532,7 +564,8 @@ class ConcurrentPipeline:
                 logger.error(f"[收集者] 错误: {e}")
                 logger.error(traceback.format_exc())
         
-        logger.info("[收集者] 完成")
+        enqueued_total = getattr(self, 'translation_enqueued_total', 0)
+        logger.info(f"[收集者] 完成 (累计收集: {collected_total}，累计入队: {enqueued_total})")
     
     async def _translation_pool_worker(self, worker_id: int, batch_queue: asyncio.Queue):
         """
@@ -557,31 +590,32 @@ class ConcurrentPipeline:
                 
                 # 毒丸信号：退出
                 if batch is None:
+                    # Mark the poison pill as processed to keep queue state consistent.
+                    batch_queue.task_done()
                     logger.info(f"[Worker-{worker_id}] 收到停止信号，已处理 {processed_count} 个批次")
                     break
                 
-                # 处理批次（使用速率限制器）
+                # 处理批次（错误重试流程见 md/错误重试流程.md）
                 logger.info(f"[Worker-{worker_id}] 开始处理批次 ({len(batch)} 张图片)")
+
+                # ✅ 将 worker_id 传递给 ctx，让翻译器使用独立连接池
+                for ctx, _config in batch:
+                    ctx.worker_id = worker_id
+
                 try:
-                    async with self.rate_limiter:
-                        translated_batch = await self.translator._batch_translate_contexts(
-                            batch, len(batch)
-                        )
-                    
-                    self.stats['translation'] += len(batch)
-                    processed_count += 1
-                    self.rate_limiter.report_success()
-                    
-                    # 立即标记完成并检查是否可渲染
-                    await self._mark_translation_done(translated_batch)
-                    
-                    logger.info(f"[Worker-{worker_id}] 批次完成 (总进度: {self.stats['translation']}/{self.total_images})")
-                    
+                    # ✅ 统一走批次级重试逻辑：
+                    # - timeout: 直接进入 retry_queue（拆分单张），不做整批重试
+                    # - network/auth: 整批重试 1 次，仍失败则进入 retry_queue（拆分单张）
+                    # - safety/count/br/quality: 进入 retry_queue（拆分单张）
+                    await self._process_translation_batch(batch)
                 except Exception as e:
-                    # 处理错误（复用现有的错误处理逻辑）
+                    # Fallback: should be rare because _process_translation_batch already handles most errors.
                     await self._handle_translation_error(batch, e, worker_id)
-                
-                batch_queue.task_done()
+                finally:
+                    processed_count += 1
+                    batch_queue.task_done()
+
+                logger.info(f"[Worker-{worker_id}] 批次处理结束 (总进度: {self.stats['translation']}/{self.total_images})")
                 
             except Exception as e:
                 logger.error(f"[Worker-{worker_id}] 未捕获错误: {e}")
@@ -1393,6 +1427,7 @@ class ConcurrentPipeline:
         self.base_contexts.clear()  # ✅ 清理基础上下文
         self.detection_ocr_done = False  # 重置标志
         self.failed_images.clear()  # 重置失败图片列表
+        self.translation_enqueued_total = 0
         
         # 结果列表
         results = []

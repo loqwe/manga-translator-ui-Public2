@@ -2130,7 +2130,7 @@ class MangaTranslator:
             pages_used = skipped = 0
 
         if self.context_size > 0:
-            logger.info(f"Context-aware translation enabled with {self.context_size} pages of history")
+            logger.info(f"已启用上下文翻译：使用最近 {self.context_size} 页历史作为参考")
 
         # 构建上下文字符串
         # Build the context string
@@ -2303,11 +2303,11 @@ class MangaTranslator:
                 if os.path.exists(line_break_prompt_path):
                     with open(line_break_prompt_path, 'r', encoding='utf-8') as f:
                         ctx.line_break_prompt_json = json.load(f)
-                    logger.info("AI line breaking is enabled. Loaded line break prompt.")
+                    logger.info("AI断句已启用，已加载断句提示词。")
                 else:
-                    logger.warning("AI line breaking is enabled, but line break prompt file not found.")
+                    logger.warning("AI断句已启用，但未找到断句提示词文件。")
             except Exception as e:
-                logger.error(f"Failed to load line break prompt: {e}")
+                logger.error(f"加载断句提示词失败: {e}")
         return ctx
 
     async def _run_text_translation(self, config: Config, ctx: Context):
@@ -4587,7 +4587,7 @@ class MangaTranslator:
                 pages_used = skipped = 0
 
             if self.context_size > 0:
-                logger.info(f"Context-aware translation enabled with {self.context_size} pages of history")
+                logger.info(f"已启用上下文翻译：使用最近 {self.context_size} 页历史作为参考")
 
             # 构建上下文（简化版，不使用批次内上下文）
             prev_ctx = self._build_prev_context(

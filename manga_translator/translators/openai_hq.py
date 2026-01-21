@@ -157,7 +157,7 @@ class OpenAIHighQualityTranslator(CommonTranslator):
         use_stream = getattr(args, 'use_stream', None)
         if use_stream is not None:
             self.use_stream = use_stream
-            self.logger.info(f"[Stream] Stream mode: {'enabled' if use_stream else 'disabled'}")
+            self.logger.info(f"[流式] 流式模式: {'已启用' if use_stream else '已关闭'}")
         
         # If API Key / Base URL changes, reset the cached client (re-created lazily in async context)
         if need_rebuild_client:
@@ -446,12 +446,13 @@ This is an incorrect response because it includes extra text and explanations.
                     max_tokens=self.max_tokens,
                     stream=self.use_stream,
                     stream_options=stream_options,
-                    timeout=httpx.Timeout(400.0, connect=60.0, read=60.0),
+                    timeout=httpx.Timeout(timeout=400.0, connect=30.0, read=120.0, write=60.0, pool=30.0),
                     max_requests_per_minute=self._MAX_REQUESTS_PER_MINUTE,
                     headers=BROWSER_HEADERS,
                     metrics_logger=self.log_ai_metrics,
                     logger=self.logger,
                     extra_metrics={"send_images": send_images, "batch": len(batch_data)},
+                    worker_id=getattr(ctx, 'worker_id', None),
                 )
 
                 response = result.response
@@ -776,11 +777,12 @@ This is an incorrect response because it includes extra text and explanations.
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
                 stream=False,
-                timeout=httpx.Timeout(400.0, connect=60.0, read=60.0),
+                timeout=httpx.Timeout(timeout=400.0, connect=30.0, read=120.0, write=60.0, pool=30.0),
                 max_requests_per_minute=self._MAX_REQUESTS_PER_MINUTE,
                 headers=BROWSER_HEADERS,
                 metrics_logger=self.log_ai_metrics,
                 logger=self.logger,
+                worker_id=getattr(ctx, 'worker_id', None),
             )
 
             result_text = result.text

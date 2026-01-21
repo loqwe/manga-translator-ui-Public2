@@ -1,0 +1,21 @@
+{
+  "version": "1.0",
+  "groups": {
+    "admin": {
+      "name": "管理员组",
+      "description": "拥有所有权限的管理员用户组",
+      "parameter_config": {}
+    },
+    "default": {
+      "name": "默认用户组",
+      "description": "新用户的默认用户组",
+      "parameter_config": {
+        "target_lang": {
+          "visible": true,
+          "readonly": false,
+          "default_value": "CHS"
+        }
+      }
+    }
+  }
+}

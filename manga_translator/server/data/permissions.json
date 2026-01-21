@@ -1,0 +1,18 @@
+{
+  "global_permissions": {
+    "can_upload_prompt": false,
+    "can_upload_font": false,
+    "can_delete_own_files": true,
+    "can_delete_all_files": false,
+    "view_permission": "own",
+    "save_enabled": true,
+    "can_edit_own_env": false,
+    "can_edit_server_env": false,
+    "can_view_own_logs": true,
+    "can_view_all_logs": false,
+    "can_view_system_logs": false
+  },
+  "group_permissions": {},
+  "user_permissions": {},
+  "last_updated": null
+}

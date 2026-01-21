@@ -298,6 +298,7 @@ class OpenAITranslator(CommonTranslator):
                     headers=BROWSER_HEADERS,
                     metrics_logger=self.log_ai_metrics,
                     logger=self.logger,
+                    worker_id=getattr(ctx, 'worker_id', None),
                 )
                 response = result.response
 

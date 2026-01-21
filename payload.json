@@ -1,0 +1,14 @@
+{
+    "model":  "gemini-3-flash-preview",
+    "messages":  [
+                     {
+                         "content":  [
+                                         {
+                                             "text":  "你好",
+                                             "type":  "text"
+                                         }
+                                     ],
+                         "role":  "user"
+                     }
+                 ]
+}

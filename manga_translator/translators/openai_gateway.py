@@ -39,9 +39,10 @@ class OpenAIChatResult:
     status: str  # ok / timeout / rate_limit / content_filter / error
 
 
-# A lightweight cache for (event-loop, base_url, api_key, headers) -> client.
-_CLIENT_CACHE: Dict[Tuple[int, str, str, str], AsyncOpenAI] = {}
-_HTTPX_CACHE: Dict[Tuple[int, str, str, str], httpx.AsyncClient] = {}
+# A lightweight cache for (event-loop, base_url, api_key, headers_fp, worker_id) -> client.
+# NOTE: worker_id is optional; when provided each worker uses an independent connection pool.
+_CLIENT_CACHE: Dict[Tuple[int, str, str, str, Optional[int]], AsyncOpenAI] = {}
+_HTTPX_CACHE: Dict[Tuple[int, str, str, str, Optional[int]], httpx.AsyncClient] = {}
 _CACHE_LOCK = threading.Lock()
 
 
@@ -69,12 +70,27 @@ def _headers_fingerprint(headers: Dict[str, str]) -> str:
 
 def _default_httpx_limits() -> httpx.Limits:
     # Keep it reasonably high for concurrent batches while still bounded.
-    return httpx.Limits(max_connections=256, max_keepalive_connections=64, keepalive_expiry=30.0)
+    # keepalive_expiry=60 避免连接过早超时
+    return httpx.Limits(
+        max_connections=256,
+        max_keepalive_connections=64,
+        keepalive_expiry=60.0  # 从30秒增加到60秒
+    )
 
 
 def _default_httpx_timeout() -> httpx.Timeout:
-    # Default timeout; callers can override per-request via the OpenAI SDK `timeout` parameter.
-    return httpx.Timeout(300.0, connect=60.0)
+    # 分别设置各阶段超时，避免无限等待
+    # connect: 建立连接的超时
+    # read: 等待服务器响应的超时（最关键）
+    # write: 发送数据的超时
+    # pool: 等待连接池空闲连接的超时
+    return httpx.Timeout(
+        timeout=300.0,    # 总超时
+        connect=30.0,     # 连接超时（从60降到30）
+        read=120.0,       # ✅ 新增：读取超时120秒（避免无限等待）
+        write=60.0,       # ✅ 新增：写入超时
+        pool=30.0         # ✅ 新增：连接池等待超时
+    )
 
 
 async def get_openai_client(
@@ -82,10 +98,15 @@ async def get_openai_client(
     api_key: str,
     base_url: str,
     headers: Optional[Dict[str, str]] = None,
+    worker_id: Optional[int] = None,
 ) -> AsyncOpenAI:
     """Return a cached AsyncOpenAI client with a shared httpx connection pool.
 
     IMPORTANT: The returned client must be treated as shared; callers should NOT close it.
+    
+    Args:
+        worker_id: 可选的 worker ID，传入时每个 worker 使用独立连接池
+                   避免 HTTP/2 多路复用导致的互相阻塞
     """
 
     api_key = api_key or ""
@@ -97,7 +118,9 @@ async def get_openai_client(
     loop = asyncio.get_running_loop()
     loop_key = id(loop)
     fp = _headers_fingerprint(merged_headers)
-    key = (loop_key, base_url_n, api_key, fp)
+    
+    # ✅ 加入 worker_id，不同 worker 使用独立的客户端和连接池
+    key = (loop_key, base_url_n, api_key, fp, worker_id)
 
     if key in _CLIENT_CACHE:
         return _CLIENT_CACHE[key]
@@ -106,9 +129,14 @@ async def get_openai_client(
         if key in _CLIENT_CACHE:
             return _CLIENT_CACHE[key]
 
+        # ✅ 默认禁用 HTTP/2（可通过环境变量 OPENAI_HTTP2=true 启用）
+        # HTTP/2 多路复用可能导致一个慢请求阻塞同连接的其他请求
+        import os
+        use_http2 = os.getenv('OPENAI_HTTP2', 'false').lower() == 'true'
+        
         http_client = httpx.AsyncClient(
             headers=merged_headers,
-            http2=True,
+            http2=use_http2,
             limits=_default_httpx_limits(),
             timeout=_default_httpx_timeout(),
         )
@@ -123,6 +151,36 @@ async def get_openai_client(
         _HTTPX_CACHE[key] = http_client
         _CLIENT_CACHE[key] = client
         return client
+
+
+def invalidate_client_cache(*, base_url: str = None, api_key: str = None):
+    """
+    清理客户端缓存（连接错误时调用）
+    
+    参数为空时清理所有缓存，否则只清理匹配的缓存
+    """
+    with _CACHE_LOCK:
+        if base_url is None and api_key is None:
+            # 清理所有
+            _CLIENT_CACHE.clear()
+            _HTTPX_CACHE.clear()
+            return
+        
+        # 清理匹配的缓存
+        base_url_n = _normalize_base_url(base_url) if base_url else None
+        keys_to_remove = []
+        for key in _CLIENT_CACHE.keys():
+            # key may be (loop_key, base_url, api_key, headers_fp) or
+            # (loop_key, base_url, api_key, headers_fp, worker_id)
+            cached_url = key[1] if len(key) > 1 else None
+            cached_key = key[2] if len(key) > 2 else None
+            if (base_url_n is None or cached_url == base_url_n) and \
+               (api_key is None or cached_key == api_key):
+                keys_to_remove.append(key)
+        
+        for key in keys_to_remove:
+            _CLIENT_CACHE.pop(key, None)
+            _HTTPX_CACHE.pop(key, None)
 
 
 async def _maybe_rpm_sleep(*, base_url: str, model: str, max_requests_per_minute: int, logger=None) -> None:
@@ -188,6 +246,7 @@ async def chat_completions(
     metrics_logger: Optional[Callable[..., None]] = None,
     logger: Any = None,
     extra_metrics: Optional[Dict[str, Any]] = None,
+    worker_id: Optional[int] = None,
 ) -> OpenAIChatResult:
     """Unified OpenAI chat.completions call.
 
@@ -200,7 +259,7 @@ async def chat_completions(
     The function does NOT implement semantic retries; callers should handle retries at a higher level.
     """
 
-    client = await get_openai_client(api_key=api_key, base_url=base_url, headers=headers)
+    client = await get_openai_client(api_key=api_key, base_url=base_url, headers=headers, worker_id=worker_id)
 
     await _maybe_rpm_sleep(
         base_url=base_url,
@@ -317,6 +376,17 @@ async def chat_completions(
 
     except Exception as exc:
         status = _classify_error(exc)
+        
+        # ✅ 连接错误时清理缓存，下次请求将重建连接
+        error_msg = str(exc).lower()
+        is_connection_error = any(kw in error_msg for kw in [
+            'connection', 'reset', 'closed', 'eof', 'broken',
+            'remotedisconnected', 'remoteprotocolerror'
+        ]) or isinstance(exc, (ConnectionError, httpx.ConnectError, httpx.RemoteProtocolError))
+        
+        if is_connection_error:
+            invalidate_client_cache(base_url=base_url)
+        
         raise
 
     finally:
