@@ -12,8 +12,8 @@
       "interval_ms": 500,
       "log_expanded": false
     },
-    "window_x": 442,
-    "window_y": 227,
+    "window_x": 640,
+    "window_y": 282,
     "window_width": 1300,
     "window_height": 758,
     "window_maximized": false
@@ -28,7 +28,7 @@
     "gpt_config": "examples/gpt_config-example.yaml",
     "high_quality_prompt_path": "dict/prompt_example.json",
     "extract_glossary": true,
-    "use_stream": true,
+    "use_stream": false,
     "attempts": -1
   },
   "ocr": {
@@ -118,9 +118,9 @@
     "load_text": false,
     "template": false,
     "save_quality": 100,
-    "batch_size": 3,
+    "batch_size": 5,
     "batch_concurrent": true,
-    "translation_concurrency": 4,
+    "translation_concurrency": 5,
     "inpaint_concurrency": 2,
     "generate_and_export": false,
     "colorize_only": false,

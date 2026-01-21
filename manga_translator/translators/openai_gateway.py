@@ -377,14 +377,17 @@ async def chat_completions(
     except Exception as exc:
         status = _classify_error(exc)
         
-        # ✅ 连接错误时清理缓存，下次请求将重建连接
+        # ✅ 连接错误或超时时清理缓存，下次请求将重建客户端
         error_msg = str(exc).lower()
         is_connection_error = any(kw in error_msg for kw in [
             'connection', 'reset', 'closed', 'eof', 'broken',
             'remotedisconnected', 'remoteprotocolerror'
         ]) or isinstance(exc, (ConnectionError, httpx.ConnectError, httpx.RemoteProtocolError))
         
-        if is_connection_error:
+        is_timeout_error = isinstance(exc, (asyncio.TimeoutError, httpx.TimeoutException)) or \
+            'timeout' in error_msg or 'timed out' in error_msg
+        
+        if is_connection_error or is_timeout_error:
             invalidate_client_cache(base_url=base_url)
         
         raise

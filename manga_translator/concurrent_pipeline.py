@@ -110,6 +110,9 @@ class ConcurrentPipeline:
         # Translation queue metrics (for logging/diagnostics)
         self.translation_enqueued_total = 0  # how many images have been enqueued to translation_queue
         
+        # Worker busy flags (for serial mode when only one worker is used)
+        self._worker_busy = {}  # {worker_id: bool}
+        
         # 延迟重试队列（安全限制等错误时，先放入这里，等主队列完成后统一处理）
         self.retry_queue = []  # [(ctx, config, error_type), ...]
     
@@ -506,6 +509,13 @@ class ConcurrentPipeline:
                     logger.warning(f"[收集者] 检测到严重错误，停止收集")
                     break
                 
+                # ✅ 多 Worker 模式：若所有 Worker 都忙，则暂停收集
+                if self._target_worker_count > 1 and self._worker_busy:
+                    all_busy = all(self._worker_busy.values())
+                    if all_busy:
+                        await asyncio.sleep(0.5)
+                        continue
+                
                 # 尝试从队列获取图片
                 if len(pending_batch) < self.batch_size:
                     try:
@@ -560,6 +570,17 @@ class ConcurrentPipeline:
                     pending_batch = []
                     batch_start_time = None
                     
+                    # ✅ 单 Worker 模式：等待当前批次翻译完成后再收集下一批
+                    # 多 Worker 模式：继续并行收集（流水线）
+                    if self._target_worker_count == 1:
+                        # 等待单Worker空闲，确保上一批次翻译完成
+                        while not self.stop_workers and not self.has_critical_error:
+                            busy = any(self._worker_busy.values())
+                            if not busy:
+                                logger.debug("[收集者] 串行模式：上一批次已完成，继续收集")
+                                break
+                            await asyncio.sleep(0.5)
+                    
             except Exception as e:
                 logger.error(f"[收集者] 错误: {e}")
                 logger.error(traceback.format_exc())
@@ -575,6 +596,9 @@ class ConcurrentPipeline:
         """
         logger.info(f"[Worker-{worker_id}] 启动")
         processed_count = 0
+        
+        # 默认空闲
+        self._worker_busy[worker_id] = False
         
         while not self.stop_workers:
             try:
@@ -596,6 +620,7 @@ class ConcurrentPipeline:
                     break
                 
                 # 处理批次（错误重试流程见 md/错误重试流程.md）
+                self._worker_busy[worker_id] = True
                 logger.info(f"[Worker-{worker_id}] 开始处理批次 ({len(batch)} 张图片)")
 
                 # ✅ 将 worker_id 传递给 ctx，让翻译器使用独立连接池
@@ -614,6 +639,7 @@ class ConcurrentPipeline:
                 finally:
                     processed_count += 1
                     batch_queue.task_done()
+                    self._worker_busy[worker_id] = False
 
                 logger.info(f"[Worker-{worker_id}] 批次处理结束 (总进度: {self.stats['translation']}/{self.total_images})")
                 
