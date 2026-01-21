@@ -213,7 +213,7 @@ class OpenAIHighQualityTranslator(CommonTranslator):
                 "ENG": "en.json",
                 "IND": "id.json",
                 "ESP": "es.json",
-                "VIN": "vi.json",
+                "VIN": "es.json",  # Vietnamese uses Spanish prompt
             }
             
             # 根据源语言选择提示词文件

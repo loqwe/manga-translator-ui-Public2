@@ -138,17 +138,49 @@ class OpenAITranslator(CommonTranslator):
         if line_break_prompt_json and line_break_prompt_json.get('line_break_prompt'):
             line_break_prompt_str = line_break_prompt_json['line_break_prompt']
 
-        # 尝试加载 HQ System Prompt
+        # 尝试加载按语言分类的提示词
         base_prompt = ""
         try:
             from ..utils import BASE_PATH
             import os
             import json
-            prompt_path = os.path.join(BASE_PATH, 'dict', 'system_prompt_hq.json')
+            
+            # 源语言代码到提示词文件的映射
+            lang_to_prompt_file = {
+                "JPN": "ja.json",
+                "KOR": "ko.json",
+                "ENG": "en.json",
+                "IND": "id.json",
+                "ESP": "es.json",
+                "VIN": "es.json",  # Vietnamese uses Spanish prompt
+            }
+            
+            # 根据源语言选择提示词文件
+            prompt_filename = lang_to_prompt_file.get(source_lang, "default.json")
+            prompt_path = os.path.join(BASE_PATH, 'dict', 'prompts', prompt_filename)
+            
+            # 如果按语言文件不存在，回退到 default.json
+            if not os.path.exists(prompt_path):
+                prompt_path = os.path.join(BASE_PATH, 'dict', 'prompts', 'default.json')
+            
+            # 如果 prompts 目录不存在，回退到旧的 system_prompt_hq.json
+            if not os.path.exists(prompt_path):
+                prompt_path = os.path.join(BASE_PATH, 'dict', 'system_prompt_hq.json')
+            
             if os.path.exists(prompt_path):
                 with open(prompt_path, 'r', encoding='utf-8') as f:
                     base_prompt_data = json.load(f)
-                base_prompt = base_prompt_data['system_prompt']
+                base_prompt = base_prompt_data.get('system_prompt', '')
+                lang_display = {
+                    "JPN": "日语",
+                    "KOR": "韩语",
+                    "ENG": "英语",
+                    "IND": "印尼语",
+                    "ESP": "西班牙语",
+                    "VIN": "越南语",
+                    "auto": "自动",
+                }.get(source_lang, source_lang)
+                self.logger.info(f"加载提示词: {os.path.basename(prompt_path)} (源语言: {lang_display})")
         except Exception as e:
             self.logger.warning(f"Failed to load system prompt from file: {e}")
 

@@ -252,7 +252,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
                 "ENG": "en.json",
                 "IND": "id.json",
                 "ESP": "es.json",
-                "VIN": "vi.json",
+                "VIN": "es.json",  # Vietnamese uses Spanish prompt
             }
 
             prompt_filename = lang_to_prompt_file.get(source_lang, "default.json")
