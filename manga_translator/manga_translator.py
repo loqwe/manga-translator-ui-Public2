@@ -4033,6 +4033,10 @@ class MangaTranslator:
                     if hasattr(first_ctx, 'image_name'):
                         merged_ctx.image_name = first_ctx.image_name
                     
+                    # ✅ 复制同批次局部上下文（用于延迟重试单图时参考上一张）
+                    if hasattr(first_ctx, 'local_prev_context'):
+                        merged_ctx.local_prev_context = getattr(first_ctx, 'local_prev_context', None)
+
                     # ✅ 加载AI断句prompt和自定义HQ prompt
                     merged_ctx = await self._load_and_prepare_prompts(sample_config, merged_ctx)
                     
@@ -4596,6 +4600,15 @@ class MangaTranslator:
                 batch_index=None,  # 不使用批次内上下文
                 batch_original_texts=None
             )
+
+            # ✅ 延迟重试单图：把同批次上一张的原文上下文附加到历史上下文后
+            local_prev = getattr(ctx, 'local_prev_context', None)
+            if local_prev:
+                prev_ctx = (prev_ctx + "\n\n---\n\n" + local_prev) if prev_ctx else local_prev
+                # Count how many same-batch images are referenced
+                ref_count = local_prev.count("同批次前序原文参考#")
+                logger.info(f"[延迟重试] 使用同批次前 {ref_count} 张图片原文作为局部上下文")
+
             translator.set_prev_context(prev_ctx)
 
             if pages_used > 0:
