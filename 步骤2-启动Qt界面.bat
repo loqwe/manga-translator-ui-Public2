@@ -165,5 +165,6 @@ REM 切换到项目根目录(确保Python能正确找到模块)
 cd /d "%~dp0"
 
 REM 直接启动 Qt 界面
+set "PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True"
 python desktop_qt_ui\main.py
 pause

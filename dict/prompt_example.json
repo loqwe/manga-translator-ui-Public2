@@ -64,7 +64,12 @@
           },
           {
             "original": "한채아",
-            "translation": "韩彩儿"
+            "translation": "韩彩儿",
+            "lang": "ko"
+          },
+          {
+            "original": "민혁",
+            "translation": "民赫"
           }
         ],
         "Location": [
@@ -82,9 +87,18 @@
             "original": "미래대",
             "translation": "未来大",
             "lang": "ko"
+          },
+          {
+            "original": "탑카페",
+            "translation": "Top咖啡厅"
           }
         ],
-        "Org": [],
+        "Org": [
+          {
+            "original": "러닝크루",
+            "translation": "跑步团"
+          }
+        ],
         "Item": [
           {
             "original": "오나휠",
@@ -93,22 +107,27 @@
           },
           {
             "original": "O쌔",
-            "translation": "〇赛"
+            "translation": "爱喜"
           },
           {
-            "original": "El gusto es mío",
-            "translation": "我的荣幸"
-          },
-          {
-            "original": "Tu novia increíble",
-            "translation": "你的超棒女友"
-          },
-          {
-            "original": "Mujeres de la oficina",
-            "translation": "办公室女性"
+            "original": "무선연결 오나홀",
+            "translation": "无线连接飞机杯"
           }
         ],
-        "Skill": [],
+        "Skill": [
+          {
+            "original": "아바타 모드",
+            "translation": "化身模式"
+          },
+          {
+            "original": "관음모드",
+            "translation": "窥视模式"
+          },
+          {
+            "original": "스마타",
+            "translation": "素股"
+          }
+        ],
         "Creature": []
       },
       "女神都在看这些": {
@@ -441,6 +460,11 @@
         "lang": "ko"
       },
       {
+        "original": "한채아",
+        "translation": "韩彩儿",
+        "lang": "ko"
+      },
+      {
         "original": "선호",
         "translation": "善浩",
         "lang": "auto"
@@ -547,8 +571,8 @@
         "translation": "李世镇"
       },
       {
-        "original": "한채아",
-        "translation": "韩彩儿"
+        "original": "민혁",
+        "translation": "民赫"
       }
     ],
     "Location": [
@@ -566,12 +590,20 @@
         "original": "미래대",
         "translation": "未来大",
         "lang": "ko"
+      },
+      {
+        "original": "탑카페",
+        "translation": "Top咖啡厅"
       }
     ],
     "Org": [
       {
         "original": "아스모데",
         "translation": "阿斯莫德"
+      },
+      {
+        "original": "러닝크루",
+        "translation": "跑步团"
       }
     ],
     "Item": [
@@ -595,19 +627,11 @@
       },
       {
         "original": "O쌔",
-        "translation": "〇赛"
+        "translation": "爱喜"
       },
       {
-        "original": "El gusto es mío",
-        "translation": "我的荣幸"
-      },
-      {
-        "original": "Tu novia increíble",
-        "translation": "你的超棒女友"
-      },
-      {
-        "original": "Mujeres de la oficina",
-        "translation": "办公室女性"
+        "original": "무선연결 오나홀",
+        "translation": "无线连接飞机杯"
       }
     ],
     "Skill": [
@@ -619,6 +643,18 @@
         "original": "쾌락의물결",
         "translation": "快乐之潮",
         "lang": "auto"
+      },
+      {
+        "original": "아바타 모드",
+        "translation": "化身模式"
+      },
+      {
+        "original": "관음모드",
+        "translation": "窥视模式"
+      },
+      {
+        "original": "스마타",
+        "translation": "素股"
       }
     ],
     "Creature": []

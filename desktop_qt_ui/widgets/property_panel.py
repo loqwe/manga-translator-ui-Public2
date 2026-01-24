@@ -498,7 +498,7 @@ class PropertyPanel(QWidget):
 
             self.mask_dilation_offset_entry.setText(str(mask_dilation_offset))
             self.mask_kernel_size_entry.setText(str(kernel_size))
-            self.ignore_bubble_checkbox.setChecked(ignore_bubble)
+            self.ignore_bubble_checkbox.setChecked(bool(ignore_bubble))
 
             self.mask_dilation_offset_entry.blockSignals(False)
             self.mask_kernel_size_entry.blockSignals(False)
