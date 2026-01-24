@@ -1139,6 +1139,94 @@ class FileListView(QTreeWidget):
             event.ignore()
 
 
+class _FailedRecordItemWidget(QWidget):
+    """失败记录行组件：按钮默认隐藏，悬停时显示。"""
+
+    def __init__(
+        self,
+        label_text: str,
+        on_double_click,
+        on_retry,
+        on_delete,
+        tooltip_retry: str,
+        tooltip_delete: str,
+        parent=None,
+    ):
+        super().__init__(parent)
+
+        self._on_double_click = on_double_click
+        self._on_retry = on_retry
+        self._on_delete = on_delete
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(5, 2, 5, 2)
+        layout.setSpacing(5)
+
+        # 记录文本
+        self.label = QLabel(label_text)
+        self.label.setStyleSheet("QLabel { color: #666; }")
+        # 让父Widget接收鼠标事件（用于悬停显示按钮）
+        self.label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        layout.addWidget(self.label, 1)
+
+        # 重试按钮
+        self.retry_btn = QPushButton("↻")
+        self.retry_btn.setFixedSize(20, 20)
+        self.retry_btn.setToolTip(tooltip_retry)
+        self.retry_btn.setStyleSheet("""
+            QPushButton {
+                border: none;
+                color: #999;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                color: #4CAF50;
+            }
+        """)
+        self.retry_btn.clicked.connect(self._on_retry)
+        layout.addWidget(self.retry_btn)
+
+        # 删除按钮
+        self.delete_btn = QPushButton("✕")
+        self.delete_btn.setFixedSize(20, 20)
+        self.delete_btn.setToolTip(tooltip_delete)
+        self.delete_btn.setStyleSheet("""
+            QPushButton {
+                border: none;
+                color: #999;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                color: #f00;
+            }
+        """)
+        self.delete_btn.clicked.connect(self._on_delete)
+        layout.addWidget(self.delete_btn)
+
+        # 默认隐藏按钮
+        self._set_buttons_visible(False)
+        self.setMouseTracking(True)
+
+    def _set_buttons_visible(self, visible: bool):
+        self.retry_btn.setVisible(visible)
+        self.delete_btn.setVisible(visible)
+
+    def enterEvent(self, event):
+        self._set_buttons_visible(True)
+        return super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._set_buttons_visible(False)
+        return super().leaveEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        try:
+            if callable(self._on_double_click):
+                self._on_double_click()
+        finally:
+            return super().mouseDoubleClickEvent(event)
+
+
 class FailedRecordsList(QWidget):
     """失败记录列表组件 - 显示翻译失败的图片记录，支持双击重新导入"""
     import_requested = pyqtSignal(dict)  # 发射导入请求信号，携带失败记录数据
@@ -1307,54 +1395,21 @@ class FailedRecordsList(QWidget):
         self.record_list.clear()
         
         for i, record in enumerate(self.records):
-            # 创建带删除按钮的项
-            item_widget = QWidget()
-            item_layout = QHBoxLayout(item_widget)
-            item_layout.setContentsMargins(5, 2, 5, 2)
-            item_layout.setSpacing(5)
-            
-            # 记录文本
-            label = QLabel(f"{record['time']}  {record['label']}")
-            label.setStyleSheet("QLabel { color: #666; }")
-            item_layout.addWidget(label, 1)
-            
-            # 重试按钮
-            retry_btn = QPushButton("↻")
-            retry_btn.setFixedSize(20, 20)
-            retry_btn.setToolTip(self._t("Retry"))
-            retry_btn.setStyleSheet("""
-                QPushButton {
-                    border: none;
-                    color: #999;
-                    font-size: 14px;
-                }
-                QPushButton:hover {
-                    color: #4CAF50;
-                }
-            """)
-            retry_btn.clicked.connect(lambda checked, idx=i: self._retry_record(idx))
-            item_layout.addWidget(retry_btn)
-            
-            # 删除按钮
-            delete_btn = QPushButton("✕")
-            delete_btn.setFixedSize(20, 20)
-            delete_btn.setToolTip(self._t("Delete"))
-            delete_btn.setStyleSheet("""
-                QPushButton {
-                    border: none;
-                    color: #999;
-                    font-size: 12px;
-                }
-                QPushButton:hover {
-                    color: #f00;
-                }
-            """)
-            delete_btn.clicked.connect(lambda checked, idx=i: self._delete_record(idx))
-            item_layout.addWidget(delete_btn)
-            
             # 添加到列表
             item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, i)
+
+            label_text = f"{record['time']}  {record['label']}"
+            item_widget = _FailedRecordItemWidget(
+                label_text=label_text,
+                on_double_click=lambda _item=item: self._on_item_double_clicked(_item),
+                on_retry=lambda checked=False, idx=i: self._retry_record(idx),
+                on_delete=lambda checked=False, idx=i: self._delete_record(idx),
+                tooltip_retry=self._t("Retry"),
+                tooltip_delete=self._t("Delete"),
+                parent=self.record_list,
+            )
+
             item.setSizeHint(item_widget.sizeHint())
             self.record_list.addItem(item)
             self.record_list.setItemWidget(item, item_widget)

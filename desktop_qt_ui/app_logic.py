@@ -1197,12 +1197,29 @@ class MainAppLogic(QObject):
     def add_files(self, file_paths: List[str]):
         """
         Adds files/folders to the list for processing.
+        只添加有效的图片文件或文件夹，过滤掉非图片文件。
         """
         new_paths = []
+        skipped_files = []
         for path in file_paths:
             norm_path = os.path.normpath(path)
             if norm_path not in self.source_files:
-                new_paths.append(norm_path)
+                # 文件夹直接添加
+                if os.path.isdir(norm_path):
+                    new_paths.append(norm_path)
+                # 文件需要验证是否为有效的图片或压缩包
+                elif os.path.isfile(norm_path):
+                    if self.file_service.validate_image_file(norm_path):
+                        new_paths.append(norm_path)
+                    else:
+                        skipped_files.append(norm_path)
+
+        if skipped_files:
+            self._ui_log(f"⚠️ 跳过 {len(skipped_files)} 个非图片文件", "WARNING")
+            for f in skipped_files[:3]:  # 只显示前3个
+                self._ui_log(f"   - {os.path.basename(f)}")
+            if len(skipped_files) > 3:
+                self._ui_log(f"   ... 还有 {len(skipped_files) - 3} 个")
 
         if new_paths:
             self.source_files.extend(new_paths)
@@ -2989,6 +3006,13 @@ class TranslationWorker(QObject):
                 
                 # 并发模式和非并发模式都会到这里
                 contexts = all_contexts
+                
+                # 🔍 调试：检查并发模式返回的contexts
+                self.log_received.emit(f"📋 [调试] contexts数量: {len(contexts)}")
+                for i, ctx in enumerate(contexts[:5]):  # 只显示前5个
+                    has_error = hasattr(ctx, 'translation_error') and ctx.translation_error
+                    has_success = hasattr(ctx, 'success') and ctx.success
+                    self.log_received.emit(f"📋 [调试] ctx[{i}]: image_name={getattr(ctx, 'image_name', 'N/A')}, translation_error={has_error}, success={has_success}")
 
                 # The backend now handles saving for batch jobs. We just need to collect the paths/status.
                 success_count = 0
@@ -3029,6 +3053,12 @@ class TranslationWorker(QObject):
 
                 if failed_count > 0:
                     self.log_received.emit(self._t("\n⚠️ Batch translation completed: {success}/{total} succeeded, {failed}/{total} failed", success=success_count, total=total_images, failed=failed_count))
+                    # 🔍 调试：检查results中的失败项
+                    self.log_received.emit(f"📋 [调试] 即将调用_emit_failed_files_record，results数量: {len(results)}")
+                    failed_results = [r for r in results if not r.get('success', True)]
+                    self.log_received.emit(f"📋 [调试] 失败项数量: {len(failed_results)}")
+                    for r in failed_results[:3]:  # 只显示前3个
+                        self.log_received.emit(f"📋 [调试] 失败项: success={r.get('success')}, original_path={r.get('original_path', 'N/A')[:50]}")
                     # 收集失败文件信息并发射信号
                     self._emit_failed_files_record(results)
                 else:
@@ -3048,39 +3078,62 @@ class TranslationWorker(QObject):
 
                 # 初始化进度条
                 self.progress.emit(skipped_count, total_original_count, "")
-                
+
                 success_count = 0
-                for i, file_path in enumerate(self.files):
-                    if not self._is_running:
-                        raise asyncio.CancelledError("Task stopped by user.")
+                # ✅ 顺序模式也需要把失败信息发射给UI（用于“失败记录”列表）
+                sequential_failed_results = []  # [{'success': False, 'original_path': str, 'error': str}, ...]
+                failed_record_emitted = False
 
-                    current_num = skipped_count + i + 1
-                    # 更新进度条（显示图片数量）
-                    self.progress.emit(current_num, total_original_count, "")
-                    self.log_received.emit(f"🔄 [{current_num}/{total_original_count}] 正在处理：{os.path.basename(file_path)}")
+                try:
+                    for i, file_path in enumerate(self.files):
+                        if not self._is_running:
+                            raise asyncio.CancelledError("Task stopped by user.")
 
-                    try:
-                        # 使用二进制模式读取以避免Windows路径编码问题
-                        with open(file_path, 'rb') as f:
-                            image = Image.open(f)
-                            image.load()  # 立即加载图片数据，避免文件句柄关闭后无法访问
-                        image.name = file_path
+                        current_num = skipped_count + i + 1
+                        # 更新进度条（显示图片数量）
+                        self.progress.emit(current_num, total_original_count, "")
+                        self.log_received.emit(f"🔄 [{current_num}/{total_original_count}] 正在处理：{os.path.basename(file_path)}")
 
-                        ctx = await translator.translate(image, config, image_name=image.name, save_info=save_info)
+                        try:
+                            # 使用二进制模式读取以避免Windows路径编码问题
+                            with open(file_path, 'rb') as f:
+                                image = Image.open(f)
+                                image.load()  # 立即加载图片数据，避免文件句柄关闭后无法访问
+                            image.name = file_path
 
-                        if ctx and ctx.result:
-                            self.file_processed.emit({'success': True, 'original_path': file_path, 'image_data': ctx.result})
-                            success_count += 1
-                            self.log_received.emit(f"✅ [{current_num}/{total_files}] 完成：{os.path.basename(file_path)}")
-                        else:
-                            self.file_processed.emit({'success': False, 'original_path': file_path, 'error': 'Translation returned no result or image'})
-                            self.log_received.emit(f"❌ [{current_num}/{total_files}] 失败：{os.path.basename(file_path)}")
+                            ctx = await translator.translate(image, config, image_name=image.name, save_info=save_info)
 
-                    except Exception as e:
-                        self.log_received.emit(f"❌ [{current_num}/{total_files}] 错误：{os.path.basename(file_path)} - {e}")
-                        self.file_processed.emit({'success': False, 'original_path': file_path, 'error': str(e)})
-                        # 抛出异常，终止整个翻译流程
-                        raise
+                            if ctx and ctx.result:
+                                self.file_processed.emit({'success': True, 'original_path': file_path, 'image_data': ctx.result})
+                                success_count += 1
+                                self.log_received.emit(f"✅ [{current_num}/{total_files}] 完成：{os.path.basename(file_path)}")
+                            else:
+                                err_msg = 'Translation returned no result or image'
+                                # 尝试使用后端返回的错误信息（如果存在）
+                                if ctx and hasattr(ctx, 'translation_error') and ctx.translation_error:
+                                    err_msg = str(ctx.translation_error)
+                                self.file_processed.emit({'success': False, 'original_path': file_path, 'error': err_msg})
+                                sequential_failed_results.append({'success': False, 'original_path': file_path, 'error': err_msg})
+                                self.log_received.emit(f"❌ [{current_num}/{total_files}] 失败：{os.path.basename(file_path)}")
+
+                        except Exception as e:
+                            self.log_received.emit(f"❌ [{current_num}/{total_files}] 错误：{os.path.basename(file_path)} - {e}")
+                            self.file_processed.emit({'success': False, 'original_path': file_path, 'error': str(e)})
+                            sequential_failed_results.append({'success': False, 'original_path': file_path, 'error': str(e)})
+
+                            # ✅ 在抛出异常前，先把失败记录发给UI（避免列表为空）
+                            if sequential_failed_results and not failed_record_emitted:
+                                self._emit_failed_files_record(sequential_failed_results)
+                                failed_record_emitted = True
+
+                            # 抛出异常，终止整个翻译流程
+                            raise
+
+                finally:
+                    # ✅ 正常结束时，统一发射一次失败记录
+                    if sequential_failed_results and not failed_record_emitted:
+                        self._emit_failed_files_record(sequential_failed_results)
+                        failed_record_emitted = True
 
                 self.log_received.emit(f"✅ 顺序翻译完成：成功 {success_count}/{total_files} 张")
                 self.log_received.emit(f"💾 文件已保存到：{self.output_folder}")

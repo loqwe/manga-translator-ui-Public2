@@ -15,6 +15,7 @@ import functools
 
 from .utils import Context, load_image
 from .utils.generic import is_mostly_noise_text
+from .utils.failure_record import save_failure_record, remove_failure_record
 from .config import Config
 from .rate_limiter import RateLimiter
 
@@ -968,6 +969,24 @@ class ConcurrentPipeline:
                 ctx.success = False
                 self.translation_done[ctx.image_name] = 'FAILED'
                 self.failed_images.append((ctx.image_name, str(e)))
+                
+                # ✅ 保存失败记录
+                try:
+                    historical_ctx = {
+                        'all_page_translations': self.translator.all_page_translations.copy() if hasattr(self.translator, 'all_page_translations') else [],
+                        '_original_page_texts': self.translator._original_page_texts.copy() if hasattr(self.translator, '_original_page_texts') else [],
+                        'context_size': getattr(self.translator, 'context_size', 3),
+                    }
+                    save_failure_record(
+                        image_path=ctx.image_name,
+                        error_type=error_type,
+                        error_message=str(e),
+                        ctx=ctx,
+                        config=config,
+                        historical_context=historical_ctx
+                    )
+                except Exception as save_err:
+                    logger.debug(f"[失败记录] 保存异常: {save_err}")
             self.stats['translation'] += len(batch)
     
     async def _mark_translation_done(self, translated_batch: List[tuple]):
@@ -1188,6 +1207,12 @@ class ConcurrentPipeline:
             # ✅ 增加翻译计数
             self.stats['translation'] += 1
             
+            # ✅ 重试成功，移除失败记录
+            try:
+                remove_failure_record(ctx.image_name)
+            except Exception:
+                pass
+            
             self.rate_limiter.report_success()
             logger.info(f"[延迟重试] 成功: {ctx.image_name}")
             return True
@@ -1201,6 +1226,24 @@ class ConcurrentPipeline:
             ctx.success = False
             self.translation_done[ctx.image_name] = 'FAILED'
             self.failed_images.append((ctx.image_name, error_msg))
+            
+            # ✅ 保存失败记录（包含上下文，供下次重试）
+            try:
+                historical_ctx = {
+                    'all_page_translations': self.translator.all_page_translations.copy() if hasattr(self.translator, 'all_page_translations') else [],
+                    '_original_page_texts': self.translator._original_page_texts.copy() if hasattr(self.translator, '_original_page_texts') else [],
+                    'context_size': getattr(self.translator, 'context_size', 3),
+                }
+                save_failure_record(
+                    image_path=ctx.image_name,
+                    error_type=error_type,
+                    error_message=error_msg,
+                    ctx=ctx,
+                    config=config,
+                    historical_context=historical_ctx
+                )
+            except Exception as save_err:
+                logger.debug(f"[失败记录] 保存异常: {save_err}")
             
             # ✅ 失败也增加翻译计数（表示已处理）
             self.stats['translation'] += 1
