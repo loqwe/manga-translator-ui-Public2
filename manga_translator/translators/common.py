@@ -763,9 +763,9 @@ class CommonTranslator(InfererModule):
         # 添加多页上下文（如果有）
         if prev_context:
             prompt += f"{prev_context}\n\n---\n\n"
-            self.logger.info(f"[Context] Length: {len(prev_context)} chars")
+            self.logger.info(f"[历史上下文] 长度: {len(prev_context)} 字符")
         else:
-            self.logger.info("[Context] None")
+            self.logger.info("[历史上下文] 无")
 
         if is_image_mode:
             prompt += "Please translate the following manga text regions. I'm providing multiple images with their text regions in reading order:\n\n"

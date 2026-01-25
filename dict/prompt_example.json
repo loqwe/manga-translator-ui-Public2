@@ -413,11 +413,28 @@
           "original": "누헌",
           "translation": "修宪",
           "raw_work_name": "无生肉名"
+        },
+        {
+          "original": "우진",
+          "translation": "宇镇"
+        },
+        {
+          "original": "신아영",
+          "translation": "申雅英"
+        },
+        {
+          "original": "박우진",
+          "translation": "朴宇镇"
         }
       ],
       "Location": [],
       "Org": [],
-      "Item": [],
+      "Item": [
+        {
+          "original": "무선연결 오나홀",
+          "translation": "无线连接名器"
+        }
+      ],
       "Skill": [],
       "Creature": []
     },

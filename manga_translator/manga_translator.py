@@ -2147,9 +2147,9 @@ class MangaTranslator:
 
             if pages_used > 0:
                 context_count = prev_ctx.count("<|")
-                logger.info(f"Carrying {pages_used} pages of context, {context_count} sentences as translation reference")
+                logger.info(f"[历史上下文] 携带 {pages_used} 页上下文, {context_count} 条句子作为翻译参考")
             if skipped > 0:
-                logger.warning(f"Skipped {skipped} pages with no sentences")
+                logger.warning(f"[历史上下文] 跳过了 {skipped} 页无句子的空页")
                 
 
 
@@ -4603,19 +4603,29 @@ class MangaTranslator:
 
             # ✅ 延迟重试单图：把同批次上一张的原文上下文附加到历史上下文后
             local_prev = getattr(ctx, 'local_prev_context', None)
+            local_ref_count = 0
             if local_prev:
                 prev_ctx = (prev_ctx + "\n\n---\n\n" + local_prev) if prev_ctx else local_prev
                 # Count how many same-batch images are referenced
-                ref_count = local_prev.count("同批次前序原文参考#")
-                logger.info(f"[延迟重试] 使用同批次前 {ref_count} 张图片原文作为局部上下文")
+                local_ref_count = local_prev.count("同批次前序原文参考#")
 
             translator.set_prev_context(prev_ctx)
 
-            if pages_used > 0:
+            # 输出合并后的上下文日志
+            if local_ref_count > 0 and pages_used > 0:
+                # 延迟重试单图：同时有历史上下文和局部上下文
                 context_count = prev_ctx.count("<|")
-                logger.info(f"Carrying {pages_used} pages of context, {context_count} sentences as translation reference")
+                logger.info(f"[延迟重试] 携带 {pages_used} 页历史上下文 + 同批次前 {local_ref_count} 张图片原文, 共 {context_count} 条句子")
+            elif local_ref_count > 0:
+                # 延迟重试单图：只有局部上下文（无历史上下文）
+                context_count = prev_ctx.count("<|") if prev_ctx else 0
+                logger.info(f"[延迟重试] 携带同批次前 {local_ref_count} 张图片原文, {context_count} 条句子")
+            elif pages_used > 0:
+                # 正常翻译：只有历史上下文
+                context_count = prev_ctx.count("<|")
+                logger.info(f"[历史上下文] 携带 {pages_used} 页上下文, {context_count} 条句子作为翻译参考")
             if skipped > 0:
-                logger.warning(f"Skipped {skipped} pages with no sentences")
+                logger.warning(f"[历史上下文] 跳过了 {skipped} 页无句子的空页")
 
 
             # 将config附加到ctx，供翻译器使用（例如AI断句功能）

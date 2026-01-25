@@ -6,8 +6,8 @@ from typing import Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor
 
 from PIL import Image
-from PyQt6.QtCore import QSize, Qt, pyqtSignal, QObject, pyqtSlot, QSettings
-from PyQt6.QtGui import QImage, QPixmap
+from PyQt6.QtCore import QSize, Qt, pyqtSignal, QObject, pyqtSlot, QSettings, QEvent
+from PyQt6.QtGui import QImage, QPixmap, QCursor
 from PyQt6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -16,6 +16,8 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QSizePolicy,
+    QMenu,
     QSplitter,
     QStyle,
     QTreeWidget,
@@ -1140,7 +1142,7 @@ class FileListView(QTreeWidget):
 
 
 class _FailedRecordItemWidget(QWidget):
-    """失败记录行组件：按钮默认隐藏，悬停时显示。"""
+    """失败记录行组件：按钮默认隐藏，悬停时显示；支持右键菜单操作。"""
 
     def __init__(
         self,
@@ -1150,6 +1152,7 @@ class _FailedRecordItemWidget(QWidget):
         on_delete,
         tooltip_retry: str,
         tooltip_delete: str,
+        menu_import_text: str,
         parent=None,
     ):
         super().__init__(parent)
@@ -1157,6 +1160,7 @@ class _FailedRecordItemWidget(QWidget):
         self._on_double_click = on_double_click
         self._on_retry = on_retry
         self._on_delete = on_delete
+        self._menu_import_text = menu_import_text
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(5, 2, 5, 2)
@@ -1167,11 +1171,15 @@ class _FailedRecordItemWidget(QWidget):
         self.label.setStyleSheet("QLabel { color: #666; }")
         # 让父Widget接收鼠标事件（用于悬停显示按钮）
         self.label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        # 允许文本在水平上收缩（否则长文本可能把右侧按钮“挤出可视区域”）
+        self.label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.label.setMinimumWidth(0)
         layout.addWidget(self.label, 1)
 
         # 重试按钮
         self.retry_btn = QPushButton("↻")
         self.retry_btn.setFixedSize(20, 20)
+        self.retry_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.retry_btn.setToolTip(tooltip_retry)
         self.retry_btn.setStyleSheet("""
             QPushButton {
@@ -1189,6 +1197,7 @@ class _FailedRecordItemWidget(QWidget):
         # 删除按钮
         self.delete_btn = QPushButton("✕")
         self.delete_btn.setFixedSize(20, 20)
+        self.delete_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.delete_btn.setToolTip(tooltip_delete)
         self.delete_btn.setStyleSheet("""
             QPushButton {
@@ -1203,6 +1212,11 @@ class _FailedRecordItemWidget(QWidget):
         self.delete_btn.clicked.connect(self._on_delete)
         layout.addWidget(self.delete_btn)
 
+        # 关键：按钮出现后，鼠标可能“落在按钮上”，Qt 会给父Widget发送 leaveEvent。
+        # 因此这里监听按钮的 Enter/Leave，统一根据鼠标是否仍在整行区域内来决定显示/隐藏。
+        self.retry_btn.installEventFilter(self)
+        self.delete_btn.installEventFilter(self)
+
         # 默认隐藏按钮
         self._set_buttons_visible(False)
         self.setMouseTracking(True)
@@ -1211,12 +1225,32 @@ class _FailedRecordItemWidget(QWidget):
         self.retry_btn.setVisible(visible)
         self.delete_btn.setVisible(visible)
 
+    def _sync_buttons_visibility(self):
+        """根据鼠标是否仍在整行区域内决定按钮显示/隐藏。
+
+        说明：当鼠标进入子控件（按钮）时，Qt 可能会给父Widget发送 leaveEvent。
+        这里用全局鼠标位置判断，避免按钮“刚显示就被立刻隐藏”。
+        """
+        try:
+            inside = self.rect().contains(self.mapFromGlobal(QCursor.pos()))
+            self._set_buttons_visible(bool(inside))
+        except Exception:
+            pass
+
+    def eventFilter(self, obj, event):
+        # 处理从按钮离开到行外的情况（父Widget 可能收不到 leaveEvent）
+        if obj in (self.retry_btn, self.delete_btn):
+            et = event.type()
+            if et in (QEvent.Type.Enter, QEvent.Type.Leave):
+                self._sync_buttons_visibility()
+        return super().eventFilter(obj, event)
+
     def enterEvent(self, event):
         self._set_buttons_visible(True)
         return super().enterEvent(event)
 
     def leaveEvent(self, event):
-        self._set_buttons_visible(False)
+        self._sync_buttons_visibility()
         return super().leaveEvent(event)
 
     def mouseDoubleClickEvent(self, event):
@@ -1225,6 +1259,30 @@ class _FailedRecordItemWidget(QWidget):
                 self._on_double_click()
         finally:
             return super().mouseDoubleClickEvent(event)
+
+    def contextMenuEvent(self, event):
+        """右键菜单：提供“重新导入/重试/删除”，避免悬停按钮不可见时无法操作。"""
+        try:
+            menu = QMenu(self)
+            act_import = menu.addAction(self._menu_import_text)
+            menu.addSeparator()
+            act_retry = menu.addAction(self.retry_btn.toolTip() or "重试")
+            act_delete = menu.addAction(self.delete_btn.toolTip() or "删除")
+
+            chosen = menu.exec(event.globalPos())
+            if chosen == act_import:
+                if callable(self._on_double_click):
+                    self._on_double_click()
+            elif chosen == act_retry:
+                if callable(self._on_retry):
+                    self._on_retry()
+            elif chosen == act_delete:
+                if callable(self._on_delete):
+                    self._on_delete()
+        except Exception:
+            pass
+        finally:
+            return super().contextMenuEvent(event)
 
 
 class FailedRecordsList(QWidget):
@@ -1246,6 +1304,12 @@ class FailedRecordsList(QWidget):
         
         self._init_ui()
         self._load_records()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # 失败记录行的 label 可能很长（例如 "Chapter 5, 57, 58..."），会导致 item widget 的宽度被撑大。
+        # 在关闭横向滚动条的情况下，右侧按钮会被挤到可视区域外。
+        self._sync_item_widget_widths()
     
     def _t(self, key: str, **kwargs) -> str:
         """翻译辅助方法"""
@@ -1253,6 +1317,32 @@ class FailedRecordsList(QWidget):
             return self.i18n.translate(key, **kwargs)
         return key
     
+    def _sync_item_widget_widths(self):
+        """将每一行的 item widget 宽度固定到视口宽度，避免长文本把按钮挤出可视区域。"""
+        try:
+            if not hasattr(self, 'record_list') or not self.record_list:
+                return
+            vw = None
+            if self.record_list.viewport():
+                vw = self.record_list.viewport().width()
+            if not vw:
+                vw = self.record_list.width()
+            if not vw or vw <= 0:
+                return
+
+            # 给一点余量，避免在某些样式/边框下出现 1px 的横向溢出
+            vw = max(0, int(vw) - 2)
+
+            for i in range(self.record_list.count()):
+                item = self.record_list.item(i)
+                if not item:
+                    continue
+                w = self.record_list.itemWidget(item)
+                if w:
+                    w.setFixedWidth(vw)
+        except Exception:
+            pass
+
     def _init_ui(self):
         """初始化UI"""
         layout = QVBoxLayout(self)
@@ -1283,8 +1373,10 @@ class FailedRecordsList(QWidget):
         self.record_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.record_list.itemDoubleClicked.connect(self._on_item_double_clicked)
         self.record_list.setToolTip(self._t("Double-click to re-import failed images"))
+
         layout.addWidget(self.record_list)
     
+
     def _load_records(self):
         """从QSettings加载失败记录"""
         settings = QSettings("MangaTranslator", "UI")
@@ -1407,12 +1499,17 @@ class FailedRecordsList(QWidget):
                 on_delete=lambda checked=False, idx=i: self._delete_record(idx),
                 tooltip_retry=self._t("Retry"),
                 tooltip_delete=self._t("Delete"),
+                menu_import_text=self._t("Re-import"),
                 parent=self.record_list,
             )
 
-            item.setSizeHint(item_widget.sizeHint())
+            # 仅锁定高度，避免使用 sizeHint 的宽度把列表内容撑得很宽（横向滚动被禁用时会导致按钮不可见）
+            item.setSizeHint(QSize(0, item_widget.sizeHint().height()))
             self.record_list.addItem(item)
             self.record_list.setItemWidget(item, item_widget)
+
+        # 刷新后同步一次宽度（若此时还未布局完成，resizeEvent 还会再同步）
+        self._sync_item_widget_widths()
     
     def _delete_record(self, index: int):
         """删除指定索引的记录"""

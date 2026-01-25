@@ -1802,6 +1802,49 @@ class MainAppLogic(QObject):
             self._ui_log(f"输出目录不合法: {output_path}", "WARNING")
             return
         
+        # 从失败记录中提取历史上下文（用于重试时恢复翻译上下文）
+        historical_context = None
+        try:
+            from manga_translator.utils.failure_record import load_failure_records, prepare_retry_context
+            
+            # 用第一个文件定位工作目录
+            if files_to_process:
+                records = load_failure_records(files_to_process[0])
+                if records:
+                    # 合并所有失败记录的历史上下文（它们应该来自同一个作品目录）
+                    all_translations = []
+                    all_originals = []
+                    context_size = 3  # 默认值
+                    
+                    for record in records:
+                        ctx = prepare_retry_context(record)
+                        hist_ctx = ctx.get('historical_context', {})
+                        if hist_ctx:
+                            all_trans = hist_ctx.get('all_page_translations', [])
+                            all_orig = hist_ctx.get('_original_page_texts', [])
+                            context_size = hist_ctx.get('context_size', context_size)
+                            
+                            # 合并上下文（去重）
+                            for t in all_trans:
+                                if t not in all_translations:
+                                    all_translations.append(t)
+                            for o in all_orig:
+                                if o not in all_originals:
+                                    all_originals.append(o)
+                    
+                    if all_translations or all_originals:
+                        historical_context = {
+                            'all_page_translations': all_translations,
+                            '_original_page_texts': all_originals,
+                            'context_size': context_size
+                        }
+                        self._ui_log(
+                            f"🔄 从失败记录中提取历史上下文: "
+                            f"{len(all_translations)} 页翻译, {len(all_originals)} 页原文"
+                        )
+        except Exception as e:
+            self._ui_log(f"提取历史上下文时出错: {e}", "WARNING")
+        
         # 获取配置并修改为顺序模式
         config_dict = self.config_service.get_config().dict()
         # 禁用并发模式
@@ -1819,7 +1862,8 @@ class MainAppLogic(QObject):
             config_dict=config_dict,
             output_folder=output_path,
             root_dir=self.config_service.root_dir,
-            file_to_folder_map=self.file_to_folder_map.copy()
+            file_to_folder_map=self.file_to_folder_map.copy(),
+            historical_context=historical_context  # 传递历史上下文
         )
         
         self.worker.moveToThread(self.thread)
@@ -1844,106 +1888,214 @@ class MainAppLogic(QObject):
         """处理任务完成信号，并根据需要保存批量任务的结果"""
         saved_files = []
         results_summary = None
-        self._ui_log(f"on_task_finished called with {len(results) if results else 0} results")
 
-        # 从results中提取summary（不影响原有保存文件逻辑）
+        # Separate summary items from actual result items.
+        result_items = []
         if results:
             try:
                 for r in list(results):
                     if isinstance(r, dict) and r.get('results_summary'):
                         results_summary = r.get('results_summary')
-                        break
+                        continue
+                    result_items.append(r)
             except Exception:
+                # Fallback: treat all as result items
+                result_items = list(results)
                 results_summary = None
-        # The `results` list will only contain items from a batch job now.
-        # Sequential jobs handle saving in `on_file_completed`.
-        if results:
-            self._ui_log(f"批量翻译任务完成，收到 {len(results)} 个结果。正在保存...")
+
+        self._ui_log(f"任务完成回调：收到 {len(result_items) if result_items else 0} 条结果")
+
+        is_batch = isinstance(results_summary, dict)
+
+        # Batch jobs: backend already saved files; UI only acknowledges.
+        # Sequential jobs: saving is handled in `on_file_completed`.
+        if is_batch and result_items:
+            self._ui_log(f"批量翻译任务完成，收到 {len(result_items)} 个结果。正在整理...")
             try:
                 config = self.config_service.get_config()
                 output_format = config.cli.format
                 save_quality = config.cli.save_quality
                 output_folder = config.app.last_output_path
+                save_to_source_dir = config.cli.save_to_source_dir
 
-                if not output_folder:
-                    self._ui_log("输出目录未设置，无法保存文件。", "ERROR")
+                if not output_folder and not save_to_source_dir:
+                    self._ui_log("输出目录未设置，无法整理结果。", "ERROR")
                     self.state_manager.set_status_message("错误：输出目录未设置！")
                 else:
-                    for result in results:
-                        if result.get('success'):
-                            # In batch mode, image_data is None because the backend already saved the file.
-                            # We just need to acknowledge it.
-                            if result.get('image_data') is None:
-                                # 构造翻译后的图片路径
-                                original_path = result.get('original_path')
-                                source_folder = self.file_to_folder_map.get(original_path)
+                    for result in result_items:
+                        if not isinstance(result, dict):
+                            continue
+                        if not result.get('success'):
+                            continue
 
+                        original_path = result.get('original_path')
+                        if not original_path:
+                            continue
+
+                        # In batch mode, image_data is None because the backend already saved the file.
+                        # We just need to acknowledge it.
+                        if result.get('image_data') is None:
+                            if save_to_source_dir:
+                                source_dir = os.path.dirname(original_path)
+                                final_output_folder = os.path.join(source_dir, 'manga_translator_work', 'result')
+                                translated_file = os.path.join(final_output_folder, os.path.basename(original_path))
+                            else:
+                                # 构造翻译后的图片路径
+                                source_folder = self.file_to_folder_map.get(original_path)
                                 if source_folder:
-                                    # 文件来自文件夹
                                     folder_name = os.path.basename(source_folder)
                                     final_output_folder = os.path.join(output_folder, folder_name)
                                     translated_file = os.path.join(final_output_folder, os.path.basename(original_path))
                                 else:
-                                    # 单独添加的文件
                                     translated_file = os.path.join(output_folder, os.path.basename(original_path))
 
-                                # 规范化路径，避免混合斜杠
-                                translated_file = os.path.normpath(translated_file)
-                                saved_files.append(translated_file)
-                            else:
-                                # This handles cases where a result with image_data is present in a batch
-                                try:
-                                    base_filename = os.path.splitext(os.path.basename(result['original_path']))[0]
-                                    file_extension = f".{output_format}" if output_format and output_format != "不指定" else ".png"
-                                    output_filename = f"{base_filename}_translated{file_extension}"
-                                    final_output_path = os.path.join(output_folder, output_filename)
-                                    os.makedirs(output_folder, exist_ok=True)
-                                    
-                                    save_kwargs = {}
-                                    image_to_save = result['image_data']
+                            translated_file = os.path.normpath(translated_file)
+                            saved_files.append(translated_file)
+                        else:
+                            # This handles cases where a result with image_data is present in a batch
+                            try:
+                                if not output_folder:
+                                    raise ValueError("输出目录未设置")
 
-                                    # Convert RGBA to RGB for JPEG format
-                                    if file_extension in ['.jpg', '.jpeg']:
-                                        if image_to_save.mode == 'RGBA':
-                                            image_to_save = image_to_save.convert('RGB')
-                                        save_kwargs['quality'] = save_quality
-                                    elif file_extension == '.webp':
-                                        save_kwargs['quality'] = save_quality
+                                base_filename = os.path.splitext(os.path.basename(original_path))[0]
+                                file_extension = f".{output_format}" if output_format and output_format != "不指定" else ".png"
+                                output_filename = f"{base_filename}_translated{file_extension}"
+                                final_output_path = os.path.join(output_folder, output_filename)
+                                os.makedirs(output_folder, exist_ok=True)
 
-                                    image_to_save.save(final_output_path, **save_kwargs)
-                                    saved_files.append(final_output_path)
-                                    self._ui_log(f"成功保存文件: {final_output_path}")
-                                except Exception as e:
-                                    self._ui_log(f"保存文件 {result['original_path']} 时出错: {e}", "ERROR")
-                
-                # In batch mode, the saved_files_count is the length of this list
-                self.saved_files_count = len(saved_files)
+                                save_kwargs = {}
+                                image_to_save = result['image_data']
+
+                                # Convert RGBA to RGB for JPEG format
+                                if file_extension in ['.jpg', '.jpeg']:
+                                    if image_to_save.mode == 'RGBA':
+                                        image_to_save = image_to_save.convert('RGB')
+                                    save_kwargs['quality'] = save_quality
+                                elif file_extension == '.webp':
+                                    save_kwargs['quality'] = save_quality
+
+                                image_to_save.save(final_output_path, **save_kwargs)
+                                saved_files.append(final_output_path)
+                                self._ui_log(f"成功保存文件: {final_output_path}")
+                            except Exception as e:
+                                self._ui_log(f"保存文件 {original_path} 时出错: {e}", "ERROR")
 
             except Exception as e:
                 self._ui_log(f"处理批量任务结果时发生严重错误: {e}", "ERROR")
 
-        # This part runs for both sequential and batch modes
-        self._ui_log(f"翻译任务完成。总共成功处理 {self.saved_files_count} 个文件。")
-        
-        # 对于顺序处理模式，使用累积的 saved_files_list
-        if not saved_files and self.saved_files_list:
-            saved_files = self.saved_files_list.copy()
-        
+        # For sequential mode, include already-saved files and also skipped-existing outputs (if any).
+        if not is_batch:
+            if self.saved_files_list:
+                saved_files = list(self.saved_files_list)
+
+            try:
+                config = self.config_service.get_config()
+                output_folder = config.app.last_output_path
+                save_to_source_dir = config.cli.save_to_source_dir
+
+                for result in result_items:
+                    if not isinstance(result, dict):
+                        continue
+                    if not result.get('success'):
+                        continue
+                    if not result.get('skipped'):
+                        continue
+
+                    original_path = result.get('original_path')
+                    if not original_path:
+                        continue
+
+                    if save_to_source_dir:
+                        source_dir = os.path.dirname(original_path)
+                        final_output_folder = os.path.join(source_dir, 'manga_translator_work', 'result')
+                        translated_file = os.path.join(final_output_folder, os.path.basename(original_path))
+                    else:
+                        if not output_folder:
+                            continue
+                        source_folder = self.file_to_folder_map.get(original_path)
+                        if source_folder:
+                            folder_name = os.path.basename(source_folder)
+                            final_output_folder = os.path.join(output_folder, folder_name)
+                            translated_file = os.path.join(final_output_folder, os.path.basename(original_path))
+                        else:
+                            translated_file = os.path.join(output_folder, os.path.basename(original_path))
+
+                    translated_file = os.path.normpath(translated_file)
+                    saved_files.append(translated_file)
+            except Exception:
+                # Keep best-effort behavior; do not fail the completion path.
+                pass
+        else:
+            if not saved_files and self.saved_files_list:
+                saved_files = self.saved_files_list.copy()
+
+        # Compute a consistent summary line.
+        summary_total = None
+        summary_success = None
+        summary_failed = None
+        summary_skipped = None
+        summary_skipped_backend = None
+        if isinstance(results_summary, dict):
+            try:
+                summary_total = int(results_summary.get('total', 0) or 0)
+                summary_success = int(results_summary.get('success', 0) or 0)
+                summary_failed = int(results_summary.get('failed', 0) or 0)
+                summary_skipped = int(results_summary.get('skipped', 0) or 0)
+                summary_skipped_backend = int(results_summary.get('skipped_backend', 0) or 0)
+            except Exception:
+                summary_total = None
+
+        # Fallback summary if not provided
+        if summary_total is None:
+            try:
+                # Count only dict items
+                ok = 0
+                fail = 0
+                skip = 0
+                for r in result_items:
+                    if not isinstance(r, dict):
+                        continue
+                    if r.get('success'):
+                        ok += 1
+                        if r.get('skipped'):
+                            skip += 1
+                    else:
+                        fail += 1
+                summary_total = ok + fail
+                summary_success = ok - skip
+                summary_failed = fail
+                summary_skipped = skip
+                summary_skipped_backend = 0
+            except Exception:
+                summary_total = 0
+                summary_success = 0
+                summary_failed = 0
+                summary_skipped = 0
+                summary_skipped_backend = 0
+
+        extra_skipped = summary_skipped_backend or 0
+        if extra_skipped > 0:
+            completion_msg = f"翻译任务完成：总计 {summary_total} 个文件，成功 {summary_success} 个，跳过 {summary_skipped} 个（已存在）+ {extra_skipped} 个（无文本等），失败 {summary_failed} 个。"
+        else:
+            completion_msg = f"翻译任务完成：总计 {summary_total} 个文件，成功 {summary_success} 个，跳过 {summary_skipped} 个（已存在），失败 {summary_failed} 个。"
+
+        self._ui_log(completion_msg)
+
         try:
             self.state_manager.set_translating(False)
-            self.state_manager.set_status_message(f"任务完成，成功处理 {self.saved_files_count} 个文件。")
-            
+            self.state_manager.set_status_message(completion_msg)
+
             # 重置主视图的进度条
             if hasattr(self, 'main_view') and self.main_view:
                 self.main_view.reset_progress()
-            
+
             # 播放系统提示音
             try:
                 from PyQt6.QtWidgets import QApplication
                 QApplication.beep()
             except Exception:
                 pass
-            
+
             # 使用列表副本发送信号，避免引用问题
             payload = list(saved_files)
             if isinstance(results_summary, dict):
@@ -1953,7 +2105,7 @@ class MainAppLogic(QObject):
             self._ui_log(f"完成任务状态更新或信号发射时发生致命错误: {e}", "ERROR")
             import traceback
             traceback.print_exc()
-        
+
         # 注意：将清理逻辑移出 finally 块，使用 QTimer 延迟执行
         # 这样可以确保信号有足够时间被主线程处理
         from PyQt6.QtCore import QTimer
@@ -2162,13 +2314,14 @@ class TranslationWorker(QObject):
     file_processed = pyqtSignal(dict)
     failed_files_recorded = pyqtSignal(dict)  # 失败文件记录信号: {folder_path: [filename, ...]}
 
-    def __init__(self, files, config_dict, output_folder, root_dir, file_to_folder_map=None):
+    def __init__(self, files, config_dict, output_folder, root_dir, file_to_folder_map=None, historical_context=None):
         super().__init__()
         self.files = files
         self.config_dict = config_dict
         self.output_folder = output_folder
         self.root_dir = root_dir
         self.file_to_folder_map = file_to_folder_map or {}  # 文件到文件夹的映射
+        self.historical_context = historical_context  # 重试时恢复的历史上下文
         self._is_running = True
         self._current_task = None  # 保存当前运行的异步任务
         self._finished_emitted = False
@@ -2695,6 +2848,18 @@ class TranslationWorker(QObject):
             translator = MangaTranslator(params=translator_params)
             self.log_received.emit("--- 翻译器初始化完成")
             
+            # 注入历史上下文（重试模式时恢复之前翻译的上下文）
+            if self.historical_context:
+                all_trans = self.historical_context.get('all_page_translations', [])
+                all_orig = self.historical_context.get('_original_page_texts', [])
+                if all_trans or all_orig:
+                    translator.all_page_translations = all_trans.copy()
+                    translator._original_page_texts = all_orig.copy()
+                    self.log_received.emit(
+                        f"--- 🔄 已恢复历史上下文: 携带 {len(all_trans)} 页翻译记录, "
+                        f"{len(all_orig)} 页原文记录"
+                    )
+            
             # 注册进度钩子，接收后端的批次进度
             progress_signal = self.progress  # 捕获信号引用
             
@@ -2848,7 +3013,7 @@ class TranslationWorker(QObject):
                         files_to_process.append(file_path)
                 
                 if skipped_files:
-                    skip_msg = self._t("⏭️ Skipped {count} existing files.", count=len(skipped_files))
+                    skip_msg = f"⏭️ 已跳过 {len(skipped_files)} 个已存在的文件"
                     self.log_received.emit(skip_msg)
                     self.log_received.emit("--- ℹ️ 跳过的文件将不会被处理，如需重新翻译请启用「覆盖已存在文件」选项")
                     self.logger.info(f"已跳过 {len(skipped_files)} 个已存在的文件（覆盖检测已禁用）")
@@ -2860,7 +3025,7 @@ class TranslationWorker(QObject):
             
             # Update total count for progress bar logic
             total_original_count = len(original_files)
-            skipped_count = len(skipped_files)
+            skipped_existing_count = len(skipped_files)
             
             # 确定翻译流程模式
             workflow_mode = self._t("Normal Translation")
@@ -2903,8 +3068,8 @@ class TranslationWorker(QObject):
                         self.log_received.emit(workflow_tip)
                     self.log_received.emit(self._t("🚀 Starting translation..."))
                     
-                    # 初始化进度条 (start from skipped_count)
-                    self.progress.emit(skipped_count, total_original_count, "")
+                    # 初始化进度条 (start from skipped_existing_count)
+                    self.progress.emit(skipped_existing_count, total_original_count, "")
                     
                     if total_images > 0:
                         # 并发模式：直接传递所有文件路径，不预加载图片
@@ -2914,7 +3079,7 @@ class TranslationWorker(QObject):
                         all_contexts = await translator.translate_batch(
                             images_with_configs,
                             save_info=save_info,
-                            global_offset=skipped_count,
+                            global_offset=skipped_existing_count,
                             global_total=total_original_count
                         )
                     else:
@@ -2930,9 +3095,9 @@ class TranslationWorker(QObject):
                     backend_total_batches = (total_images + batch_size - 1) // batch_size if batch_size > 0 else total_images
                     
                     # 显示批量处理信息
-                    if skipped_count > 0:
+                    if skipped_existing_count > 0:
                         self.log_received.emit(self._t("📊 Batch processing mode: {total} images in {batches} batches", total=total_images, batches=backend_total_batches))
-                        self.log_received.emit(f"--- ℹ️ 另有 {skipped_count} 个文件已跳过（原始总数：{total_original_count}）")
+                        self.log_received.emit(f"--- ℹ️ 另有 {skipped_existing_count} 个文件已跳过（原始总数：{total_original_count}）")
                     else:
                         self.log_received.emit(self._t("📊 Batch processing mode: {total} images in {batches} batches", total=total_images, batches=backend_total_batches))
                     
@@ -2945,10 +3110,10 @@ class TranslationWorker(QObject):
                     self.log_received.emit(self._t("🚀 Starting translation..."))
                     
                     # 初始化进度条
-                    self.progress.emit(skipped_count, total_original_count, "")
+                    self.progress.emit(skipped_existing_count, total_original_count, "")
                     
                     all_contexts = []
-                    processed_images_count = skipped_count  # Start count from skipped files
+                    processed_images_count = skipped_existing_count  # Start count from skipped files
                     
                     for frontend_batch_num in range(total_frontend_batches):
                         if not self._is_running: raise asyncio.CancelledError("Task stopped by user.")
@@ -3015,44 +3180,50 @@ class TranslationWorker(QObject):
                     self.log_received.emit(f"📋 [调试] ctx[{i}]: image_name={getattr(ctx, 'image_name', 'N/A')}, translation_error={has_error}, success={has_success}")
 
                 # The backend now handles saving for batch jobs. We just need to collect the paths/status.
-                success_count = 0
-                failed_count = 0
-                skipped_count = 0
+                processed_success_count = 0
+                processed_failed_count = 0
+                skipped_backend_count = 0
                 for ctx in contexts:
                     # ✅ 不在结果收集阶段检查取消状态
                     # process_batch 已经处理了取消逻辑，这里只需要收集所有结果
                     if ctx:
                         if hasattr(ctx, 'skipped') and ctx.skipped:
-                            skipped_count += 1
+                            skipped_backend_count += 1
                         # 检查是否有翻译错误
                         if hasattr(ctx, 'translation_error') and ctx.translation_error:
                             results.append({'success': False, 'original_path': ctx.image_name, 'error': ctx.translation_error})
-                            failed_count += 1
+                            processed_failed_count += 1
                             # 输出详细的错误信息（包含原始错误）
                             self.log_received.emit(f"\n⚠️ 图片 {os.path.basename(ctx.image_name)} 翻译失败：")
                             self.log_received.emit(ctx.translation_error)
                         elif hasattr(ctx, 'success') and ctx.success:
                             # 优先检查success标志（因为result可能被清理了）
                             results.append({'success': True, 'original_path': ctx.image_name, 'image_data': None})
-                            success_count += 1
+                            processed_success_count += 1
                         elif ctx.result:
                             results.append({'success': True, 'original_path': ctx.image_name, 'image_data': None})
-                            success_count += 1
+                            processed_success_count += 1
                         else:
                             results.append({'success': False, 'original_path': ctx.image_name, 'error': '翻译结果为空'})
-                            failed_count += 1
+                            processed_failed_count += 1
                     else:
                         results.append({'success': False, 'original_path': 'Unknown', 'error': 'Batch translation returned no context'})
-                        failed_count += 1
+                        processed_failed_count += 1
 
+                # Summary fields are used by UI for consistent counting.
+                # Keep legacy keys (success/failed/skipped) for compatibility.
                 self.results_summary = {
-                    'success': success_count,
-                    'failed': failed_count,
-                    'skipped': skipped_count,
+                    'total': total_original_count,
+                    'to_process': total_images,
+                    'success': processed_success_count,
+                    'failed': processed_failed_count,
+                    'skipped': skipped_existing_count,
+                    'skipped_existing': skipped_existing_count,
+                    'skipped_backend': skipped_backend_count,
                 }
 
-                if failed_count > 0:
-                    self.log_received.emit(self._t("\n⚠️ Batch translation completed: {success}/{total} succeeded, {failed}/{total} failed", success=success_count, total=total_images, failed=failed_count))
+                if processed_failed_count > 0:
+                    self.log_received.emit(self._t("\n⚠️ Batch translation completed: {success}/{total} succeeded, {failed}/{total} failed", success=processed_success_count, total=total_images, failed=processed_failed_count))
                     # 🔍 调试：检查results中的失败项
                     self.log_received.emit(f"📋 [调试] 即将调用_emit_failed_files_record，results数量: {len(results)}")
                     failed_results = [r for r in results if not r.get('success', True)]
@@ -3062,7 +3233,7 @@ class TranslationWorker(QObject):
                     # 收集失败文件信息并发射信号
                     self._emit_failed_files_record(results)
                 else:
-                    self.log_received.emit(self._t("✅ Batch translation completed: {success}/{total} succeeded", success=success_count, total=total_images))
+                    self.log_received.emit(self._t("✅ Batch translation completed: {success}/{total} succeeded", success=processed_success_count, total=total_images))
                 self.log_received.emit(self._t("💾 Files saved to: {dir}", dir=self.output_folder))
 
             else:
@@ -3077,7 +3248,7 @@ class TranslationWorker(QObject):
                     self.log_received.emit(workflow_tip)
 
                 # 初始化进度条
-                self.progress.emit(skipped_count, total_original_count, "")
+                self.progress.emit(skipped_existing_count, total_original_count, "")
 
                 success_count = 0
                 # ✅ 顺序模式也需要把失败信息发射给UI（用于“失败记录”列表）
@@ -3089,7 +3260,7 @@ class TranslationWorker(QObject):
                         if not self._is_running:
                             raise asyncio.CancelledError("Task stopped by user.")
 
-                        current_num = skipped_count + i + 1
+                        current_num = skipped_existing_count + i + 1
                         # 更新进度条（显示图片数量）
                         self.progress.emit(current_num, total_original_count, "")
                         self.log_received.emit(f"🔄 [{current_num}/{total_original_count}] 正在处理：{os.path.basename(file_path)}")

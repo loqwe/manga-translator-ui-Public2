@@ -727,6 +727,7 @@
   "Clear": "清空",
   "Double-click to re-import failed images": "双击重新导入失败的图片",
   "All files in this record no longer exist.": "此记录中的所有文件均已不存在。",
+  "Re-import": "重新导入",
   "Retry": "重试",
   "Delete": "删除",
   "A task is already running. Please wait for it to complete.": "当前有任务在运行中，请等待它完成后再试。",
