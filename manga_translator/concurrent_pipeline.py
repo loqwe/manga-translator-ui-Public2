@@ -84,6 +84,23 @@ class ConcurrentPipeline:
         self.inpaint_queue = asyncio.Queue()      # 修复队列
         self.render_queue = asyncio.Queue()       # 渲染队列
         
+        # Main-queue backpressure: pause OCR/detection when translation_queue is piled up, then focus on translation.
+        self._ocr_pause_threshold = 100
+        self._ocr_resume_threshold = 0
+        self._ocr_can_run_event = asyncio.Event()
+        self._ocr_can_run_event.set()
+        self._main_queue_concurrent_enabled = False
+        
+        # Translation worker "active concurrency" limit:
+        # - Main stage: default 1
+        # - Backpressure triggered: temporarily raise to translation_concurrency
+        # - After inpaint stops: raise to translation_concurrency (sticky)
+        self._active_worker_limit = 1
+        self._worker_scale_lock = asyncio.Lock()
+
+        # Serialize GPU-heavy ops across stages to reduce HIP OOM spikes on AMD/ROCm.
+        self._gpu_op_lock = asyncio.Lock()
+        
         # 结果存储 {image_name: ctx}
         # ✅ 存储完整的ctx对象，而不是True/False标记
         self.translation_done = {}  # 翻译完成的ctx（包含翻译后的text_regions）
@@ -123,6 +140,18 @@ class ConcurrentPipeline:
         self._main_workers_target = 0
         self._main_workers_finished = 0
         self._main_workers_lock = asyncio.Lock()
+
+    def _should_serialize_gpu_ops(self, config) -> bool:
+        """Return True if GPU-heavy ops should be serialized."""
+        try:
+            if config is None:
+                return True
+            cli = getattr(config, 'cli', None)
+            if cli is None:
+                return True
+            return bool(getattr(cli, 'use_gpu', False))
+        except Exception:
+            return True
     
     async def _detection_ocr_worker(self, file_paths: List[str], configs: List):
         """
@@ -140,6 +169,10 @@ class ConcurrentPipeline:
         current_work_name = None
         
         for idx, (file_path, config) in enumerate(zip(file_paths, configs)):
+            # Main-queue backpressure: pause OCR/detection (only takes effect between images; won't interrupt the current image).
+            while (not self.stop_workers) and (not self.has_critical_error) and (not self._ocr_can_run_event.is_set()):
+                await asyncio.sleep(0.2)
+
             # 检查是否需要停止（其他线程出错）
             if self.stop_workers:
                 logger.warning(f"[检测+OCR] 收到停止信号，已处理 {idx}/{len(file_paths)} 张图片")
@@ -178,12 +211,18 @@ class ConcurrentPipeline:
                 ctx.rate_limiter = self.rate_limiter  # 传递限速器引用，便于翻译器通知 429 错误
                 
                 logger.info(f"[检测+OCR] 处理 {idx+1}/{self.total_images}: {ctx.image_name}")
+
+                serialize_gpu = self._should_serialize_gpu_ops(config)
                 
                 # 预处理：加载图片、上色、超分
                 ctx.img_rgb, ctx.img_alpha = load_image(image)
                 
                 if config.colorizer.colorizer.value != 'none':
-                    colorized_result = await self.translator._run_colorizer(config, ctx)
+                    if serialize_gpu:
+                        async with self._gpu_op_lock:
+                            colorized_result = await self.translator._run_colorizer(config, ctx)
+                    else:
+                        colorized_result = await self.translator._run_colorizer(config, ctx)
                     # colorizer 返回 PIL Image，需要转换为 numpy
                     if hasattr(colorized_result, 'mode'):  # PIL Image
                         ctx.img_colorized, _ = load_image(colorized_result)
@@ -193,7 +232,11 @@ class ConcurrentPipeline:
                     ctx.img_colorized = ctx.img_rgb
                 
                 if config.upscale.upscale_ratio:
-                    upscaled_result = await self.translator._run_upscaling(config, ctx)
+                    if serialize_gpu:
+                        async with self._gpu_op_lock:
+                            upscaled_result = await self.translator._run_upscaling(config, ctx)
+                    else:
+                        upscaled_result = await self.translator._run_upscaling(config, ctx)
                     # upscaler 返回 PIL Image，需要转换为 numpy
                     if hasattr(upscaled_result, 'mode'):  # PIL Image
                         ctx.upscaled, _ = load_image(upscaled_result)
@@ -211,9 +254,15 @@ class ConcurrentPipeline:
                     asyncio.run,
                     self.translator._run_detection(config, ctx)
                 )
-                detection_result = await loop.run_in_executor(
-                    self.executor, detection_func
-                )
+                if serialize_gpu:
+                    async with self._gpu_op_lock:
+                        detection_result = await loop.run_in_executor(
+                            self.executor, detection_func
+                        )
+                else:
+                    detection_result = await loop.run_in_executor(
+                        self.executor, detection_func
+                    )
                 # 检测结果现在返回4个值：(textlines, mask_raw, mask/debug_img, yolo_boxes)
                 if len(detection_result) >= 4:
                     ctx.textlines, ctx.mask_raw, ctx.mask = detection_result[0], detection_result[1], detection_result[2]
@@ -226,9 +275,15 @@ class ConcurrentPipeline:
                     asyncio.run,
                     self.translator._run_ocr(config, ctx)
                 )
-                ctx.textlines = await loop.run_in_executor(
-                    self.executor, ocr_func
-                )
+                if serialize_gpu:
+                    async with self._gpu_op_lock:
+                        ctx.textlines = await loop.run_in_executor(
+                            self.executor, ocr_func
+                        )
+                else:
+                    ctx.textlines = await loop.run_in_executor(
+                        self.executor, ocr_func
+                    )
                 
                 # 文本行合并
                 if ctx.textlines:
@@ -412,9 +467,12 @@ class ConcurrentPipeline:
         # 内部批次队列（收集者 -> workers）
         batch_queue: asyncio.Queue = asyncio.Queue()
         
-        # Worker 数量控制
+        # Worker control:
+        # - _current_worker_count: spawned worker count (monotonic increase; used for worker_id allocation)
+        # - _active_worker_limit: active worker limit (can switch between 1 and target)
         self._current_worker_count = 1  # 修复线程运行时只启动1个worker
-        self._target_worker_count = self.translation_concurrency
+        self._target_worker_count = max(1, int(self.translation_concurrency or 1))
+        self._active_worker_limit = 1
         self._workers: List[asyncio.Task] = []
         self._worker_stop_event = asyncio.Event()  # 通知所有worker停止
         
@@ -435,9 +493,30 @@ class ConcurrentPipeline:
         expand_workers_task = asyncio.create_task(
             self._expand_workers_on_inpaint_stop(batch_queue)
         )
+
+        # Main-queue backpressure controller: pause OCR when translation_queue is piled up, then temporarily enable concurrent translation.
+        backpressure_task = asyncio.create_task(
+            self._main_queue_backpressure_controller(batch_queue)
+        )
         
         # Wait for the collector to finish (all images have been enqueued into batch_queue).
         await collector_task
+
+        # Stop backpressure controller (avoid affecting the shutdown stage).
+        if not backpressure_task.done():
+            backpressure_task.cancel()
+            try:
+                await backpressure_task
+            except asyncio.CancelledError:
+                pass
+        # Ensure OCR/detection won't be stuck.
+        try:
+            self._ocr_can_run_event.set()
+        except Exception:
+            pass
+
+        # Shutdown stage: allow all spawned workers to participate (avoid idle workers hanging forever).
+        self._active_worker_limit = max(1, int(self._current_worker_count or 1))
 
         # Send switch signals to all workers.
         # IMPORTANT: send based on the *target* worker count to avoid deadlocks when
@@ -517,9 +596,10 @@ class ConcurrentPipeline:
                     logger.warning(f"[收集者] 检测到严重错误，停止收集")
                     break
                 
-                # ✅ 多 Worker 模式：若所有 Worker 都忙，则暂停收集
-                if self._current_worker_count > 1 and self._worker_busy:
-                    all_busy = all(self._worker_busy.values())
+                # Multi-worker mode: if all active workers are busy, pause collecting.
+                if self._active_worker_limit > 1 and self._worker_busy:
+                    active_ids = [i for i in range(int(self._active_worker_limit or 1))]
+                    all_busy = all(self._worker_busy.get(i, False) for i in active_ids)
                     if all_busy:
                         await asyncio.sleep(0.5)
                         continue
@@ -537,7 +617,7 @@ class ConcurrentPipeline:
                             if batch_start_time is None:
                                 batch_start_time = asyncio.get_event_loop().time()
                             enqueued_total = getattr(self, 'translation_enqueued_total', 0)
-                            if self._current_worker_count == 1:
+                            if self._active_worker_limit == 1:
                                 logger.info(
                                     f"[收集者] 收集到图片 ({len(pending_batch)}/{self.batch_size})，"
                                     f"累计收集: {collected_total}，累计入队: {enqueued_total}，"
@@ -578,7 +658,7 @@ class ConcurrentPipeline:
                     enqueued_total = getattr(self, 'translation_enqueued_total', 0)
                     logger.info(
                         f"[收集者] 将 {len(pending_batch)}/{self.batch_size} 张图片放入批次队列"
-                        f"（当前worker数={self._current_worker_count}，目标={self._target_worker_count}，累计收集: {collected_total}，"
+                        f"（活跃worker={self._active_worker_limit}，已启动={self._current_worker_count}，目标={self._target_worker_count}，累计收集: {collected_total}，"
                         f"累计入队: {enqueued_total}，翻译队列剩余: {self.translation_queue.qsize()}，"
                         f"原因: {reason}）"
                     )
@@ -588,7 +668,7 @@ class ConcurrentPipeline:
                     
                     # ✅ 单 Worker 模式：等待当前批次翻译完成后再收集下一批
                     # 多 Worker 模式：继续并行收集（流水线）
-                    if self._current_worker_count == 1:
+                    if self._active_worker_limit == 1:
                         # 等待单Worker空闲，确保上一批次翻译完成
                         while not self.stop_workers and not self.has_critical_error:
                             busy = any(self._worker_busy.values())
@@ -621,6 +701,12 @@ class ConcurrentPipeline:
                 if self.has_critical_error:
                     logger.warning(f"[Worker-{worker_id}] 检测到严重错误，停止")
                     break
+
+                # Main-queue backpressure: non-active workers should not pull tasks in serial mode.
+                # worker_id=0 is always active; others are gated by _active_worker_limit.
+                if worker_id > 0 and worker_id >= int(self._active_worker_limit or 1):
+                    await asyncio.sleep(0.2)
+                    continue
                 
                 # 从批次队列获取任务（阻塞等待）
                 try:
@@ -704,47 +790,173 @@ class ConcurrentPipeline:
             self.stats['translation'] += len(batch)
     
     async def _expand_workers_on_inpaint_stop(self, batch_queue: asyncio.Queue):
-        """
-        后台任务：等待修复线程停止后扩展worker数量
-        """
+        """Wait for the inpaint worker to stop, then expand translation workers."""
         try:
-            # 等待修复线程停止
+            # Wait for the inpaint worker to stop.
             await self.inpaint_stopped_event.wait()
             
-            logger.info(f"[扩展] 修复线程已停止，开始扩展worker")
-            
-            # 切换术语缓存策略
-            if not self.glossary_mode_switched:
-                from .translators.glossary_cache import set_translation_concurrency
-                set_translation_concurrency(self.translation_concurrency)
-                self.glossary_mode_switched = True
-                logger.info(f"[扩展] 术语切换为延迟刷新模式")
-            
-            # 扩展速率限制器
-            if not self.rpm_restored:
-                old_concurrency = self.rate_limiter.concurrency
-                if self._target_worker_count > old_concurrency:
-                    self.rate_limiter.expand_concurrency(self._target_worker_count)
-                self.rpm_restored = True
-                logger.info(f"[扩展] 速率限制器扩展: {old_concurrency} -> {self._target_worker_count}")
-            
-            # 启动额外的worker
-            workers_to_add = self._target_worker_count - self._current_worker_count
-            if workers_to_add > 0:
-                logger.info(f"[扩展] 启动 {workers_to_add} 个额外worker")
-                for i in range(workers_to_add):
-                    new_worker_id = self._current_worker_count + i
-                    worker = asyncio.create_task(
-                        self._translation_pool_worker(new_worker_id, batch_queue)
-                    )
-                    self._workers.append(worker)
-                self._current_worker_count = self._target_worker_count
-                logger.info(f"[扩展] worker数量: {self._current_worker_count}")
+            logger.info("[扩展] 修复线程已停止，开始扩展worker")
+
+            async with self._worker_scale_lock:
+                # Switch glossary write strategy to delayed flush (concurrent-safe).
+                if not self.glossary_mode_switched:
+                    from .translators.glossary_cache import set_translation_concurrency
+                    set_translation_concurrency(self.translation_concurrency)
+                    self.glossary_mode_switched = True
+                    logger.info("[扩展] 术语切换为延迟刷新模式")
+
+                # Expand rate limiter concurrency.
+                if not self.rpm_restored:
+                    old_concurrency = self.rate_limiter.concurrency
+                    if self._target_worker_count > old_concurrency:
+                        self.rate_limiter.expand_concurrency(self._target_worker_count)
+                    self.rpm_restored = True
+                    logger.info(f"[扩展] 速率限制器扩展: {old_concurrency} -> {self._target_worker_count}")
+
+                # Spawn extra workers (monotonic increase).
+                workers_to_add = self._target_worker_count - self._current_worker_count
+                if workers_to_add > 0:
+                    logger.info(f"[扩展] 启动 {workers_to_add} 个额外worker")
+                    for i in range(workers_to_add):
+                        new_worker_id = self._current_worker_count + i
+                        worker = asyncio.create_task(
+                            self._translation_pool_worker(new_worker_id, batch_queue)
+                        )
+                        self._workers.append(worker)
+                    self._current_worker_count = self._target_worker_count
+                    logger.info(f"[扩展] worker数量: {self._current_worker_count}")
+
+                # After inpaint stops, keep concurrent translation enabled.
+                self._active_worker_limit = int(self._target_worker_count or 1)
+                logger.info(f"[扩展] 活跃worker上限: {self._active_worker_limit}")
                 
         except asyncio.CancelledError:
             logger.debug("[扩展] 任务被取消")
         except Exception as e:
             logger.error(f"[扩展] 错误: {e}")
+
+    async def _main_queue_backpressure_controller(self, batch_queue: asyncio.Queue):
+        """Backpressure controller (main stage only).
+
+        Uses `translation_queue.qsize()` (OCR-finished but not yet collected) as the metric:
+        - If queue size >= threshold: pause OCR/detection and temporarily enable concurrent translation.
+        - If queue size == 0: resume OCR/detection and disable concurrent translation.
+
+        Note:
+        - This controller is only meaningful before the inpaint worker stops.
+        - Once inpaint stops, the pipeline switches to full concurrency permanently.
+        """
+        target = int(self._target_worker_count or 1)
+        if target <= 1:
+            return
+
+        try:
+            while not self.stop_workers and not self.has_critical_error:
+                # Only apply to the "main queue" stage.
+                if self.inpaint_stopped_event.is_set() or self.detection_ocr_done:
+                    try:
+                        self._ocr_can_run_event.set()
+                    except Exception:
+                        pass
+                    break
+
+                q = int(self.translation_queue.qsize() or 0)
+
+                if (not self._main_queue_concurrent_enabled) and q >= int(self._ocr_pause_threshold or 0):
+                    await self._enable_main_queue_concurrency(batch_queue=batch_queue, qsize=q)
+                elif self._main_queue_concurrent_enabled and q <= int(self._ocr_resume_threshold or 0):
+                    await self._disable_main_queue_concurrency(qsize=q)
+
+                await asyncio.sleep(0.5)
+
+        except asyncio.CancelledError:
+            try:
+                self._ocr_can_run_event.set()
+            except Exception:
+                pass
+            raise
+
+    async def _enable_main_queue_concurrency(self, *, batch_queue: asyncio.Queue, qsize: int):
+        """Enable concurrent translation temporarily (main queue stage)."""
+        async with self._worker_scale_lock:
+            if self._main_queue_concurrent_enabled:
+                return
+            if self.inpaint_stopped_event.is_set() or self.detection_ocr_done:
+                return
+
+            # Pause OCR/detection.
+            try:
+                self._ocr_can_run_event.clear()
+            except Exception:
+                pass
+
+            target = int(self._target_worker_count or 1)
+
+            # Expand rate limiter concurrency once (monotonic increase).
+            try:
+                if target > int(self.rate_limiter.concurrency or 1):
+                    self.rate_limiter.expand_concurrency(target)
+            except Exception:
+                pass
+
+            # Spawn workers up to target.
+            workers_to_add = target - int(self._current_worker_count or 0)
+            if workers_to_add > 0:
+                logger.info(f"[背压] 启动 {workers_to_add} 个额外worker（阈值触发）")
+                for i in range(workers_to_add):
+                    new_worker_id = int(self._current_worker_count or 0) + i
+                    worker = asyncio.create_task(
+                        self._translation_pool_worker(new_worker_id, batch_queue)
+                    )
+                    self._workers.append(worker)
+                self._current_worker_count = target
+
+            # Switch glossary cache strategy to delayed flush to avoid concurrent file writes.
+            try:
+                from .translators.glossary_cache import set_translation_concurrency
+                set_translation_concurrency(target)
+            except Exception:
+                pass
+
+            # Enable concurrent translation workers.
+            prev_limit = int(self._active_worker_limit or 1)
+            self._active_worker_limit = target
+            self._main_queue_concurrent_enabled = True
+
+            logger.warning(
+                f"[背压] 翻译队列剩余={qsize} 达到阈值{self._ocr_pause_threshold}，暂停检测+OCR，"
+                f"启用并发翻译（活跃worker: {prev_limit} -> {self._active_worker_limit}）"
+            )
+
+    async def _disable_main_queue_concurrency(self, *, qsize: int):
+        """Disable concurrent translation temporarily (main queue stage)."""
+        async with self._worker_scale_lock:
+            if not self._main_queue_concurrent_enabled:
+                return
+            if self.inpaint_stopped_event.is_set() or self.detection_ocr_done:
+                return
+
+            prev_limit = int(self._active_worker_limit or 1)
+            self._active_worker_limit = 1
+            self._main_queue_concurrent_enabled = False
+
+            # Switch glossary cache strategy back to write-through.
+            try:
+                from .translators.glossary_cache import set_translation_concurrency
+                set_translation_concurrency(1)
+            except Exception:
+                pass
+
+            # Resume OCR/detection.
+            try:
+                self._ocr_can_run_event.set()
+            except Exception:
+                pass
+
+            logger.info(
+                f"[背压] 翻译队列已清空(q={qsize})，停止并发翻译（活跃worker: {prev_limit} -> {self._active_worker_limit}），"
+                f"恢复检测+OCR"
+            )
     
     async def _process_translation_batch(self, batch: List[tuple], retry_count: int = 0, skip_rate_limiter: bool = False):
         """
@@ -1341,6 +1553,8 @@ class ConcurrentPipeline:
                     continue
                 
                 logger.info(f"[修复] 处理: {ctx.image_name}")
+
+                serialize_gpu = self._should_serialize_gpu_ops(config)
                 
                 # Mask refinement（在线程池中执行）
                 if ctx.mask is None and ctx.text_regions:
@@ -1349,7 +1563,11 @@ class ConcurrentPipeline:
                         asyncio.run,
                         self.translator._run_mask_refinement(config, ctx)
                     )
-                    ctx.mask = await loop.run_in_executor(self.executor, mask_func)
+                    if serialize_gpu:
+                        async with self._gpu_op_lock:
+                            ctx.mask = await loop.run_in_executor(self.executor, mask_func)
+                    else:
+                        ctx.mask = await loop.run_in_executor(self.executor, mask_func)
                 
                 # Inpainting（在线程池中执行）
                 if ctx.text_regions:
@@ -1358,7 +1576,11 @@ class ConcurrentPipeline:
                         asyncio.run,
                         self.translator._run_inpainting(config, ctx)
                     )
-                    ctx.img_inpainted = await loop.run_in_executor(self.executor, inpaint_func)
+                    if serialize_gpu:
+                        async with self._gpu_op_lock:
+                            ctx.img_inpainted = await loop.run_in_executor(self.executor, inpaint_func)
+                    else:
+                        ctx.img_inpainted = await loop.run_in_executor(self.executor, inpaint_func)
                 
                 self.stats['inpaint'] += 1
                 logger.info(f"[修复] 完成: {ctx.image_name} ({self.stats['inpaint']}/{self.total_images})")
