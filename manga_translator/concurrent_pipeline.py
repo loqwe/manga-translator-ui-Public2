@@ -518,7 +518,7 @@ class ConcurrentPipeline:
                     break
                 
                 # ✅ 多 Worker 模式：若所有 Worker 都忙，则暂停收集
-                if self._target_worker_count > 1 and self._worker_busy:
+                if self._current_worker_count > 1 and self._worker_busy:
                     all_busy = all(self._worker_busy.values())
                     if all_busy:
                         await asyncio.sleep(0.5)
@@ -537,7 +537,7 @@ class ConcurrentPipeline:
                             if batch_start_time is None:
                                 batch_start_time = asyncio.get_event_loop().time()
                             enqueued_total = getattr(self, 'translation_enqueued_total', 0)
-                            if self._target_worker_count == 1:
+                            if self._current_worker_count == 1:
                                 logger.info(
                                     f"[收集者] 收集到图片 ({len(pending_batch)}/{self.batch_size})，"
                                     f"累计收集: {collected_total}，累计入队: {enqueued_total}，"
@@ -578,7 +578,7 @@ class ConcurrentPipeline:
                     enqueued_total = getattr(self, 'translation_enqueued_total', 0)
                     logger.info(
                         f"[收集者] 将 {len(pending_batch)}/{self.batch_size} 张图片放入批次队列"
-                        f"（worker总数={self._target_worker_count}，累计收集: {collected_total}，"
+                        f"（当前worker数={self._current_worker_count}，目标={self._target_worker_count}，累计收集: {collected_total}，"
                         f"累计入队: {enqueued_total}，翻译队列剩余: {self.translation_queue.qsize()}，"
                         f"原因: {reason}）"
                     )
@@ -588,7 +588,7 @@ class ConcurrentPipeline:
                     
                     # ✅ 单 Worker 模式：等待当前批次翻译完成后再收集下一批
                     # 多 Worker 模式：继续并行收集（流水线）
-                    if self._target_worker_count == 1:
+                    if self._current_worker_count == 1:
                         # 等待单Worker空闲，确保上一批次翻译完成
                         while not self.stop_workers and not self.has_critical_error:
                             busy = any(self._worker_busy.values())

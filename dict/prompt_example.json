@@ -126,9 +126,22 @@
           {
             "original": "스마타",
             "translation": "素股"
+          },
+          {
+            "original": "동화율",
+            "translation": "同化率"
+          },
+          {
+            "original": "함몰",
+            "translation": "凹陷"
           }
         ],
-        "Creature": []
+        "Creature": [
+          {
+            "original": "염생",
+            "translation": "鬼魂"
+          }
+        ]
       },
       "女神都在看这些": {
         "Person": [],
@@ -655,8 +668,21 @@
       {
         "original": "스마타",
         "translation": "素股"
+      },
+      {
+        "original": "동화율",
+        "translation": "同化率"
+      },
+      {
+        "original": "함몰",
+        "translation": "凹陷"
       }
     ],
-    "Creature": []
+    "Creature": [
+      {
+        "original": "염생",
+        "translation": "鬼魂"
+      }
+    ]
   }
 }
