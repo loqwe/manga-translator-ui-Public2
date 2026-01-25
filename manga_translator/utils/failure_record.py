@@ -45,6 +45,10 @@ def _serialize_context(ctx) -> Dict[str, Any]:
     if hasattr(ctx, 'image_name'):
         result['image_name'] = ctx.image_name
     
+    # 保存作品名（用于重试时匹配术语表）
+    if hasattr(ctx, 'work_name') and ctx.work_name:
+        result['work_name'] = ctx.work_name
+    
     # 保存原文文本（用于重试时的上下文）
     if hasattr(ctx, 'text_regions') and ctx.text_regions:
         original_texts = []
@@ -297,7 +301,7 @@ def prepare_retry_context(record: Dict[str, Any]) -> Dict[str, Any]:
         record: 失败记录字典
         
     Returns:
-        重试上下文字典，包含 local_prev_context 和 historical_context
+        重试上下文字典，包含 local_prev_context、historical_context 和 work_name
     """
     result = {}
     
@@ -305,6 +309,10 @@ def prepare_retry_context(record: Dict[str, Any]) -> Dict[str, Any]:
     ctx_data = record.get('context', {})
     if 'local_prev_context' in ctx_data:
         result['local_prev_context'] = ctx_data['local_prev_context']
+    
+    # 提取作品名（用于重试时匹配术语表）
+    if 'work_name' in ctx_data:
+        result['work_name'] = ctx_data['work_name']
     
     # 提取历史上下文
     hist_ctx = record.get('historical_context', {})
