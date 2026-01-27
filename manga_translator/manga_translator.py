@@ -4633,21 +4633,182 @@ class MangaTranslator:
             
             # ✅ 确保 from_lang 有效（用于按语言加载提示词）
             source_lang = getattr(ctx, 'from_lang', None) or 'auto'
-            
-            # openai_hq, gemini_hq 等需要传递ctx参数
-            if config.translator.translator in [Translator.openai_hq, Translator.gemini_hq]:
-                # 所有需要上下文的翻译器都在这里传递ctx
-                return await translator._translate(
-                    source_lang,
-                    config.translator.target_lang,
-                    texts,
-                    ctx
+            target_lang = config.translator.target_lang
+
+            def _is_openai_hq_empty_content_error(err: Exception) -> bool:
+                msg = str(err) or ""
+                low = msg.lower()
+                # Typical patterns:
+                # - "OpenAI returned empty content (finish_reason: stop)"
+                # - "OpenAI API returned empty text"
+                return (
+                    "returned empty content" in low
+                    or "api returned empty text" in low
+                    or "返回空内容" in msg
+                    or "返回空文本" in msg
                 )
+
+            # openai_hq, gemini_hq 等需要传递ctx参数
+            if translator_key in [Translator.openai_hq, Translator.gemini_hq]:
+                try:
+                    return await translator._translate(
+                        source_lang,
+                        target_lang,
+                        texts,
+                        ctx
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    # openai_hq 空内容：拆分单图翻译，仍失败再降级到 openai 文本翻译继续跑
+                    if translator_key == Translator.openai_hq and _is_openai_hq_empty_content_error(e):
+                        logger.warning(
+                            "[HQ降级] openai_hq 批量翻译返回空内容，将拆分为单图翻译；若仍失败则降级到 openai 文本翻译继续处理"
+                        )
+
+                        batch_data = getattr(ctx, 'high_quality_batch_data', None)
+                        if not isinstance(batch_data, list) or not batch_data:
+                            logger.warning("[HQ降级] 未找到 high_quality_batch_data，直接降级到 openai 文本翻译")
+                            try:
+                                return await self._fallback_batch_text_translate(texts, config, ctx)
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception as fb_e:
+                                logger.error(f"[HQ降级] 文本翻译也失败，将回退原文: {fb_e}")
+                                return texts
+
+                        counts = []
+                        for d in batch_data:
+                            if not isinstance(d, dict):
+                                counts.append(0)
+                                continue
+                            original_texts = d.get('original_texts') or []
+                            if isinstance(original_texts, list):
+                                counts.append(len([t for t in original_texts if t is not None]))
+                            else:
+                                counts.append(0)
+
+                        total_expected = sum(counts)
+                        if total_expected != len(texts):
+                            logger.warning(
+                                f"[HQ降级] 文本数量不匹配，无法按图片拆分 (expected={len(texts)}, by_batch_data={total_expected})，直接降级到 openai 文本翻译"
+                            )
+                            try:
+                                return await self._fallback_batch_text_translate(texts, config, ctx)
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception as fb_e:
+                                logger.error(f"[HQ降级] 文本翻译也失败，将回退原文: {fb_e}")
+                                return texts
+
+                        results: List[str] = []
+                        offset = 0
+                        for img_idx, cnt in enumerate(counts):
+                            single_texts = texts[offset: offset + cnt]
+                            offset += cnt
+                            if not single_texts:
+                                continue
+
+                            # Prefer the real per-image context if available.
+                            ref_ctx = None
+                            try:
+                                if batch_contexts and img_idx < len(batch_contexts):
+                                    ref_ctx = batch_contexts[img_idx]
+                            except Exception:
+                                ref_ctx = None
+
+                            # Build per-image batch_data with local ids 1..N (must match unified user prompt ids).
+                            d = batch_data[img_idx] if img_idx < len(batch_data) else {}
+                            single_data = dict(d) if isinstance(d, dict) else {}
+                            single_data['original_texts'] = list(single_texts)
+                            single_data['text_order'] = list(range(1, len(single_texts) + 1))
+                            single_batch_data = [single_data]
+
+                            # Build a per-image ctx for HQ translator.
+                            single_ctx = Context()
+                            single_ctx.config = config
+                            single_ctx.high_quality_batch_data = single_batch_data
+
+                            # Runtime fields (best-effort).
+                            try:
+                                single_ctx.worker_id = (getattr(ref_ctx, 'worker_id', None) if ref_ctx else None) or getattr(ctx, 'worker_id', None)
+                            except Exception:
+                                pass
+                            try:
+                                single_ctx.rate_limiter = (getattr(ref_ctx, 'rate_limiter', None) if ref_ctx else None) or getattr(ctx, 'rate_limiter', None)
+                            except Exception:
+                                pass
+
+                            # Work resolver / glossary needs image_name.
+                            single_ctx.image_name = (getattr(ref_ctx, 'image_name', None) if ref_ctx else None) or getattr(ctx, 'image_name', None)
+
+                            # Per-image source language if we have it.
+                            single_ctx.from_lang = (getattr(ref_ctx, 'from_lang', None) if ref_ctx else None) or getattr(ctx, 'from_lang', None) or 'auto'
+
+                            # Input image.
+                            if ref_ctx and getattr(ref_ctx, 'input', None) is not None:
+                                single_ctx.input = ref_ctx.input
+                            else:
+                                single_ctx.input = single_data.get('image') or getattr(ctx, 'input', None)
+
+                            # Text regions (for AI断句/BR检查).
+                            tr = single_data.get('text_regions')
+                            if tr is None and ref_ctx is not None:
+                                tr = getattr(ref_ctx, 'text_regions', None)
+                            single_ctx.text_regions = tr or []
+
+                            # Carry prompts & glossary metadata from the merged ctx.
+                            single_ctx.custom_prompt_json = getattr(ctx, 'custom_prompt_json', None)
+                            single_ctx.line_break_prompt_json = getattr(ctx, 'line_break_prompt_json', None)
+                            single_ctx.glossary_write_work_name = getattr(ctx, 'glossary_write_work_name', None)
+                            single_ctx.raw_work_name = getattr(ctx, 'raw_work_name', None)
+                            single_ctx.work_name = getattr(ctx, 'work_name', None)
+
+                            # Carry same-batch original context if present.
+                            if ref_ctx and hasattr(ref_ctx, 'local_prev_context'):
+                                single_ctx.local_prev_context = getattr(ref_ctx, 'local_prev_context', None)
+
+                            # 1) Try HQ single-image translation.
+                            try:
+                                single_trans = await translator._translate(
+                                    getattr(single_ctx, 'from_lang', None) or 'auto',
+                                    target_lang,
+                                    single_texts,
+                                    single_ctx
+                                )
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception as single_e:
+                                logger.warning(f"[HQ降级] 单图翻译失败，将降级到文本翻译: {single_e}")
+                                # 2) Fallback to text-only OpenAI translator.
+                                try:
+                                    single_trans = await self._fallback_batch_text_translate(single_texts, config, single_ctx)
+                                except asyncio.CancelledError:
+                                    raise
+                                except Exception as fb_e:
+                                    logger.error(f"[HQ降级] 文本翻译也失败，将回退原文: {fb_e}")
+                                    single_trans = list(single_texts)
+
+                            if (not isinstance(single_trans, list)) or (len(single_trans) != len(single_texts)):
+                                logger.warning(
+                                    f"[HQ降级] 单图结果数量不匹配，将回退原文 (expected={len(single_texts)}, got={len(single_trans) if isinstance(single_trans, list) else 'N/A'})"
+                                )
+                                single_trans = list(single_texts)
+
+                            results.extend(single_trans)
+
+                        if len(results) != len(texts):
+                            logger.warning(f"[HQ降级] 合并后的结果数量不匹配，将回退原文 (expected={len(texts)}, got={len(results)})")
+                            return texts
+
+                        return results
+
+                    raise
             else:
                 # 普通OpenAI和Gemini需要ctx参数（用于AI断句）
                 return await translator._translate(
                     source_lang,
-                    config.translator.target_lang,
+                    target_lang,
                     texts,
                     ctx
                 )
@@ -5549,6 +5710,9 @@ class MangaTranslator:
                                 enhanced_ctx.from_lang = first_ctx.from_lang
                             else:
                                 enhanced_ctx.from_lang = 'auto'
+                            # ✅ 复制 image_name（用于作品名识别与术语匹配）
+                            if hasattr(first_ctx, 'image_name'):
+                                enhanced_ctx.image_name = first_ctx.image_name
                         
                         enhanced_ctx.high_quality_batch_data = batch_data
 
@@ -5578,6 +5742,7 @@ class MangaTranslator:
                             all_texts, 
                             sample_config, 
                             enhanced_ctx,
+                            batch_contexts=[pctx for pctx, _ in preprocessed_contexts],
                             page_index=page_index,
                             batch_index=None,  # 不使用批次内上下文
                             batch_original_texts=None

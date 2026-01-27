@@ -12,10 +12,10 @@
       "interval_ms": 500,
       "log_expanded": false
     },
-    "window_x": 544,
-    "window_y": 363,
+    "window_x": 484,
+    "window_y": 353,
     "window_width": 1300,
-    "window_height": 758,
+    "window_height": 751,
     "window_maximized": false
   },
   "enable_watermark_filter": true,
@@ -63,7 +63,7 @@
   "inpainter": {
     "inpainter": "lama_large",
     "inpainting_size": 2048,
-    "inpainting_precision": "fp16",
+    "inpainting_precision": "bf16",
     "inpainting_split_ratio": 3.0,
     "force_use_torch_inpainting": true
   },

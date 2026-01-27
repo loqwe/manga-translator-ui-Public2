@@ -3,7 +3,24 @@
   "glossary": {
     "works": {
       "借妻條約": {
-        "Person": [],
+        "Person": [
+          {
+            "original": "메이",
+            "translation": "美熙"
+          },
+          {
+            "original": "수헌",
+            "translation": "秀宪"
+          },
+          {
+            "original": "유리",
+            "translation": "宥利"
+          },
+          {
+            "original": "유미",
+            "translation": "由美"
+          }
+        ],
         "Location": [],
         "Org": [],
         "Item": [],
@@ -213,6 +230,10 @@
           {
             "original": "시현",
             "translation": "诗贤"
+          },
+          {
+            "original": "미희",
+            "translation": "美熙"
           }
         ],
         "Location": [],
@@ -291,6 +312,18 @@
           {
             "original": "초아",
             "translation": "草娥"
+          },
+          {
+            "original": "야경",
+            "translation": "夜景"
+          },
+          {
+            "original": "함지동",
+            "translation": "咸志东"
+          },
+          {
+            "original": "고은",
+            "translation": "高恩"
           }
         ],
         "Location": [],
@@ -300,8 +333,46 @@
         "Creature": []
       },
       "猎艳管理员": {
-        "Person": [],
-        "Location": [],
+        "Person": [
+          {
+            "original": "이한",
+            "translation": "李韩"
+          },
+          {
+            "original": "민아",
+            "translation": "敏儿"
+          },
+          {
+            "original": "이부장",
+            "translation": "李部长"
+          },
+          {
+            "original": "박민아",
+            "translation": "朴敏儿"
+          },
+          {
+            "original": "회장",
+            "translation": "会长"
+          },
+          {
+            "original": "김은주",
+            "translation": "金恩珠"
+          },
+          {
+            "original": "주황여우",
+            "translation": "橙色狐狸"
+          },
+          {
+            "original": "빨간망토",
+            "translation": "小红帽"
+          }
+        ],
+        "Location": [
+          {
+            "original": "아롱아파트",
+            "translation": "雅龙公寓"
+          }
+        ],
         "Org": [],
         "Item": [],
         "Skill": [],
@@ -349,6 +420,14 @@
           {
             "original": "이세진",
             "translation": "李世镇"
+          },
+          {
+            "original": "Dog종",
+            "translation": "Dog种"
+          },
+          {
+            "original": "모모",
+            "translation": "桃桃"
           }
         ],
         "Location": [],
@@ -371,6 +450,10 @@
           {
             "original": "히로인 공략노트",
             "translation": "女主角攻略笔记"
+          },
+          {
+            "original": "소환반지",
+            "translation": "召唤戒指"
           }
         ],
         "Skill": [
@@ -382,9 +465,71 @@
             "original": "쾌락의물결",
             "translation": "快乐之潮",
             "lang": "auto"
+          },
+          {
+            "original": "공격력",
+            "translation": "攻击力"
+          },
+          {
+            "original": "심리 반전",
+            "translation": "心理反转"
+          },
+          {
+            "original": "모모편치",
+            "translation": "桃桃重拳"
           }
         ],
         "Creature": []
+      },
+      "慾海交鋒": {
+        "Item": [],
+        "Person": [
+          {
+            "original": "유나",
+            "translation": "宥娜"
+          },
+          {
+            "original": "강이",
+            "translation": "小刚"
+          },
+          {
+            "original": "고동탁",
+            "translation": "高东卓"
+          },
+          {
+            "original": "훈상",
+            "translation": "勋尚"
+          },
+          {
+            "original": "얀새",
+            "translation": "燕鸟"
+          },
+          {
+            "original": "디니",
+            "translation": "迪尼"
+          },
+          {
+            "original": "야진",
+            "translation": "亚珍"
+          },
+          {
+            "original": "연주",
+            "translation": "妍珠"
+          }
+        ],
+        "Org": [],
+        "Creature": [],
+        "Location": [
+          {
+            "original": "반남",
+            "translation": "半南"
+          },
+          {
+            "original": "서남호수공원",
+            "translation": "西南湖水公园"
+          }
+        ],
+        "Skill": []
       }
     },
     "unassigned": {
@@ -603,6 +748,106 @@
       {
         "original": "민혁",
         "translation": "民赫"
+      },
+      {
+        "original": "야경",
+        "translation": "夜景"
+      },
+      {
+        "original": "함지동",
+        "translation": "咸志东"
+      },
+      {
+        "original": "고은",
+        "translation": "高恩"
+      },
+      {
+        "original": "Dog종",
+        "translation": "Dog种"
+      },
+      {
+        "original": "모모",
+        "translation": "桃桃"
+      },
+      {
+        "original": "유나",
+        "translation": "宥娜"
+      },
+      {
+        "original": "강이",
+        "translation": "小刚"
+      },
+      {
+        "original": "고동탁",
+        "translation": "高东卓"
+      },
+      {
+        "original": "훈상",
+        "translation": "勋尚"
+      },
+      {
+        "original": "얀새",
+        "translation": "燕鸟"
+      },
+      {
+        "original": "디니",
+        "translation": "迪尼"
+      },
+      {
+        "original": "야진",
+        "translation": "亚珍"
+      },
+      {
+        "original": "연주",
+        "translation": "妍珠"
+      },
+      {
+        "original": "이한",
+        "translation": "李韩"
+      },
+      {
+        "original": "민아",
+        "translation": "敏儿"
+      },
+      {
+        "original": "이부장",
+        "translation": "李部长"
+      },
+      {
+        "original": "박민아",
+        "translation": "朴敏儿"
+      },
+      {
+        "original": "회장",
+        "translation": "会长"
+      },
+      {
+        "original": "김은주",
+        "translation": "金恩珠"
+      },
+      {
+        "original": "미희",
+        "translation": "美熙"
+      },
+      {
+        "original": "메이",
+        "translation": "美熙"
+      },
+      {
+        "original": "수헌",
+        "translation": "秀宪"
+      },
+      {
+        "original": "유미",
+        "translation": "由美"
+      },
+      {
+        "original": "주황여우",
+        "translation": "橙色狐狸"
+      },
+      {
+        "original": "빨간망토",
+        "translation": "小红帽"
       }
     ],
     "Location": [
@@ -624,6 +869,18 @@
       {
         "original": "탑카페",
         "translation": "Top咖啡厅"
+      },
+      {
+        "original": "반남",
+        "translation": "半南"
+      },
+      {
+        "original": "서남호수공원",
+        "translation": "西南湖水公园"
+      },
+      {
+        "original": "아롱아파트",
+        "translation": "雅龙公寓"
       }
     ],
     "Org": [
@@ -662,6 +919,10 @@
       {
         "original": "무선연결 오나홀",
         "translation": "无线连接飞机杯"
+      },
+      {
+        "original": "소환반지",
+        "translation": "召唤戒指"
       }
     ],
     "Skill": [
@@ -693,6 +954,18 @@
       {
         "original": "함몰",
         "translation": "凹陷"
+      },
+      {
+        "original": "공격력",
+        "translation": "攻击力"
+      },
+      {
+        "original": "심리 반전",
+        "translation": "心理反转"
+      },
+      {
+        "original": "모모편치",
+        "translation": "桃桃重拳"
       }
     ],
     "Creature": [
