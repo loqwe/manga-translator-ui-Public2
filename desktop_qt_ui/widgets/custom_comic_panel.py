@@ -166,9 +166,9 @@ class CustomComicPanel(QWidget):
         if not hasattr(self, '_settings_restored'):
             self._settings_restored = True
             self._restore_basic_settings()
-            # 自动加载上次分析结果
+            # 自动开始分析（如果有配置的文件夹）
             from PyQt6.QtCore import QTimer
-            QTimer.singleShot(200, self._load_previous_analysis)
+            QTimer.singleShot(200, self._auto_analyze_on_open)
     
     # =========================================================
     # 名称映射相关方法已移除（迁移到 NameMappingPanel）
@@ -744,6 +744,22 @@ class CustomComicPanel(QWidget):
                 
         except Exception as e:
             print(f"保存分析结果失败: {e}")
+    
+    def _auto_analyze_on_open(self):
+        """打开时自动开始分析（如果有配置的文件夹）"""
+        try:
+            folder = self.analysis_folder_edit.text()
+            if folder and os.path.exists(folder):
+                # 有有效的分析文件夹，自动开始分析
+                self.result_text.append("\u25b6 自动开始分析...")
+                self.analyze_chapters()
+            else:
+                # 没有配置文件夹，尝试加载上次结果作为备选
+                self._load_previous_analysis()
+        except Exception as e:
+            print(f"自动分析失败: {e}")
+            # 失败时尝试加载上次结果
+            self._load_previous_analysis()
     
     def _load_previous_analysis(self):
         """加载上次分析结果"""
