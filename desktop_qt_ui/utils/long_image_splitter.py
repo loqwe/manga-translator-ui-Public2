@@ -14,6 +14,8 @@
 """
 
 import os
+import re
+import shutil
 import json
 import logging
 from pathlib import Path
@@ -38,6 +40,24 @@ NAMING_PRESETS = {
     "源文件名_序号": "{source}_{index}",      # 原文件名_001.jpg
     "序号_宽x高": "{index}_{width}x{height}",  # 001_800x2600.jpg
 }
+
+
+_DEBUG_TS_DIR_RE = re.compile(r"^\d{8}_\d{6}$")
+_WIN_INVALID_PATH_CHARS_RE = re.compile(r"[<>:\"/\\|?*]")
+
+
+def _sanitize_path_component(name: str) -> str:
+    """Sanitize a path component for Windows filesystem."""
+    if name is None:
+        name = ""
+    name = str(name).strip()
+    if not name:
+        return "unknown"
+
+    name = _WIN_INVALID_PATH_CHARS_RE.sub("_", name)
+    # Windows does not allow trailing spaces or dots
+    name = name.rstrip(" .")
+    return name or "unknown"
 
 
 def format_output_name(
@@ -174,6 +194,35 @@ class LocalSplitter:
         self.debug_dir = DEBUG_ROOT / timestamp
         self.debug_dir.mkdir(parents=True, exist_ok=True)
         self.logger.info(f"[调试] 输出目录: {self.debug_dir}")
+        self._cleanup_old_debug_dirs(keep_last=10)
+
+    def _cleanup_old_debug_dirs(self, keep_last: int = 10) -> None:
+        """Auto-clean old debug log directories under debug/split, keeping the latest ones."""
+        try:
+            if keep_last <= 0:
+                return
+            if not DEBUG_ROOT.exists():
+                return
+
+            candidates = []
+            for p in DEBUG_ROOT.iterdir():
+                if not p.is_dir():
+                    continue
+                if _DEBUG_TS_DIR_RE.match(p.name) is None:
+                    continue
+                candidates.append(p)
+
+            candidates.sort(key=lambda x: x.name)
+            extra = len(candidates) - keep_last
+            if extra <= 0:
+                return
+
+            for old_dir in candidates[:extra]:
+                shutil.rmtree(old_dir, ignore_errors=True)
+
+            self.logger.info(f"[调试] 已自动清理 {extra} 个旧日志目录，保留最近 {keep_last} 个")
+        except Exception as e:
+            self.logger.warning(f"[调试] 自动清理失败: {e}")
     
     def _save_debug_data(
         self,
@@ -196,18 +245,33 @@ class LocalSplitter:
         image_path = Path(image_path)
         base_name = image_path.stem
         
+        # When splitting multiple chapters/works in batch, image names may repeat (e.g. 001.jpg).
+        # Store debug outputs under work/chapter subfolders to avoid overwriting.
+        raw_chapter_name = image_path.parent.name if image_path.parent else ""
+        raw_work_name = image_path.parent.parent.name if image_path.parent and image_path.parent.parent else ""
+        chapter_dir_name = _sanitize_path_component(raw_chapter_name)
+        work_dir_name = _sanitize_path_component(raw_work_name) if raw_work_name else ""
+
+        if work_dir_name:
+            debug_out_dir = self.debug_dir / work_dir_name / chapter_dir_name
+        else:
+            debug_out_dir = self.debug_dir / chapter_dir_name
+        debug_out_dir.mkdir(parents=True, exist_ok=True)
+
         try:
             height, width = img.shape[:2]
             
             # 1. 保存标注图片
             annotated = self._draw_debug_image(img.copy(), forbidden_zones, cuts)
-            debug_img_path = self.debug_dir / f"{base_name}_debug.jpg"
+            debug_img_path = debug_out_dir / f"{base_name}_debug.jpg"
             cv2.imwrite(str(debug_img_path), annotated, [cv2.IMWRITE_JPEG_QUALITY, 85])
             
             # 2. 保存 JSON 数据
             debug_data = {
                 "image": image_path.name,
                 "image_path": str(image_path),
+                "chapter": raw_chapter_name,
+                "work": raw_work_name,
                 "image_size": {"width": width, "height": height},
                 "params": {
                     "target_height": self.target_height,
@@ -236,11 +300,11 @@ class LocalSplitter:
                     for b in bubbles
                 ]
             
-            json_path = self.debug_dir / f"{base_name}_data.json"
+            json_path = debug_out_dir / f"{base_name}_data.json"
             with open(json_path, "w", encoding="utf-8") as f:
                 json.dump(debug_data, f, ensure_ascii=False, indent=2)
             
-            self.logger.info(f"[调试] 已保存: {base_name}_debug.jpg, {base_name}_data.json")
+            self.logger.info(f"[调试] 已保存: {debug_img_path.name}, {json_path.name} -> {debug_out_dir}")
             
         except Exception as e:
             self.logger.warning(f"[调试] 保存失败: {e}")

@@ -1082,6 +1082,12 @@ class ConcurrentPipeline:
             # 检测质量检查失败错误
             is_quality_error = 'quality check failed' in error_msg or '质量检查失败' in error_msg
             
+            # 检测 HQ 空内容错误
+            is_empty_content_error = any(kw in error_msg for kw in [
+                'returned empty content', 'api returned empty text',
+                '返回空内容', '返回空文本'
+            ])
+            
             # 超时错误：直接进入延迟队列（避免在主翻译槽位里卡住），并拆分为单张重试
             if is_timeout_error:
                 rl_stats = self.rate_limiter.get_stats() if self.rate_limiter else {}
@@ -1149,8 +1155,8 @@ class ConcurrentPipeline:
                         prev_ctxs.append(ctx)
                     return
             
-            # 安全限制/数量不匹配/BR缺失/质量检查错误：放入延迟重试队列，等主队列完成后统一处理
-            if is_safety_error or is_count_mismatch or is_br_error or is_quality_error:
+            # 安全限制/数量不匹配/BR缺失/质量检查/HQ空内容错误：放入延迟重试队列，等主队列完成后统一处理
+            if is_safety_error or is_count_mismatch or is_br_error or is_quality_error or is_empty_content_error:
                 # 确定错误类型
                 if is_safety_error:
                     error_type_str = 'safety_limit'
@@ -1161,6 +1167,9 @@ class ConcurrentPipeline:
                 elif is_br_error:
                     error_type_str = 'br_missing'
                     error_desc = 'BR标记缺失'
+                elif is_empty_content_error:
+                    error_type_str = 'empty_content'
+                    error_desc = 'HQ空内容'
                 else:
                     error_type_str = 'quality_failed'
                     error_desc = '质量检查失败'

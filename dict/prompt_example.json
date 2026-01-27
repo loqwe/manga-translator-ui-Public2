@@ -86,7 +86,8 @@
           },
           {
             "original": "민혁",
-            "translation": "民赫"
+            "translation": "民赫",
+            "lang": "ko"
           }
         ],
         "Location": [
@@ -107,13 +108,15 @@
           },
           {
             "original": "탑카페",
-            "translation": "Top咖啡厅"
+            "translation": "Top咖啡厅",
+            "lang": "ko"
           }
         ],
         "Org": [
           {
             "original": "러닝크루",
-            "translation": "跑步团"
+            "translation": "跑步团",
+            "lang": "ko"
           }
         ],
         "Item": [
@@ -124,39 +127,47 @@
           },
           {
             "original": "O쌔",
-            "translation": "爱喜"
+            "translation": "爱喜",
+            "lang": "ko"
           },
           {
             "original": "무선연결 오나홀",
-            "translation": "无线连接飞机杯"
+            "translation": "无线连接飞机杯",
+            "lang": "ko"
           }
         ],
         "Skill": [
           {
             "original": "아바타 모드",
-            "translation": "化身模式"
+            "translation": "化身模式",
+            "lang": "ko"
           },
           {
             "original": "관음모드",
-            "translation": "窥视模式"
+            "translation": "窥视模式",
+            "lang": "ko"
           },
           {
             "original": "스마타",
-            "translation": "素股"
+            "translation": "素股",
+            "lang": "ko"
           },
           {
             "original": "동화율",
-            "translation": "同化率"
+            "translation": "同化率",
+            "lang": "ko"
           },
           {
             "original": "함몰",
-            "translation": "凹陷"
+            "translation": "凹陷",
+            "lang": "ko"
           }
         ],
         "Creature": [
           {
             "original": "염생",
-            "translation": "鬼魂"
+            "translation": "鬼魂",
+            "lang": "ko"
           }
         ]
       },
@@ -185,8 +196,60 @@
         "Creature": []
       },
       "校园成人礼": {
-        "Person": [],
-        "Location": [],
+        "Person": [
+          {
+            "original": "철진",
+            "translation": "哲镇",
+            "lang": "ko"
+          },
+          {
+            "original": "운달",
+            "translation": "云达",
+            "lang": "ko"
+          },
+          {
+            "original": "솔아",
+            "translation": "率雅",
+            "lang": "ko"
+          },
+          {
+            "original": "야근늘보",
+            "translation": "加班树懒",
+            "lang": "ko"
+          },
+          {
+            "original": "무지개봄",
+            "translation": "彩虹之春",
+            "lang": "ko"
+          },
+          {
+            "original": "서라",
+            "translation": "西拉",
+            "lang": "ko"
+          },
+          {
+            "original": "미나",
+            "translation": "美娜",
+            "lang": "ko"
+          },
+          {
+            "original": "소진",
+            "translation": "素珍",
+            "lang": "ko"
+          },
+          {
+            "original": "뉴시오",
+            "translation": "纽西奥",
+            "lang": "ko"
+          }
+        ],
+        "Location": [
+          {
+            "original": "크라겐호프",
+            "translation": "克拉根酒吧",
+            "lang": "ko"
+          }
+        ],
         "Org": [],
         "Item": [],
         "Skill": [],
@@ -243,7 +306,28 @@
         "Creature": []
       },
       "老师的亲密指导": {
-        "Person": [],
+        "Person": [
+          {
+            "original": "도월양",
+            "translation": "都月亮"
+          },
+          {
+            "original": "한가영",
+            "translation": "韩佳英"
+          },
+          {
+            "original": "차수민",
+            "translation": "车秀敏"
+          },
+          {
+            "original": "인시윤",
+            "translation": "印时允"
+          },
+          {
+            "original": "시윤",
+            "translation": "时允"
+          }
+        ],
         "Location": [],
         "Org": [],
         "Item": [],
@@ -275,6 +359,26 @@
           {
             "original": "이훈",
             "translation": "李勋"
+          },
+          {
+            "original": "은싸",
+            "translation": "恩莎"
+          },
+          {
+            "original": "우영",
+            "translation": "宇英"
+          },
+          {
+            "original": "쉬두",
+            "translation": "希度"
+          },
+          {
+            "original": "자매님",
+            "translation": "姊妹"
+          },
+          {
+            "original": "한수진",
+            "translation": "韩秀珍"
           }
         ],
         "Location": [],
@@ -365,15 +469,36 @@
           {
             "original": "빨간망토",
             "translation": "小红帽"
+          },
+          {
+            "original": "캣맘",
+            "translation": "猫妈"
+          },
+          {
+            "original": "한수진",
+            "translation": "韩秀珍"
           }
         ],
         "Location": [
           {
             "original": "아롱아파트",
             "translation": "雅龙公寓"
+          },
+          {
+            "original": "301호",
+            "translation": "301室"
           }
         ],
-        "Org": [],
+        "Org": [
+          {
+            "original": "한민전구",
+            "translation": "韩民灯泡"
+          },
+          {
+            "original": "부녀회장",
+            "translation": "妇女会会长"
+          }
+        ],
         "Item": [],
         "Skill": [],
         "Creature": []
@@ -382,208 +507,232 @@
         "Person": [
           {
             "original": "서진",
-            "translation": "瑞镇"
+            "translation": "瑞镇",
+            "lang": "ko"
           },
           {
             "original": "하린",
-            "translation": "夏琳"
+            "translation": "夏琳",
+            "lang": "ko"
           },
           {
             "original": "세진",
-            "translation": "世镇"
+            "translation": "世镇",
+            "lang": "ko"
           },
           {
             "original": "함소빌",
-            "translation": "咸少非"
+            "translation": "咸少非",
+            "lang": "ko"
           },
           {
             "original": "F선향",
-            "translation": "F线香"
+            "translation": "F线香",
+            "lang": "ko"
           },
           {
             "original": "송하린",
-            "translation": "宋夏琳"
+            "translation": "宋夏琳",
+            "lang": "ko"
           },
           {
             "original": "서아",
-            "translation": "书雅"
+            "translation": "书雅",
+            "lang": "ko"
           },
           {
             "original": "윤서아",
             "translation": "尹瑞雅",
-            "lang": "auto"
+            "lang": "ko"
           },
           {
             "original": "정다은",
-            "translation": "郑多恩"
+            "translation": "郑多恩",
+            "lang": "ko"
           },
           {
             "original": "이세진",
-            "translation": "李世镇"
+            "translation": "李世镇",
+            "lang": "ko"
           },
           {
             "original": "Dog종",
-            "translation": "Dog种"
+            "translation": "Dog种",
+            "lang": "ko"
           },
           {
             "original": "모모",
-            "translation": "桃桃"
+            "translation": "桃桃",
+            "lang": "ko"
           }
         ],
         "Location": [],
         "Org": [
           {
             "original": "아스모데",
-            "translation": "阿斯莫德"
+            "translation": "阿斯莫德",
+            "lang": "ko"
           }
         ],
         "Item": [
           {
             "original": "아스모덱",
             "translation": "阿斯莫德",
-            "lang": "auto"
+            "lang": "ko"
           },
           {
             "original": "역바니",
-            "translation": "逆兔女郎"
+            "translation": "逆兔女郎",
+            "lang": "ko"
           },
           {
             "original": "히로인 공략노트",
-            "translation": "女主角攻略笔记"
+            "translation": "女主角攻略笔记",
+            "lang": "ko"
           },
           {
             "original": "소환반지",
-            "translation": "召唤戒指"
+            "translation": "召唤戒指",
+            "lang": "ko"
           }
         ],
         "Skill": [
           {
             "original": "강제수행",
-            "translation": "强制执行"
+            "translation": "强制执行",
+            "lang": "ko"
           },
           {
             "original": "쾌락의물결",
             "translation": "快乐之潮",
-            "lang": "auto"
+            "lang": "ko"
           },
           {
             "original": "공격력",
-            "translation": "攻击力"
+            "translation": "攻击力",
+            "lang": "ko"
           },
           {
             "original": "심리 반전",
-            "translation": "心理反转"
+            "translation": "心理反转",
+            "lang": "ko"
           },
           {
             "original": "모모편치",
-            "translation": "桃桃重拳"
+            "translation": "桃桃重拳",
+            "lang": "ko"
           }
         ],
         "Creature": []
       },
       "慾海交鋒": {
-        "Item": [],
         "Person": [
           {
             "original": "유나",
-            "translation": "宥娜"
+            "translation": "宥娜",
+            "lang": "ko"
           },
           {
             "original": "강이",
-            "translation": "小刚"
+            "translation": "小刚",
+            "lang": "ko"
           },
           {
             "original": "고동탁",
-            "translation": "高东卓"
+            "translation": "高东卓",
+            "lang": "ko"
           },
           {
             "original": "훈상",
-            "translation": "勋尚"
+            "translation": "勋尚",
+            "lang": "ko"
           },
           {
             "original": "얀새",
-            "translation": "燕鸟"
+            "translation": "燕鸟",
+            "lang": "ko"
           },
           {
             "original": "디니",
-            "translation": "迪尼"
+            "translation": "迪尼",
+            "lang": "ko"
           },
           {
             "original": "야진",
-            "translation": "亚珍"
+            "translation": "亚珍",
+            "lang": "ko"
           },
           {
             "original": "연주",
-            "translation": "妍珠"
+            "translation": "妍珠",
+            "lang": "ko"
           }
         ],
-        "Org": [],
-        "Creature": [],
         "Location": [
           {
             "original": "반남",
-            "translation": "半南"
+            "translation": "半南",
+            "lang": "ko"
           },
           {
             "original": "서남호수공원",
-            "translation": "西南湖水公园"
+            "translation": "西南湖水公园",
+            "lang": "ko"
           }
         ],
-        "Skill": []
+        "Org": [],
+        "Item": [],
+        "Skill": [],
+        "Creature": []
+      },
+      "人妻猎人": {
+        "Person": [],
+        "Location": [],
+        "Org": [],
+        "Item": [],
+        "Skill": [],
+        "Creature": []
+      },
+      "教你防身术": {
+        "Person": [],
+        "Location": [],
+        "Org": [],
+        "Item": [],
+        "Skill": [],
+        "Creature": []
       }
     },
     "unassigned": {
-      "Person": [
-        {
-          "original": "유미",
-          "translation": "由美",
-          "raw_work_name": "无生肉名"
-        },
-        {
-          "original": "수헌",
-          "translation": "秀宪",
-          "raw_work_name": "无生肉名"
-        },
-        {
-          "original": "유리",
-          "translation": "由里",
-          "raw_work_name": "无生肉名"
-        },
-        {
-          "original": "김수헌",
-          "translation": "金守宪",
-          "raw_work_name": "无生肉名"
-        },
-        {
-          "original": "누헌",
-          "translation": "修宪",
-          "raw_work_name": "无生肉名"
-        },
-        {
-          "original": "우진",
-          "translation": "宇镇"
-        },
-        {
-          "original": "신아영",
-          "translation": "申雅英"
-        },
-        {
-          "original": "박우진",
-          "translation": "朴宇镇"
-        }
-      ],
+      "Person": [],
       "Location": [],
       "Org": [],
       "Item": [
         {
           "original": "무선연결 오나홀",
-          "translation": "无线连接名器"
+          "translation": "无线连接名器",
+          "lang": "ko"
         }
       ],
       "Skill": [],
       "Creature": []
     },
     "Person": [
+      {
+        "original": "메이",
+        "translation": "美熙"
+      },
+      {
+        "original": "수헌",
+        "translation": "秀宪"
+      },
+      {
+        "original": "유리",
+        "translation": "宥利"
+      },
+      {
+        "original": "유미",
+        "translation": "由美"
+      },
       {
         "original": "SHIN AHYOUNG",
         "translation": "申雅英",
@@ -640,6 +789,56 @@
         "lang": "ko"
       },
       {
+        "original": "민혁",
+        "translation": "民赫",
+        "lang": "ko"
+      },
+      {
+        "original": "철진",
+        "translation": "哲镇",
+        "lang": "ko"
+      },
+      {
+        "original": "운달",
+        "translation": "云达",
+        "lang": "ko"
+      },
+      {
+        "original": "솔아",
+        "translation": "率雅",
+        "lang": "ko"
+      },
+      {
+        "original": "야근늘보",
+        "translation": "加班树懒",
+        "lang": "ko"
+      },
+      {
+        "original": "무지개봄",
+        "translation": "彩虹之春",
+        "lang": "ko"
+      },
+      {
+        "original": "서라",
+        "translation": "西拉",
+        "lang": "ko"
+      },
+      {
+        "original": "미나",
+        "translation": "美娜",
+        "lang": "ko"
+      },
+      {
+        "original": "소진",
+        "translation": "素珍",
+        "lang": "ko"
+      },
+      {
+        "original": "뉴시오",
+        "translation": "纽西奥",
+        "lang": "ko"
+      },
+      {
         "original": "선호",
         "translation": "善浩",
         "lang": "auto"
@@ -677,6 +876,30 @@
         "translation": "诗贤"
       },
       {
+        "original": "미희",
+        "translation": "美熙"
+      },
+      {
+        "original": "도월양",
+        "translation": "都月亮"
+      },
+      {
+        "original": "한가영",
+        "translation": "韩佳英"
+      },
+      {
+        "original": "차수민",
+        "translation": "车秀敏"
+      },
+      {
+        "original": "인시윤",
+        "translation": "印时允"
+      },
+      {
+        "original": "시윤",
+        "translation": "时允"
+      },
+      {
         "original": "메시아",
         "translation": "弥赛亚"
       },
@@ -693,6 +916,26 @@
         "translation": "李勋"
       },
       {
+        "original": "은싸",
+        "translation": "恩莎"
+      },
+      {
+        "original": "우영",
+        "translation": "宇英"
+      },
+      {
+        "original": "쉬두",
+        "translation": "希度"
+      },
+      {
+        "original": "자매님",
+        "translation": "姊妹"
+      },
+      {
+        "original": "한수진",
+        "translation": "韩秀珍"
+      },
+      {
         "original": "은남",
         "translation": "恩男"
       },
@@ -705,51 +948,6 @@
         "translation": "草娥"
       },
       {
-        "original": "서진",
-        "translation": "瑞镇"
-      },
-      {
-        "original": "하린",
-        "translation": "夏琳"
-      },
-      {
-        "original": "세진",
-        "translation": "世镇"
-      },
-      {
-        "original": "함소빌",
-        "translation": "咸少非"
-      },
-      {
-        "original": "F선향",
-        "translation": "F线香"
-      },
-      {
-        "original": "송하린",
-        "translation": "宋夏琳"
-      },
-      {
-        "original": "서아",
-        "translation": "书雅"
-      },
-      {
-        "original": "윤서아",
-        "translation": "尹瑞雅",
-        "lang": "auto"
-      },
-      {
-        "original": "정다은",
-        "translation": "郑多恩"
-      },
-      {
-        "original": "이세진",
-        "translation": "李世镇"
-      },
-      {
-        "original": "민혁",
-        "translation": "民赫"
-      },
-      {
         "original": "야경",
         "translation": "夜景"
       },
@@ -760,46 +958,6 @@
       {
         "original": "고은",
         "translation": "高恩"
-      },
-      {
-        "original": "Dog종",
-        "translation": "Dog种"
-      },
-      {
-        "original": "모모",
-        "translation": "桃桃"
-      },
-      {
-        "original": "유나",
-        "translation": "宥娜"
-      },
-      {
-        "original": "강이",
-        "translation": "小刚"
-      },
-      {
-        "original": "고동탁",
-        "translation": "高东卓"
-      },
-      {
-        "original": "훈상",
-        "translation": "勋尚"
-      },
-      {
-        "original": "얀새",
-        "translation": "燕鸟"
-      },
-      {
-        "original": "디니",
-        "translation": "迪尼"
-      },
-      {
-        "original": "야진",
-        "translation": "亚珍"
-      },
-      {
-        "original": "연주",
-        "translation": "妍珠"
       },
       {
         "original": "이한",
@@ -826,28 +984,120 @@
         "translation": "金恩珠"
       },
       {
-        "original": "미희",
-        "translation": "美熙"
-      },
-      {
-        "original": "메이",
-        "translation": "美熙"
-      },
-      {
-        "original": "수헌",
-        "translation": "秀宪"
-      },
-      {
-        "original": "유미",
-        "translation": "由美"
-      },
-      {
         "original": "주황여우",
         "translation": "橙色狐狸"
       },
       {
         "original": "빨간망토",
         "translation": "小红帽"
+      },
+      {
+        "original": "캣맘",
+        "translation": "猫妈"
+      },
+      {
+        "original": "한수진",
+        "translation": "韩秀珍"
+      },
+      {
+        "original": "서진",
+        "translation": "瑞镇",
+        "lang": "ko"
+      },
+      {
+        "original": "하린",
+        "translation": "夏琳",
+        "lang": "ko"
+      },
+      {
+        "original": "세진",
+        "translation": "世镇",
+        "lang": "ko"
+      },
+      {
+        "original": "함소빌",
+        "translation": "咸少非",
+        "lang": "ko"
+      },
+      {
+        "original": "F선향",
+        "translation": "F线香",
+        "lang": "ko"
+      },
+      {
+        "original": "송하린",
+        "translation": "宋夏琳",
+        "lang": "ko"
+      },
+      {
+        "original": "서아",
+        "translation": "书雅",
+        "lang": "ko"
+      },
+      {
+        "original": "윤서아",
+        "translation": "尹瑞雅",
+        "lang": "ko"
+      },
+      {
+        "original": "정다은",
+        "translation": "郑多恩",
+        "lang": "ko"
+      },
+      {
+        "original": "이세진",
+        "translation": "李世镇",
+        "lang": "ko"
+      },
+      {
+        "original": "Dog종",
+        "translation": "Dog种",
+        "lang": "ko"
+      },
+      {
+        "original": "모모",
+        "translation": "桃桃",
+        "lang": "ko"
+      },
+      {
+        "original": "유나",
+        "translation": "宥娜",
+        "lang": "ko"
+      },
+      {
+        "original": "강이",
+        "translation": "小刚",
+        "lang": "ko"
+      },
+      {
+        "original": "고동탁",
+        "translation": "高东卓",
+        "lang": "ko"
+      },
+      {
+        "original": "훈상",
+        "translation": "勋尚",
+        "lang": "ko"
+      },
+      {
+        "original": "얀새",
+        "translation": "燕鸟",
+        "lang": "ko"
+      },
+      {
+        "original": "디니",
+        "translation": "迪尼",
+        "lang": "ko"
+      },
+      {
+        "original": "야진",
+        "translation": "亚珍",
+        "lang": "ko"
+      },
+      {
+        "original": "연주",
+        "translation": "妍珠",
+        "lang": "ko"
       }
     ],
     "Location": [
@@ -868,29 +1118,51 @@
       },
       {
         "original": "탑카페",
-        "translation": "Top咖啡厅"
+        "translation": "Top咖啡厅",
+        "lang": "ko"
       },
       {
-        "original": "반남",
-        "translation": "半南"
-      },
-      {
-        "original": "서남호수공원",
-        "translation": "西南湖水公园"
+        "original": "크라겐호프",
+        "translation": "克拉根酒吧",
+        "lang": "ko"
       },
       {
         "original": "아롱아파트",
         "translation": "雅龙公寓"
+      },
+      {
+        "original": "301호",
+        "translation": "301室"
+      },
+      {
+        "original": "반남",
+        "translation": "半南",
+        "lang": "ko"
+      },
+      {
+        "original": "서남호수공원",
+        "translation": "西南湖水公园",
+        "lang": "ko"
       }
     ],
     "Org": [
       {
-        "original": "아스모데",
-        "translation": "阿斯莫德"
+        "original": "러닝크루",
+        "translation": "跑步团",
+        "lang": "ko"
       },
       {
-        "original": "러닝크루",
-        "translation": "跑步团"
+        "original": "한민전구",
+        "translation": "韩民灯泡"
+      },
+      {
+        "original": "부녀회장",
+        "translation": "妇女会会长"
+      },
+      {
+        "original": "아스모데",
+        "translation": "阿斯莫德",
+        "lang": "ko"
       }
     ],
     "Item": [
@@ -900,78 +1172,93 @@
         "lang": "ko"
       },
       {
-        "original": "아스모덱",
-        "translation": "阿斯莫德",
-        "lang": "auto"
-      },
-      {
-        "original": "역바니",
-        "translation": "逆兔女郎"
-      },
-      {
-        "original": "히로인 공략노트",
-        "translation": "女主角攻略笔记"
-      },
-      {
         "original": "O쌔",
-        "translation": "爱喜"
+        "translation": "爱喜",
+        "lang": "ko"
       },
       {
         "original": "무선연결 오나홀",
-        "translation": "无线连接飞机杯"
+        "translation": "无线连接飞机杯",
+        "lang": "ko"
+      },
+      {
+        "original": "아스모덱",
+        "translation": "阿斯莫德",
+        "lang": "ko"
+      },
+      {
+        "original": "역바니",
+        "translation": "逆兔女郎",
+        "lang": "ko"
+      },
+      {
+        "original": "히로인 공략노트",
+        "translation": "女主角攻略笔记",
+        "lang": "ko"
       },
       {
         "original": "소환반지",
-        "translation": "召唤戒指"
+        "translation": "召唤戒指",
+        "lang": "ko"
       }
     ],
     "Skill": [
       {
+        "original": "아바타 모드",
+        "translation": "化身模式",
+        "lang": "ko"
+      },
+      {
+        "original": "관음모드",
+        "translation": "窥视模式",
+        "lang": "ko"
+      },
+      {
+        "original": "스마타",
+        "translation": "素股",
+        "lang": "ko"
+      },
+      {
+        "original": "동화율",
+        "translation": "同化率",
+        "lang": "ko"
+      },
+      {
+        "original": "함몰",
+        "translation": "凹陷",
+        "lang": "ko"
+      },
+      {
         "original": "강제수행",
-        "translation": "强制执行"
+        "translation": "强制执行",
+        "lang": "ko"
       },
       {
         "original": "쾌락의물결",
         "translation": "快乐之潮",
-        "lang": "auto"
-      },
-      {
-        "original": "아바타 모드",
-        "translation": "化身模式"
-      },
-      {
-        "original": "관음모드",
-        "translation": "窥视模式"
-      },
-      {
-        "original": "스마타",
-        "translation": "素股"
-      },
-      {
-        "original": "동화율",
-        "translation": "同化率"
-      },
-      {
-        "original": "함몰",
-        "translation": "凹陷"
+        "lang": "ko"
       },
       {
         "original": "공격력",
-        "translation": "攻击力"
+        "translation": "攻击力",
+        "lang": "ko"
       },
       {
         "original": "심리 반전",
-        "translation": "心理反转"
+        "translation": "心理反转",
+        "lang": "ko"
       },
       {
         "original": "모모편치",
-        "translation": "桃桃重拳"
+        "translation": "桃桃重拳",
+        "lang": "ko"
       }
     ],
     "Creature": [
       {
         "original": "염생",
-        "translation": "鬼魂"
+        "translation": "鬼魂",
+        "lang": "ko"
       }
     ]
   }

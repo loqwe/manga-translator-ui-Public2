@@ -1,6 +1,6 @@
 {
   "app": {
-    "last_open_dir": "D:\\下载地方\\已整理\\모비딕",
+    "last_open_dir": "D:/下载地方/已整理/호신술 가르쳐드립니다",
     "last_output_path": "D:/漫画/通过翻译后输出文件夹",
     "favorite_folders": null,
     "theme": "native",
@@ -12,10 +12,10 @@
       "interval_ms": 500,
       "log_expanded": false
     },
-    "window_x": 484,
-    "window_y": 353,
+    "window_x": 494,
+    "window_y": 462,
     "window_width": 1300,
-    "window_height": 751,
+    "window_height": 755,
     "window_maximized": false
   },
   "enable_watermark_filter": true,
