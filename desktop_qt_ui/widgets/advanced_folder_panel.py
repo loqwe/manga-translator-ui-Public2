@@ -2799,6 +2799,7 @@ class AdvancedFolderDialog(QDialog):
             
             # 保存
             settings.setValue("recent_works", json.dumps(recent_operations, ensure_ascii=False))
+            settings.sync()  # ✅ 强制立即写入磁盘，防止程序退出时数据丢失
             self._log(f"✓ 已保存最近操作: {len(selected_data)}个作品, {total_chapters}章")
             
         except Exception as e:
