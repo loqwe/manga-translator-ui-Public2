@@ -2730,43 +2730,55 @@ class AdvancedFolderDialog(QDialog):
             if not all_selected_paths:
                 return
             
-            # 按作品名分组章节
-            selected_data = []  # [{"work": name, "chapters": [ch1, ch2, ...]}, ...]
-            work_chapters_map = {}  # {work_name: [chapter_names]}
-            
-            # 方法一：从 title_tree 中查找章节所属作品
+            # Normalize and de-duplicate chapter paths (important for drag&drop restore)
+            all_selected_paths_norm = []
+            seen_paths = set()
+            for p in all_selected_paths:
+                if not p:
+                    continue
+                p_norm = os.path.abspath(str(p))
+                if p_norm in seen_paths:
+                    continue
+                seen_paths.add(p_norm)
+                all_selected_paths_norm.append(p_norm)
+
+            # Group chapters by work name
+            selected_data = []  # [{'work': name, 'chapters': [...], 'chapter_paths': [...]}, ...]
+            work_chapters_map = {}  # {work_name: {'chapters': [...], 'chapter_paths': [...]}}
+
+            # Build path -> work mapping from title_tree (if available)
             root = self.title_tree.invisibleRootItem()
             path_to_work = {}  # {chapter_path: work_name}
             for i in range(root.childCount()):
                 work_item = root.child(i)
                 work_name = work_item.text(0)
                 self._collect_chapter_paths_to_work(work_item, work_name, path_to_work)
-            
-            # 分组章节
-            for chapter_path in all_selected_paths:
+
+            # Group chapters
+            for chapter_path in all_selected_paths_norm:
                 chapter_name = os.path.basename(chapter_path)
-                
-                # 优先从树中查找作品名
+
+                # Prefer mapping from tree; fallback to parent folder name for drag&drop cases
                 work_name = path_to_work.get(chapter_path)
-                
-                # 若未找到（拖放导入的情况），从路径推断作品名
                 if not work_name:
                     parent_dir = os.path.dirname(chapter_path)
                     work_name = os.path.basename(parent_dir) or "未分组"
-                
+
                 if work_name not in work_chapters_map:
-                    work_chapters_map[work_name] = []
-                work_chapters_map[work_name].append(chapter_name)
-            
-            # 转换为 selected_data 格式
+                    work_chapters_map[work_name] = {"chapters": [], "chapter_paths": []}
+                work_chapters_map[work_name]["chapters"].append(chapter_name)
+                work_chapters_map[work_name]["chapter_paths"].append(chapter_path)
+
+            # Convert to selected_data and count chapters
             total_chapters = 0
-            for work_name, chapters in work_chapters_map.items():
+            for work_name, data in work_chapters_map.items():
                 selected_data.append({
                     'work': work_name,
-                    'chapters': chapters
+                    'chapters': data.get('chapters', []),
+                    'chapter_paths': data.get('chapter_paths', [])
                 })
-                total_chapters += len(chapters)
-            
+                total_chapters += len(data.get('chapters', []))
+
             if not selected_data:
                 return
             
@@ -2782,6 +2794,7 @@ class AdvancedFolderDialog(QDialog):
             operation = {
                 'works': work_list,  # 保持兼容
                 'works_detail': selected_data,  # 新增：详细章节信息
+                'chapter_paths': all_selected_paths_norm,  # Used for robust restore (including drag&drop)
                 'chapter_count': total_chapters,
                 'chapter_range': chapter_range,
                 'time': datetime.now().strftime("%m-%d %H:%M")
@@ -2903,8 +2916,19 @@ class AdvancedFolderDialog(QDialog):
             works = operation['works']
             works_detail = [{'work': w, 'chapters': []} for w in works]
         
-        work_names = [w['work'] for w in works_detail]
-        self._log(f"🔍 正在查找: {', '.join(work_names)}")
+        work_names = [w.get('work', '') for w in works_detail if isinstance(w, dict)]
+        
+        # Prefer restoring by chapter paths (robust for drag&drop selections)
+        chapter_paths = operation.get('chapter_paths', [])
+        if not chapter_paths and works_detail:
+            for w in works_detail:
+                if isinstance(w, dict):
+                    chapter_paths.extend(w.get('chapter_paths', []) or [])
+        
+        if chapter_paths:
+            self._log(f"↻ 正在按路径恢复: {len(chapter_paths)} 章")
+        else:
+            self._log(f"🔍 正在查找: {', '.join(work_names)}")
         
         # 清除搜索过滤，确保所有作品可见
         self.search_combo.setCurrentText("")
@@ -2928,6 +2952,96 @@ class AdvancedFolderDialog(QDialog):
             not_found = []
             total_checked = 0
             
+            # If we have chapter paths, restore selection from paths first (works even without scan)
+            if chapter_paths:
+                # Clear existing checked state silently to avoid mixing selections
+                for i in range(root.childCount()):
+                    self._check_all_chapters_recursive(root.child(i), False)
+
+                # Clear current drag&drop selections
+                self.selected_chapters = []
+                try:
+                    self.selected_chapters_list.clear()
+                except Exception:
+                    pass
+
+                restored_paths = []
+                missing_paths = []
+                seen = set()
+                for p in chapter_paths:
+                    if not p:
+                        continue
+                    p_norm = os.path.abspath(str(p))
+                    if p_norm in seen:
+                        continue
+                    seen.add(p_norm)
+                    if os.path.isdir(p_norm):
+                        restored_paths.append(p_norm)
+                    else:
+                        missing_paths.append(p_norm)
+
+                if not restored_paths:
+                    self._log("⚠️ 最近操作的章节路径均不存在，尝试按作品/章节名恢复")
+                else:
+                    self.selected_chapters = [{'path': p, 'source': 'recent_restore'} for p in restored_paths]
+
+                    # Best-effort: sync checked state in title_tree if the works are present
+                    paths_by_work = {}
+                    for p in restored_paths:
+                        work_dir_raw = os.path.basename(os.path.dirname(p)) or "未分组"
+                        work_dir = self._get_mapped_name(work_dir_raw)
+                        if work_dir not in paths_by_work:
+                            paths_by_work[work_dir] = []
+                        paths_by_work[work_dir].append(p)
+
+                    not_in_tree = []
+                    for work_dir, paths in paths_by_work.items():
+                        target_clean = work_dir.replace(' ', '').lower()
+                        matched_item = None
+                        for i in range(root.childCount()):
+                            candidate = root.child(i)
+                            item_name = candidate.text(0)
+                            item_clean = item_name.replace(' ', '').lower()
+                            if (item_name == work_dir or
+                                work_dir in item_name or
+                                item_name in work_dir or
+                                item_clean == target_clean or
+                                target_clean in item_clean):
+                                matched_item = candidate
+                                break
+
+                        if matched_item is None:
+                            not_in_tree.append(work_dir)
+                            continue
+
+                        matched_item.setSelected(True)
+                        matched_item.setExpanded(True)
+                        if first_item is None:
+                            first_item = matched_item
+
+                        # Load chapters lazily
+                        if matched_item.childCount() == 0:
+                            self._load_chapters_for_item(matched_item)
+
+                        path_set = {os.path.abspath(x) for x in paths}
+                        checked_count = self._restore_chapter_selection_by_paths(matched_item, path_set)
+                        total_checked += checked_count
+                        found_count += 1
+
+                    if first_item:
+                        self.title_tree.scrollToItem(first_item)
+                        self.title_tree.setCurrentItem(first_item)
+
+                    self._log(f"✓ 已恢复选中 {len(restored_paths)} 章")
+                    if total_checked > 0:
+                        self._log(f"  ✓ 已同步勾选树节点 {total_checked} 章")
+                    if missing_paths:
+                        self._log(f"  ⚠️ 路径不存在已跳过: {len(missing_paths)} 章")
+                    if not_in_tree:
+                        self._log(f"  💡 有 {len(not_in_tree)} 个作品不在当前扫描列表，仅恢复到已选章节")
+
+                    return
+
             for work_data in works_detail:
                 work_name = work_data['work']
                 chapter_names = work_data.get('chapters', [])
@@ -3018,6 +3132,22 @@ class AdvancedFolderDialog(QDialog):
                 # 递归处理子项（三层结构时的来源节点）
                 checked_count += self._restore_chapter_selection(child, chapter_names)
         
+        return checked_count
+    
+    def _restore_chapter_selection_by_paths(self, work_item: QTreeWidgetItem, chapter_paths: Set[str]) -> int:
+        """Restore chapter checked state by absolute folder paths."""
+        checked_count = 0
+        for i in range(work_item.childCount()):
+            child = work_item.child(i)
+            path = child.data(0, Qt.ItemDataRole.UserRole)
+
+            if path and isinstance(path, str) and os.path.isdir(path):
+                if os.path.abspath(path) in chapter_paths:
+                    child.setCheckState(0, Qt.CheckState.Checked)
+                    checked_count += 1
+            else:
+                checked_count += self._restore_chapter_selection_by_paths(child, chapter_paths)
+
         return checked_count
     
     def _is_chapter_match(self, chapter_name: str, chapter_names: List[str]) -> bool:
