@@ -481,7 +481,7 @@ class SplitWorker(QObject):
     chapter_progress = pyqtSignal(int, int)  # 当前章节进度 (current, total)
     error = pyqtSignal(str)      # 错误信息
     
-    def __init__(self, chapters: List[str], skip_threshold: int, target_height: int, buffer_range: int, min_segment_height: int, naming_pattern: str = "{index}_{source}", index_digits: int = 1, index_start: int = 0):
+    def __init__(self, chapters: List[str], skip_threshold: int, target_height: int, buffer_range: int, min_segment_height: int, naming_pattern: str = "{index}_{source}", index_digits: int = 1, index_start: int = 0, reset_index_per_chapter: bool = True):
         super().__init__()
         self.chapters = chapters
         self.skip_threshold = skip_threshold  # 短图阈值（低于此高度不拆分）
@@ -491,7 +491,8 @@ class SplitWorker(QObject):
         self.naming_pattern = naming_pattern
         self.index_digits = index_digits
         self.index_start = index_start
-        self._global_index = index_start  # 全局序号起点
+        self.reset_index_per_chapter = reset_index_per_chapter
+        self._global_index = index_start
         self._is_running = True
         self._splitter: Optional[LocalSplitter] = None
     
@@ -549,6 +550,9 @@ class SplitWorker(QObject):
                 if not self._is_running:
                     self.progress.emit(f"[长图拆分] ⚠️ 拆分已取消")
                     break
+                
+                if self.reset_index_per_chapter:
+                    self._global_index = self.index_start
                 
                 chapter_name = os.path.basename(chapter_path)
                 self.chapter_progress.emit(idx + 1, total_chapters)
@@ -1237,6 +1241,12 @@ class AdvancedFolderDialog(QDialog):
         self.split_index_start_spin.setSingleStep(1)
         self.split_index_start_spin.setValue(settings.value("split_index_start", 0, type=int))
         self.split_index_start_spin.setVisible(False)
+        
+        # Reset index per chapter (hidden CheckBox, shown in settings popup)
+        self.split_reset_index_per_chapter_cb = QCheckBox("序号按章节重置")
+        self.split_reset_index_per_chapter_cb.setChecked(settings.value("split_reset_index_per_chapter", True, type=bool))
+        self.split_reset_index_per_chapter_cb.setToolTip("批量拆分多个章节时，每个章节的序号从起始序号重新开始")
+        self.split_reset_index_per_chapter_cb.setVisible(False)
         
         # 启用自动清理哈希后缀
         self.auto_clean_hash_cb = QCheckBox("导入时自动清理哈希后缀")
@@ -3548,6 +3558,7 @@ class AdvancedFolderDialog(QDialog):
         settings.setValue("split_naming", self.split_naming_combo.currentText())
         settings.setValue("split_index_digits", self.split_index_digits_spin.value())
         settings.setValue("split_index_start", self.split_index_start_spin.value())
+        settings.setValue("split_reset_index_per_chapter", self.split_reset_index_per_chapter_cb.isChecked())
         
         # 刷新已选章节列表显示
         selected_chapters = self.get_selected_chapters()
@@ -3557,7 +3568,7 @@ class AdvancedFolderDialog(QDialog):
         """显示长图拆分参数设置弹窗"""
         dialog = QDialog(self)
         dialog.setWindowTitle("长图拆分设置")
-        dialog.setFixedSize(320, 320)
+        dialog.setFixedSize(320, 360)
         
         layout = QFormLayout(dialog)
         layout.setContentsMargins(16, 16, 16, 16)
@@ -3619,8 +3630,14 @@ class AdvancedFolderDialog(QDialog):
         start_spin.setRange(0, 9999)
         start_spin.setSingleStep(1)
         start_spin.setValue(self.split_index_start_spin.value())
-        start_spin.setToolTip("全局序号起始值（跨所有切片累加）")
+        start_spin.setToolTip("序号起始值（每章从此值开始编号）")
         layout.addRow("起始序号:", start_spin)
+        
+        # Reset index per chapter
+        reset_index_cb = QCheckBox("序号按章节重置")
+        reset_index_cb.setChecked(self.split_reset_index_per_chapter_cb.isChecked())
+        reset_index_cb.setToolTip("批量拆分多个章节时，每个章节的序号从起始序号重新开始")
+        layout.addRow("", reset_index_cb)
         
         # 按钮
         btn_layout = QHBoxLayout()
@@ -3645,8 +3662,9 @@ class AdvancedFolderDialog(QDialog):
             self.split_naming_combo.setCurrentText(naming_combo.currentText())
             self.split_index_digits_spin.setValue(digits_spin.value())
             self.split_index_start_spin.setValue(start_spin.value())
+            self.split_reset_index_per_chapter_cb.setChecked(reset_index_cb.isChecked())
             self._save_split_settings()
-            self._log(f"✓ 长图拆分参数已更新: 短图阈值={skip_threshold_spin.value()}px, 命名={naming_combo.currentText()}, 位数={digits_spin.value()}, 起始={start_spin.value()}")
+            self._log(f"✓ 长图拆分参数已更新: 短图阈值={skip_threshold_spin.value()}px, 命名={naming_combo.currentText()}, 位数={digits_spin.value()}, 起始={start_spin.value()}, 按章节重置={'是' if reset_index_cb.isChecked() else '否'}")
     
     def _on_split_clicked(self):
         """拆分按钮点击：仅对所选章节执行长图拆分（不关闭对话框）"""
@@ -3710,6 +3728,9 @@ class AdvancedFolderDialog(QDialog):
         index_digits = self.split_index_digits_spin.value()
         index_start = self.split_index_start_spin.value()
         
+        # Reset index per chapter
+        reset_index_per_chapter = self.split_reset_index_per_chapter_cb.isChecked()
+        
         # 显示进度条，禁用按钮
         self.split_button.setEnabled(False)
         self.split_button.setText("拆分中...")
@@ -3723,7 +3744,7 @@ class AdvancedFolderDialog(QDialog):
         
         # 创建后台线程和工作器
         self._split_thread = QThread()
-        self._split_worker = SplitWorker(chapters, skip_threshold, target_height, buffer_range, min_segment, naming_pattern, index_digits, index_start)
+        self._split_worker = SplitWorker(chapters, skip_threshold, target_height, buffer_range, min_segment, naming_pattern, index_digits, index_start, reset_index_per_chapter)
         self._split_worker.moveToThread(self._split_thread)
         
         # 连接信号
