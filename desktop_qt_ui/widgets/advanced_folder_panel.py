@@ -2715,21 +2715,47 @@ class AdvancedFolderDialog(QDialog):
             from datetime import datetime
             settings = QSettings("MangaTranslator", "AdvancedFolder")
             
-            # 获取当前选中的作品和章节
+            # ✅ 使用 get_selected_chapters() 获取实际选择的章节（包括树中勾选的和拖放导入的）
+            all_selected_paths = self.get_selected_chapters()
+            if not all_selected_paths:
+                return
+            
+            # 按作品名分组章节
             selected_data = []  # [{"work": name, "chapters": [ch1, ch2, ...]}, ...]
-            total_chapters = 0
+            work_chapters_map = {}  # {work_name: [chapter_names]}
+            
+            # 方法一：从 title_tree 中查找章节所属作品
             root = self.title_tree.invisibleRootItem()
+            path_to_work = {}  # {chapter_path: work_name}
             for i in range(root.childCount()):
                 work_item = root.child(i)
-                # 获取这个作品选中的章节
-                checked_chapters = self._get_checked_chapter_names(work_item)
-                if checked_chapters:
-                    work_name = work_item.text(0)
-                    selected_data.append({
-                        'work': work_name,
-                        'chapters': checked_chapters
-                    })
-                    total_chapters += len(checked_chapters)
+                work_name = work_item.text(0)
+                self._collect_chapter_paths_to_work(work_item, work_name, path_to_work)
+            
+            # 分组章节
+            for chapter_path in all_selected_paths:
+                chapter_name = os.path.basename(chapter_path)
+                
+                # 优先从树中查找作品名
+                work_name = path_to_work.get(chapter_path)
+                
+                # 若未找到（拖放导入的情况），从路径推断作品名
+                if not work_name:
+                    parent_dir = os.path.dirname(chapter_path)
+                    work_name = os.path.basename(parent_dir) or "未分组"
+                
+                if work_name not in work_chapters_map:
+                    work_chapters_map[work_name] = []
+                work_chapters_map[work_name].append(chapter_name)
+            
+            # 转换为 selected_data 格式
+            total_chapters = 0
+            for work_name, chapters in work_chapters_map.items():
+                selected_data.append({
+                    'work': work_name,
+                    'chapters': chapters
+                })
+                total_chapters += len(chapters)
             
             if not selected_data:
                 return
@@ -2839,6 +2865,18 @@ class AdvancedFolderDialog(QDialog):
                 # 递归处理子项（三层结构时的来源节点）
                 chapters.extend(self._get_checked_chapter_names(child))
         return chapters
+    
+    def _collect_chapter_paths_to_work(self, item: QTreeWidgetItem, work_name: str, path_to_work: dict):
+        """收集章节路径与作品名的映射（递归）"""
+        for i in range(item.childCount()):
+            child = item.child(i)
+            path = child.data(0, Qt.ItemDataRole.UserRole)
+            if path and isinstance(path, str) and os.path.isdir(path):
+                # 是章节项，记录路径到作品名的映射
+                path_to_work[path] = work_name
+            else:
+                # 递归处理子项（三层结构时的来源节点）
+                self._collect_chapter_paths_to_work(child, work_name, path_to_work)
     
     def on_recent_work_double_clicked(self, item: QTreeWidgetItem, column: int):
         """双击最近操作时跳转并恢复章节选中（支持多个作品）"""
