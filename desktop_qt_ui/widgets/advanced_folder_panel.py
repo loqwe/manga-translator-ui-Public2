@@ -37,6 +37,13 @@ try:
 except ImportError:
     LongImageStitcher = None
 
+try:
+    from utils.long_image_splitter import LocalSplitter, split_image_sync, SplitResult
+except ImportError:
+    LocalSplitter = None
+    split_image_sync = None
+    SplitResult = None
+
 
 class ScanWorker(QObject):
     """后台扫描工作线程"""
@@ -467,6 +474,206 @@ class StitchWorker(QObject):
             return None
 
 
+class SplitWorker(QObject):
+    """后台拆分工作线程（使用 LocalSplitter + YOLO 智能检测）"""
+    finished = pyqtSignal(list)  # 拆分完成，发送结果文件列表
+    progress = pyqtSignal(str)   # 进度日志
+    chapter_progress = pyqtSignal(int, int)  # 当前章节进度 (current, total)
+    error = pyqtSignal(str)      # 错误信息
+    
+    def __init__(self, chapters: List[str], skip_threshold: int, target_height: int, buffer_range: int, min_segment_height: int, naming_pattern: str = "{index}_{source}", index_digits: int = 1, index_start: int = 0):
+        super().__init__()
+        self.chapters = chapters
+        self.skip_threshold = skip_threshold  # 短图阈值（低于此高度不拆分）
+        self.target_height = target_height
+        self.buffer_range = buffer_range
+        self.min_segment_height = min_segment_height
+        self.naming_pattern = naming_pattern
+        self.index_digits = index_digits
+        self.index_start = index_start
+        self._global_index = index_start  # 全局序号起点
+        self._is_running = True
+        self._splitter: Optional[LocalSplitter] = None
+    
+    def stop(self):
+        """请求停止拆分"""
+        self._is_running = False
+    
+    def run(self):
+        """执行拆分（在后台线程中运行）"""
+        import asyncio
+        
+        # 创建新的事件循环（后台线程需要独立的 loop）
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            loop.run_until_complete(self._run_async())
+        finally:
+            loop.close()
+    
+    async def _run_async(self):
+        """异步执行拆分"""
+        all_result_files = []
+        total_chapters = len(self.chapters)
+        
+        try:
+            self.progress.emit(f"[长图拆分] 启用智能长图拆分功能 (YOLO 模式)")
+            self.progress.emit(f"[长图拆分] 配置: 短图阈值={self.skip_threshold}px, 目标高度={self.target_height}px, 缓冲范围=±{self.buffer_range}px")
+            self.progress.emit(f"[长图拆分] 命名: 模式={self.naming_pattern}, 位数={self.index_digits}, 起始序号={self.index_start}")
+            self.progress.emit(f"[长图拆分] 检测到 {total_chapters} 个章节，分别处理")
+            
+            # 初始化 LocalSplitter
+            self._splitter = LocalSplitter(
+                target_height=self.target_height,
+                buffer_range=self.buffer_range,
+                min_segment_height=self.min_segment_height,
+                naming_pattern=self.naming_pattern,
+                index_digits=self.index_digits,
+                index_start=self.index_start
+            )
+            
+            # 初始化调试目录（整个批次共用一个时间戳目录）
+            self._splitter._init_debug_dir()
+            self.progress.emit(f"[长图拆分] 调试输出目录: {self._splitter.debug_dir}")
+            
+            # 加载 YOLO 模型
+            self.progress.emit(f"[长图拆分] 正在加载 YOLO 模型...")
+            await self._splitter.load_yolo()
+            if self._splitter._yolo_loaded:
+                self.progress.emit(f"[长图拆分] ✓ YOLO 模型加载成功，将检测气泡禁切区")
+            else:
+                self.progress.emit(f"[长图拆分] ⚠️ YOLO 加载失败，使用纯图像处理模式")
+            
+            for idx, chapter_path in enumerate(self.chapters):
+                if not self._is_running:
+                    self.progress.emit(f"[长图拆分] ⚠️ 拆分已取消")
+                    break
+                
+                chapter_name = os.path.basename(chapter_path)
+                self.chapter_progress.emit(idx + 1, total_chapters)
+                
+                try:
+                    result_files = await self._split_chapter_images_async(chapter_path)
+                    all_result_files.extend(result_files)
+                    if result_files:
+                        self.progress.emit(f"[长图拆分] ✓ 完成: {chapter_name} 生成 {len(result_files)} 张拆分图")
+                except Exception as e:
+                    self.progress.emit(f"[长图拆分] ⚠️ 失败: {chapter_name} - {e}")
+            
+            if self._is_running:
+                self.progress.emit(f"[长图拆分] ✓ 全部完成，共生成 {len(all_result_files)} 张拆分图")
+            
+            self.finished.emit(all_result_files)
+            
+        except Exception as e:
+            import traceback
+            self.error.emit(f"拆分失败: {e}\n{traceback.format_exc()}")
+            self.finished.emit([])
+    
+    async def _split_chapter_images_async(self, chapter_path: str) -> List[str]:
+        """异步拆分章节内的图片"""
+        import cv2
+        
+        image_extensions = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'}
+        image_files = []
+        
+        # 收集所有图片文件
+        for f in sorted(os.listdir(chapter_path)):
+            if not self._is_running:
+                return []
+            ext = os.path.splitext(f)[1].lower()
+            if ext not in image_extensions:
+                continue
+            # 跳过已拆分的文件
+            if f.lower().startswith('split'):
+                self.progress.emit(f"[长图拆分] ⚠️ 检测到已拆分文件: {f}，跳过此章节")
+                return []
+            image_files.append(os.path.join(chapter_path, f))
+        
+        if not image_files:
+            return []
+        
+        all_result_files = []
+        
+        for image_path in image_files:
+            if not self._is_running:
+                return all_result_files
+            
+            filename = os.path.basename(image_path)
+            
+            # 读取图片获取尺寸
+            img = cv2.imread(image_path)
+            if img is None:
+                self.progress.emit(f"[长图拆分] ⚠️ 无法读取: {filename}")
+                continue
+            
+            height, width = img.shape[:2]
+            
+            # 检查是否需要拆分（低于短图阈值不拆分）
+            if height <= self.skip_threshold:
+                continue  # 短图，不需要拆分
+            
+            self.progress.emit(f"[长图拆分] 处理: {filename} ({width}x{height})")
+            
+            try:
+                # 使用 LocalSplitter 异步拆分（包含 YOLO 检测）
+                start_index = self._global_index
+                result = await self._splitter.split(
+                    image_path,
+                    output_dir=chapter_path,
+                    quality=95,
+                    delete_original=True,
+                    start_index=start_index
+                )
+                
+                # 更新全局序号（只统计真正生成的文件）
+                created_count = 0
+                for p in result.output_files:
+                    if os.path.abspath(p) != os.path.abspath(image_path):
+                        created_count += 1
+                if created_count > 0:
+                    self._global_index += created_count
+                
+                if result.cuts:
+                    self.progress.emit(f"[长图拆分]   → 拆分为 {result.segment_count} 个片段，切点: {result.cuts}")
+                    all_result_files.extend(result.output_files)
+                    
+            except Exception as e:
+                self.progress.emit(f"[长图拆分] ⚠️ 拆分失败 {filename}: {e}")
+                # 回退到同步版本
+                try:
+                    if split_image_sync:
+                        start_index = self._global_index
+                        result = split_image_sync(
+                            image_path,
+                            target_height=self.target_height,
+                            buffer_range=self.buffer_range,
+                            min_segment_height=self.min_segment_height,
+                            output_dir=chapter_path,
+                            quality=95,
+                            delete_original=True,
+                            naming_pattern=self.naming_pattern,
+                            index_digits=self.index_digits,
+                            index_start=start_index
+                        )
+                        # 更新全局序号
+                        created_count = 0
+                        for p in result.output_files:
+                            if os.path.abspath(p) != os.path.abspath(image_path):
+                                created_count += 1
+                        if created_count > 0:
+                            self._global_index += created_count
+                        
+                        if result.cuts:
+                            self.progress.emit(f"[长图拆分]   → (回退) 拆分为 {result.segment_count} 个片段")
+                            all_result_files.extend(result.output_files)
+                except Exception as e2:
+                    self.progress.emit(f"[长图拆分] ⚠️ 回退也失败: {e2}")
+        
+        return all_result_files
+
+
 class DroppableListWidget(QListWidget):
     """支持拖放文件夹的列表控件"""
     folders_dropped = pyqtSignal(list)  # 发送拖放的文件夹路径列表
@@ -533,6 +740,16 @@ class AdvancedFolderDialog(QDialog):
         self._stitch_worker = None
         self._is_stitching = False
         self._stitch_accept_after = False  # 拼接完成后是否自动接受对话框
+        
+        # 后台拆分线程
+        self._split_thread = None
+        self._split_worker = None
+        self._is_splitting = False
+        self._split_accept_after = False  # 拆分完成后是否自动接受对话框
+        
+        # 撤回功能：记录最近一次操作的备份数据
+        self._undo_data: Optional[dict] = None  # {章节路径: {"backup_dir": 备份目录, "generated_files": [生成的文件]}}
+        self._undo_type: str = ""  # "split" 或 "stitch"
         
         # 支持多个根目录
         settings = QSettings("MangaTranslator", "AdvancedFolder")
@@ -944,6 +1161,83 @@ class AdvancedFolderDialog(QDialog):
         self.stitch_margin_spin.setValue(settings.value("stitch_margin", 100, type=int))
         self.stitch_margin_spin.setVisible(False)
         
+        # 启用长图拆分 + 设置按钮（同一行）
+        split_row = QHBoxLayout()
+        split_row.setSpacing(4)
+        
+        self.split_enabled_cb = QCheckBox("启用长图拆分")
+        self.split_enabled_cb.setChecked(settings.value("split_enabled", False, type=bool))
+        self.split_enabled_cb.stateChanged.connect(self._save_split_settings)
+        self.split_enabled_cb.setToolTip("将长图拆分为多个短图，便于阅读")
+        split_row.addWidget(self.split_enabled_cb)
+        
+        split_row.addStretch()
+        
+        # 拆分设置按钮
+        self.split_settings_btn = QToolButton()
+        self.split_settings_btn.setText("⚙")
+        self.split_settings_btn.setAutoRaise(True)
+        self.split_settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.split_settings_btn.setToolTip("长图拆分参数设置")
+        self.split_settings_btn.setFixedSize(22, 22)
+        self.split_settings_btn.setStyleSheet(
+            "QToolButton{border:none;padding:0px;}"
+            "QToolButton:hover{background:rgba(0,0,0,0.06);border-radius:3px;}"
+        )
+        self.split_settings_btn.clicked.connect(self._show_split_settings_popup)
+        split_row.addWidget(self.split_settings_btn)
+        
+        settings_layout.addLayout(split_row)
+        
+        # 长图拆分参数（隐藏的 SpinBox，用于保存值）
+        self.split_target_height_spin = QSpinBox()
+        self.split_target_height_spin.setRange(1000, 10000)
+        self.split_target_height_spin.setSingleStep(100)
+        self.split_target_height_spin.setValue(settings.value("split_target_height", 2600, type=int))
+        self.split_target_height_spin.setVisible(False)
+        
+        self.split_buffer_range_spin = QSpinBox()
+        self.split_buffer_range_spin.setRange(50, 1000)
+        self.split_buffer_range_spin.setSingleStep(50)
+        self.split_buffer_range_spin.setValue(settings.value("split_buffer_range", 300, type=int))
+        self.split_buffer_range_spin.setVisible(False)
+        
+        self.split_min_segment_spin = QSpinBox()
+        self.split_min_segment_spin.setRange(500, 5000)
+        self.split_min_segment_spin.setSingleStep(100)
+        self.split_min_segment_spin.setValue(settings.value("split_min_segment", 1000, type=int))
+        self.split_min_segment_spin.setVisible(False)
+        
+        # 短图阈值（低于此高度不拆分）
+        self.split_skip_threshold_spin = QSpinBox()
+        self.split_skip_threshold_spin.setRange(1000, 10000)
+        self.split_skip_threshold_spin.setSingleStep(100)
+        self.split_skip_threshold_spin.setValue(settings.value("split_skip_threshold", 3500, type=int))
+        self.split_skip_threshold_spin.setVisible(False)
+        
+        # 命名模式（隐藏的 ComboBox）
+        self.split_naming_combo = QComboBox()
+        self.split_naming_combo.addItems(["序号_源文件名", "序号", "源文件名_序号", "序号_宽x高"])
+        saved_naming = settings.value("split_naming", "序号_源文件名", type=str)
+        idx = self.split_naming_combo.findText(saved_naming)
+        if idx >= 0:
+            self.split_naming_combo.setCurrentIndex(idx)
+        self.split_naming_combo.setVisible(False)
+        
+        # 序号位数（隐藏的 SpinBox）
+        self.split_index_digits_spin = QSpinBox()
+        self.split_index_digits_spin.setRange(1, 6)
+        self.split_index_digits_spin.setSingleStep(1)
+        self.split_index_digits_spin.setValue(settings.value("split_index_digits", 1, type=int))
+        self.split_index_digits_spin.setVisible(False)
+        
+        # 起始序号（隐藏的 SpinBox）
+        self.split_index_start_spin = QSpinBox()
+        self.split_index_start_spin.setRange(0, 9999)
+        self.split_index_start_spin.setSingleStep(1)
+        self.split_index_start_spin.setValue(settings.value("split_index_start", 0, type=int))
+        self.split_index_start_spin.setVisible(False)
+        
         # 启用自动清理哈希后缀
         self.auto_clean_hash_cb = QCheckBox("导入时自动清理哈希后缀")
         self.auto_clean_hash_cb.setChecked(settings.value("auto_clean_hash", False, type=bool))
@@ -997,12 +1291,30 @@ class AdvancedFolderDialog(QDialog):
         
         # 拼接按钮（对所选章节执行长图拼接）
         self.stitch_button = QPushButton("拼接")
-        self.stitch_button.setMinimumWidth(100)
+        self.stitch_button.setMinimumWidth(80)
         self.stitch_button.setMinimumHeight(32)
         self.stitch_button.setEnabled(False)
         self.stitch_button.setToolTip("对所选章节执行长图拼接（替换原图）")
         self.stitch_button.clicked.connect(self._on_stitch_clicked)
         button_layout.addWidget(self.stitch_button)
+        
+        # 拆分按钮（对所选章节执行长图拆分）
+        self.split_button = QPushButton("拆分")
+        self.split_button.setMinimumWidth(80)
+        self.split_button.setMinimumHeight(32)
+        self.split_button.setEnabled(False)
+        self.split_button.setToolTip("对所选章节执行长图拆分（替换原图）")
+        self.split_button.clicked.connect(self._on_split_clicked)
+        button_layout.addWidget(self.split_button)
+        
+        # 撤回按钮（撤销最近的拆分/拼接操作）
+        self.undo_button = QPushButton("撤回")
+        self.undo_button.setMinimumWidth(80)
+        self.undo_button.setMinimumHeight(32)
+        self.undo_button.setEnabled(False)
+        self.undo_button.setToolTip("撤销最近的拆分/拼接操作")
+        self.undo_button.clicked.connect(self._on_undo_clicked)
+        button_layout.addWidget(self.undo_button)
         
         self.ok_button = QPushButton("确定")
         self.ok_button.setMinimumWidth(100)
@@ -1984,9 +2296,10 @@ class AdvancedFolderDialog(QDialog):
         )
         self._update_stats(total_works, total_chapters, count)
         
-        # 更新确定按钮和拼接按钮状态
+        # 更新确定按钮、拼接按钮和拆分按钮状态
         self.ok_button.setEnabled(count > 0)
         self.stitch_button.setEnabled(count > 0)
+        self.split_button.setEnabled(count > 0)
         
         # 更新已选章节列表
         self._update_selected_chapters_list(selected_chapters)
@@ -2246,18 +2559,28 @@ class AdvancedFolderDialog(QDialog):
         """确定按钮点击"""
         self._stop_scan_if_running()
         self._stop_stitch_if_running()
+        self._stop_split_if_running()
         self._save_column_widths()
         self._save_root_path()
         self._save_recent_works()  # 保存最近操作的作品
+        self._clear_undo_data()    # 关闭时清理撤回备份
         super().accept()
     
     def reject(self):
         """取消按钮点击"""
         self._stop_scan_if_running()
         self._stop_stitch_if_running()
+        self._stop_split_if_running()
         self._save_column_widths()
         self._save_root_path()
+        self._clear_undo_data()    # 关闭时清理撤回备份
         super().reject()
+    
+    def closeEvent(self, event):
+        """窗口关闭事件"""
+        # 确保关闭窗口时清理撤回备份
+        self._clear_undo_data()
+        super().closeEvent(event)
     
     def _save_root_path(self):
         """保存根目录路径（兼容旧代码）"""
@@ -3173,11 +3496,431 @@ class AdvancedFolderDialog(QDialog):
         
         return result_path
     
+    # ==================== 长图拆分相关方法 ====================
+    
+    def _save_split_settings(self):
+        """保存长图拆分设置"""
+        settings = QSettings("MangaTranslator", "AdvancedFolder")
+        settings.setValue("split_enabled", self.split_enabled_cb.isChecked())
+        settings.setValue("split_skip_threshold", self.split_skip_threshold_spin.value())
+        settings.setValue("split_target_height", self.split_target_height_spin.value())
+        settings.setValue("split_buffer_range", self.split_buffer_range_spin.value())
+        settings.setValue("split_min_segment", self.split_min_segment_spin.value())
+        settings.setValue("split_naming", self.split_naming_combo.currentText())
+        settings.setValue("split_index_digits", self.split_index_digits_spin.value())
+        settings.setValue("split_index_start", self.split_index_start_spin.value())
+        
+        # 刷新已选章节列表显示
+        selected_chapters = self.get_selected_chapters()
+        self._update_selected_chapters_list(selected_chapters)
+    
+    def _show_split_settings_popup(self):
+        """显示长图拆分参数设置弹窗"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("长图拆分设置")
+        dialog.setFixedSize(320, 320)
+        
+        layout = QFormLayout(dialog)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+        
+        # 短图阈值（低于此高度不拆分）
+        skip_threshold_spin = QSpinBox()
+        skip_threshold_spin.setRange(1000, 10000)
+        skip_threshold_spin.setSingleStep(100)
+        skip_threshold_spin.setValue(self.split_skip_threshold_spin.value())
+        skip_threshold_spin.setSuffix(" px")
+        skip_threshold_spin.setToolTip("图片高度低于此值时不拆分")
+        layout.addRow("短图阈值:", skip_threshold_spin)
+        
+        # 目标片段高度
+        target_height_spin = QSpinBox()
+        target_height_spin.setRange(1000, 10000)
+        target_height_spin.setSingleStep(100)
+        target_height_spin.setValue(self.split_target_height_spin.value())
+        target_height_spin.setSuffix(" px")
+        target_height_spin.setToolTip("拆分后每个片段的目标高度")
+        layout.addRow("目标片段高度:", target_height_spin)
+        
+        # 缓冲范围
+        buffer_range_spin = QSpinBox()
+        buffer_range_spin.setRange(50, 1000)
+        buffer_range_spin.setSingleStep(50)
+        buffer_range_spin.setValue(self.split_buffer_range_spin.value())
+        buffer_range_spin.setSuffix(" px")
+        buffer_range_spin.setToolTip("在目标高度 ± 此范围内搜索最佳切点")
+        layout.addRow("缓冲范围:", buffer_range_spin)
+        
+        # 最小片段高度
+        min_segment_spin = QSpinBox()
+        min_segment_spin.setRange(500, 5000)
+        min_segment_spin.setSingleStep(100)
+        min_segment_spin.setValue(self.split_min_segment_spin.value())
+        min_segment_spin.setSuffix(" px")
+        min_segment_spin.setToolTip("防止切出过小的片段")
+        layout.addRow("最小片段高度:", min_segment_spin)
+        
+        # 命名模式
+        naming_combo = QComboBox()
+        naming_combo.addItems(["序号_源文件名", "序号", "源文件名_序号", "序号_宽x高"])
+        naming_combo.setCurrentText(self.split_naming_combo.currentText())
+        naming_combo.setToolTip("拆分后文件的命名规则\n序号_源文件名: 001_image.jpg\n序号: 001.jpg\n源文件名_序号: image_001.jpg\n序号_宽x高: 001_800x2600.jpg")
+        layout.addRow("命名模式:", naming_combo)
+        
+        # 序号位数
+        digits_spin = QSpinBox()
+        digits_spin.setRange(1, 6)
+        digits_spin.setSingleStep(1)
+        digits_spin.setValue(self.split_index_digits_spin.value())
+        digits_spin.setToolTip("序号位数（1=不补零，3=001）")
+        layout.addRow("序号位数:", digits_spin)
+        
+        # 起始序号
+        start_spin = QSpinBox()
+        start_spin.setRange(0, 9999)
+        start_spin.setSingleStep(1)
+        start_spin.setValue(self.split_index_start_spin.value())
+        start_spin.setToolTip("全局序号起始值（跨所有切片累加）")
+        layout.addRow("起始序号:", start_spin)
+        
+        # 按钮
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        
+        ok_btn = QPushButton("确定")
+        ok_btn.clicked.connect(dialog.accept)
+        btn_layout.addWidget(ok_btn)
+        
+        cancel_btn = QPushButton("取消")
+        cancel_btn.clicked.connect(dialog.reject)
+        btn_layout.addWidget(cancel_btn)
+        
+        layout.addRow(btn_layout)
+        
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # 保存设置
+            self.split_skip_threshold_spin.setValue(skip_threshold_spin.value())
+            self.split_target_height_spin.setValue(target_height_spin.value())
+            self.split_buffer_range_spin.setValue(buffer_range_spin.value())
+            self.split_min_segment_spin.setValue(min_segment_spin.value())
+            self.split_naming_combo.setCurrentText(naming_combo.currentText())
+            self.split_index_digits_spin.setValue(digits_spin.value())
+            self.split_index_start_spin.setValue(start_spin.value())
+            self._save_split_settings()
+            self._log(f"✓ 长图拆分参数已更新: 短图阈值={skip_threshold_spin.value()}px, 命名={naming_combo.currentText()}, 位数={digits_spin.value()}, 起始={start_spin.value()}")
+    
+    def _on_split_clicked(self):
+        """拆分按钮点击：仅对所选章节执行长图拆分（不关闭对话框）"""
+        selected_chapters = self.get_selected_chapters()
+        if not selected_chapters:
+            QMessageBox.warning(self, "提示", "请先选择要拆分的章节")
+            return
+        
+        if self._is_splitting:
+            self._log("⚠️ 拆分正在进行中，请稍候...")
+            return
+        
+        # 确认对话框
+        reply = QMessageBox.question(
+            self, "确认拆分",
+            f"确定要对 {len(selected_chapters)} 个章节执行长图拆分吗？\n\n"
+            f"⚙️ 配置: 目标高度={self.split_target_height_spin.value()}px\n"
+            f"⚠️ 此操作会删除超高原图，替换为拆分后的图片！",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        
+        # 使用异步拆分，完成后不关闭对话框
+        self._start_split_async(selected_chapters, accept_after=False)
+    
+    def _start_split_async(self, chapters: List[str], accept_after: bool = False):
+        """启动异步拆分任务
+        
+        Args:
+            chapters: 要拆分的章节路径列表
+            accept_after: 拆分完成后是否自动接受对话框
+        """
+        if self._is_splitting:
+            self._log("⚠️ 拆分正在进行中，请稍候...")
+            return
+        
+        self._is_splitting = True
+        self._split_accept_after = accept_after
+        
+        # 清空上一次的撤回数据
+        self._clear_undo_data()
+        
+        # 创建备份目录
+        self._pending_undo_data = {}
+        self._pending_chapters = chapters[:]
+        self._backup_chapters_for_undo(chapters, "split")
+        
+        # 获取拆分参数
+        skip_threshold = self.split_skip_threshold_spin.value()
+        target_height = self.split_target_height_spin.value()
+        buffer_range = self.split_buffer_range_spin.value()
+        min_segment = self.split_min_segment_spin.value()
+        
+        # 获取命名模式
+        from desktop_qt_ui.utils.long_image_splitter import NAMING_PRESETS
+        naming_key = self.split_naming_combo.currentText()
+        naming_pattern = NAMING_PRESETS.get(naming_key, "{index}_{source}")
+        
+        # 序号位数与起始序号
+        index_digits = self.split_index_digits_spin.value()
+        index_start = self.split_index_start_spin.value()
+        
+        # 显示进度条，禁用按钮
+        self.split_button.setEnabled(False)
+        self.split_button.setText("拆分中...")
+        self.stitch_button.setEnabled(False)
+        self.ok_button.setEnabled(False)
+        self.stitch_progress.setRange(0, len(chapters))
+        self.stitch_progress.setValue(0)
+        self.stitch_progress.setVisible(True)
+        self.stitch_progress_label.setText(f"拆分进度: 0/{len(chapters)}")
+        self.stitch_progress_label.setVisible(True)
+        
+        # 创建后台线程和工作器
+        self._split_thread = QThread()
+        self._split_worker = SplitWorker(chapters, skip_threshold, target_height, buffer_range, min_segment, naming_pattern, index_digits, index_start)
+        self._split_worker.moveToThread(self._split_thread)
+        
+        # 连接信号
+        self._split_thread.started.connect(self._split_worker.run)
+        self._split_worker.finished.connect(self._on_split_finished)
+        self._split_worker.progress.connect(self._log)
+        self._split_worker.chapter_progress.connect(self._on_split_chapter_progress)
+        self._split_worker.error.connect(self._on_split_error)
+        self._split_worker.finished.connect(self._split_thread.quit)
+        self._split_worker.finished.connect(self._split_worker.deleteLater)
+        self._split_thread.finished.connect(self._split_thread.deleteLater)
+        
+        # 启动拆分
+        self._split_thread.start()
+    
+    def _on_split_chapter_progress(self, current: int, total: int):
+        """拆分章节进度更新"""
+        self.stitch_progress.setValue(current)
+        self.stitch_progress_label.setText(f"拆分进度: {current}/{total}")
+    
+    def _on_split_finished(self, result_files: list):
+        """拆分完成回调"""
+        self._is_splitting = False
+        
+        # 记录生成的文件用于撤回
+        if result_files and hasattr(self, '_pending_undo_data'):
+            self._finalize_undo_data(result_files, "split")
+        
+        # 恢复UI状态
+        self.split_button.setEnabled(True)
+        self.split_button.setText("拆分")
+        self.stitch_button.setEnabled(True)
+        self.ok_button.setEnabled(True)
+        self.stitch_progress.setVisible(False)
+        self.stitch_progress_label.setVisible(False)
+        
+        # 刷新已选章节列表显示
+        selected_chapters = self.get_selected_chapters()
+        self._update_selected_chapters_list(selected_chapters)
+        
+        # 如果需要在拆分完成后接受对话框
+        if self._split_accept_after:
+            self._log(f"[长图拆分] ✓ 全部完成，导入翻译器队列")
+            self.accept()
+    
+    def _on_split_error(self, error_msg: str):
+        """拆分错误回调"""
+        self._is_splitting = False
+        
+        # 恢复UI状态
+        self.split_button.setEnabled(True)
+        self.split_button.setText("拆分")
+        self.stitch_button.setEnabled(True)
+        self.ok_button.setEnabled(True)
+        self.stitch_progress.setVisible(False)
+        self.stitch_progress_label.setVisible(False)
+        
+        self._log(f"❌ {error_msg}", "ERROR")
+        QMessageBox.critical(self, "拆分错误", f"拆分图片时出错:\n{error_msg}")
+    
+    def _stop_split_if_running(self):
+        """如果拆分正在进行，停止它"""
+        if self._is_splitting and self._split_worker:
+            self._split_worker.stop()
+            if self._split_thread and self._split_thread.isRunning():
+                self._split_thread.quit()
+                self._split_thread.wait(1000)  # 最多等待1秒
+            self._is_splitting = False
+    
     def get_import_result(self) -> Optional[List[str]]:
         """获取导入模式的结果文件列表"""
         if hasattr(self, 'import_mode') and self.import_mode:
             return getattr(self, 'stitched_result_files', None)
         return None
+    
+    # ==================== 撤回功能相关方法 ====================
+    
+    def _backup_chapters_for_undo(self, chapters: List[str], operation_type: str):
+        """备份章节图片用于撤回
+        
+        Args:
+            chapters: 章节路径列表
+            operation_type: "split" 或 "stitch"
+        """
+        import shutil
+        import tempfile
+        
+        self._pending_undo_data = {}
+        image_extensions = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'}
+        
+        for chapter_path in chapters:
+            try:
+                # 创建临时备份目录
+                backup_dir = tempfile.mkdtemp(prefix=f"undo_{operation_type}_")
+                backup_files = []
+                
+                # 备份所有图片文件
+                for f in os.listdir(chapter_path):
+                    ext = os.path.splitext(f)[1].lower()
+                    if ext in image_extensions:
+                        src = os.path.join(chapter_path, f)
+                        dst = os.path.join(backup_dir, f)
+                        shutil.copy2(src, dst)
+                        backup_files.append(f)
+                
+                if backup_files:
+                    self._pending_undo_data[chapter_path] = {
+                        "backup_dir": backup_dir,
+                        "backup_files": backup_files,
+                        "generated_files": []  # 待填充
+                    }
+                    self._log(f"[撤回] 已备份 {len(backup_files)} 张图片: {os.path.basename(chapter_path)}")
+                else:
+                    # 没有图片，删除空备份目录
+                    shutil.rmtree(backup_dir, ignore_errors=True)
+                    
+            except Exception as e:
+                self._log(f"[撤回] ⚠️ 备份失败 {os.path.basename(chapter_path)}: {e}")
+    
+    def _finalize_undo_data(self, generated_files: List[str], operation_type: str):
+        """完成撤回数据记录
+        
+        Args:
+            generated_files: 生成的文件路径列表
+            operation_type: "split" 或 "stitch"
+        """
+        if not hasattr(self, '_pending_undo_data') or not self._pending_undo_data:
+            return
+        
+        # 按章节分组生成的文件
+        for file_path in generated_files:
+            chapter_path = os.path.dirname(file_path)
+            if chapter_path in self._pending_undo_data:
+                self._pending_undo_data[chapter_path]["generated_files"].append(file_path)
+        
+        # 保存撤回数据
+        self._undo_data = self._pending_undo_data
+        self._undo_type = operation_type
+        self._pending_undo_data = {}
+        
+        # 启用撤回按钮
+        self.undo_button.setEnabled(True)
+        self.undo_button.setToolTip(f"撤销最近的{"拆分" if operation_type == "split" else "拼接"}操作")
+        self._log(f"[撤回] ✓ 已记录撤回数据，可点击“撤回”按钮恢复")
+    
+    def _clear_undo_data(self):
+        """清除撤回数据并删除备份文件"""
+        import shutil
+        
+        if self._undo_data:
+            for chapter_data in self._undo_data.values():
+                backup_dir = chapter_data.get("backup_dir")
+                if backup_dir and os.path.isdir(backup_dir):
+                    try:
+                        shutil.rmtree(backup_dir)
+                    except Exception:
+                        pass
+        
+        self._undo_data = None
+        self._undo_type = ""
+        self.undo_button.setEnabled(False)
+    
+    def _on_undo_clicked(self):
+        """撤回按钮点击"""
+        if not self._undo_data:
+            QMessageBox.information(self, "提示", "没有可撤回的操作")
+            return
+        
+        operation_name = "拆分" if self._undo_type == "split" else "拼接"
+        chapter_count = len(self._undo_data)
+        
+        reply = QMessageBox.question(
+            self, "确认撤回",
+            f"确定要撤销最近的{operation_name}操作吗？\n\n"
+            f"涉及 {chapter_count} 个章节\n"
+            f"• 删除{operation_name}后生成的文件\n"
+            f"• 恢复原始图片",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        
+        self._execute_undo()
+    
+    def _execute_undo(self):
+        """执行撤回操作"""
+        import shutil
+        
+        if not self._undo_data:
+            return
+        
+        operation_name = "拆分" if self._undo_type == "split" else "拼接"
+        success_count = 0
+        
+        for chapter_path, chapter_data in self._undo_data.items():
+            try:
+                backup_dir = chapter_data.get("backup_dir")
+                backup_files = chapter_data.get("backup_files", [])
+                generated_files = chapter_data.get("generated_files", [])
+                
+                # 1. 删除生成的文件
+                for file_path in generated_files:
+                    if os.path.exists(file_path):
+                        try:
+                            os.remove(file_path)
+                        except Exception:
+                            pass
+                
+                # 2. 恢复备份文件
+                if backup_dir and os.path.isdir(backup_dir):
+                    for f in backup_files:
+                        src = os.path.join(backup_dir, f)
+                        dst = os.path.join(chapter_path, f)
+                        if os.path.exists(src):
+                            shutil.copy2(src, dst)
+                    
+                    # 删除备份目录
+                    shutil.rmtree(backup_dir, ignore_errors=True)
+                
+                success_count += 1
+                self._log(f"[撤回] ✓ 已恢复: {os.path.basename(chapter_path)}")
+                
+            except Exception as e:
+                self._log(f"[撤回] ⚠️ 恢复失败 {os.path.basename(chapter_path)}: {e}")
+        
+        # 清除撤回数据
+        self._undo_data = None
+        self._undo_type = ""
+        self.undo_button.setEnabled(False)
+        
+        # 刷新已选章节列表
+        selected_chapters = self.get_selected_chapters()
+        self._update_selected_chapters_list(selected_chapters)
+        
+        self._log(f"[撤回] ✓ {operation_name}操作已撤销，恢复了 {success_count} 个章节")
+        QMessageBox.information(self, "撤回完成", f"已成功撤销{operation_name}操作，恢复了 {success_count} 个章节")
 
 
 def show_advanced_folder_dialog(parent=None, start_dir: str = "") -> Optional[List[str]]:
