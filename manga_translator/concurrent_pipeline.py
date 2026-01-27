@@ -416,7 +416,9 @@ class ConcurrentPipeline:
                     self.translation_enqueued_total += 1
                     logger.info(
                         f"[检测+OCR] {ctx.image_name} 已加入翻译队列和修复队列 "
-                        f"(翻译队列大小: {self.translation_queue.qsize()}，累计入队: {self.translation_enqueued_total})"
+                        f"(翻译队列大小: {self.translation_queue.qsize()}，"
+                        f"延迟队列大小: {self.retry_queue.qsize()}，"
+                        f"累计入队: {self.translation_enqueued_total})"
                     )
                     # 让出控制权，让其他线程有机会运行
                     await asyncio.sleep(0)
@@ -716,6 +718,14 @@ class ConcurrentPipeline:
                 
                 # 控制信号：切换到延迟队列处理，完成后退出
                 if batch is _RETRY_SWITCH:
+                    # Guard: do not switch into retry stage until the main OCR/translation pipeline is fully done.
+                    # This prevents retry tasks from stealing capacity when OCR/detection is expected to resume.
+                    if (not self.detection_ocr_done) or (not self.translation_queue.empty()):
+                        batch_queue.task_done()
+                        await batch_queue.put(_RETRY_SWITCH)
+                        await asyncio.sleep(0.2)
+                        continue
+
                     batch_queue.task_done()
                     logger.info(f"[Worker-{worker_id}] 收到切换信号，已处理 {processed_count} 个批次，切换到延迟队列")
                     async with self._main_workers_lock:
