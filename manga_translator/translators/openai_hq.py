@@ -382,6 +382,10 @@ This is an incorrect response because it includes extra text and explanations.
         is_infinite = max_retries == -1
         last_exception = None
         local_attempt = 0  # 本次批次的尝试次数
+        
+        # 数量不匹配/BR缺失/质量检查失败的内部重试固定为2次
+        max_quality_retries = 2
+        quality_retry_count = 0  # 质量类错误重试计数
 
         while is_infinite or attempt < max_retries:
             # 检查是否被取消
@@ -556,17 +560,18 @@ This is an incorrect response because it includes extra text and explanations.
                     # Strict validation: must match input count
                     if len(translations) != len(texts):
                         retry_attempt += 1
+                        quality_retry_count += 1
                         retry_reason = f"Translation count mismatch: expected {len(texts)}, got {len(translations)}"
-                        log_attempt = f"{attempt}/{max_retries}" if not is_infinite else f"Attempt {attempt}"
-                        self.logger.warning(f"[{log_attempt}] {retry_reason}. Retrying...")
+                        log_attempt = f"{quality_retry_count}/{max_quality_retries}"
+                        self.logger.warning(f"[数量不匹配 {log_attempt}] {retry_reason}. Retrying...")
                         self.logger.warning(f"Expected texts: {texts}")
                         self.logger.warning(f"Got translations: {translations}")
                         
                         # 记录错误以便在达到最大尝试次数时显示
                         last_exception = Exception(f"翻译数量不匹配: 期望 {len(texts)} 条，实际得到 {len(translations)} 条")
 
-                        if not is_infinite and attempt >= max_retries:
-                            raise Exception(f"Translation count mismatch after {max_retries} attempts: expected {len(texts)}, got {len(translations)}")
+                        if quality_retry_count >= max_quality_retries:
+                            raise Exception(f"Translation count mismatch after {max_quality_retries} quality retries: expected {len(texts)}, got {len(translations)}")
 
                         await asyncio.sleep(2)
                         continue
@@ -575,15 +580,16 @@ This is an incorrect response because it includes extra text and explanations.
                     is_valid, error_msg = self._validate_translation_quality(texts, translations)
                     if not is_valid:
                         retry_attempt += 1
+                        quality_retry_count += 1
                         retry_reason = f"Quality check failed: {error_msg}"
-                        log_attempt = f"{attempt}/{max_retries}" if not is_infinite else f"Attempt {attempt}"
-                        self.logger.warning(f"[{log_attempt}] {retry_reason}. Retrying...")
+                        log_attempt = f"{quality_retry_count}/{max_quality_retries}"
+                        self.logger.warning(f"[质量检查失败 {log_attempt}] {retry_reason}. Retrying...")
                         
                         # 记录错误以便在达到最大尝试次数时显示
                         last_exception = Exception(f"翻译质量检查失败: {error_msg}")
 
-                        if not is_infinite and attempt >= max_retries:
-                            raise Exception(f"Quality check failed after {max_retries} attempts: {error_msg}")
+                        if quality_retry_count >= max_quality_retries:
+                            raise Exception(f"Quality check failed after {max_quality_retries} quality retries: {error_msg}")
 
                         await asyncio.sleep(2)
                         continue
@@ -597,17 +603,18 @@ This is an incorrect response because it includes extra text and explanations.
                     # BR check: Check if translations contain necessary [BR] markers
                     if not self._validate_br_markers(translations, batch_data=batch_data, ctx=ctx):
                         retry_attempt += 1
+                        quality_retry_count += 1
                         retry_reason = "BR markers missing in translations"
-                        log_attempt = f"{attempt}/{max_retries}" if not is_infinite else f"Attempt {attempt}"
-                        self.logger.warning(f"[{log_attempt}] {retry_reason}, retrying...")
+                        log_attempt = f"{quality_retry_count}/{max_quality_retries}"
+                        self.logger.warning(f"[BR标记缺失 {log_attempt}] {retry_reason}, retrying...")
                         
                         # 记录错误以便在达到最大尝试次数时显示
                         last_exception = Exception("AI断句检查失败: 翻译结果缺少必要的[BR]标记")
                         
                         # 如果达到最大重试次数，抛出友好的异常
-                        if not is_infinite and attempt >= max_retries:
+                        if quality_retry_count >= max_quality_retries:
                             from .common import BRMarkersValidationException
-                            self.logger.error("OpenAI高质量翻译在多次重试后仍然失败：AI断句检查失败。")
+                            self.logger.error(f"OpenAI高质量翻译在 {max_quality_retries} 次重试后仍然失败：AI断句检查失败。")
                             raise BRMarkersValidationException(
                                 missing_count=0,  # 具体数字在_validate_br_markers中已记录
                                 total_count=len(texts),
