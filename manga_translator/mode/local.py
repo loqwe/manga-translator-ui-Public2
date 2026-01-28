@@ -360,11 +360,19 @@ async def translate_files(input_paths, output_dir, config_service, verbose=False
     if not output_format or output_format == "不指定":
         output_format = None
     
+    # 收集所有图片的父目录（用于计算输出路径时避免同名目录冲突）
+    all_parent_dirs = set()
+    for file_path, _ in file_paths_with_configs:
+        parent_dir = os.path.normpath(os.path.dirname(file_path))
+        if parent_dir:
+            all_parent_dirs.add(parent_dir)
+    
     save_info = {
         'output_folder': final_output_dir,
         'format': output_format,
         'overwrite': overwrite,
-        'input_folders': input_folders  # 保持为 set，翻译器内部会处理
+        'input_folders': input_folders,  # 保持为 set，翻译器内部会处理
+        'all_parent_dirs': all_parent_dirs  # 用于 build_unique_folder_aliases
     }
     
     # 调试：检查输出目录是否存在

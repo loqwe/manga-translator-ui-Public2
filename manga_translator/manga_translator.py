@@ -37,7 +37,8 @@ from matplotlib import cm
 from .utils.path_manager import (
     get_json_path,
     get_inpainted_path,
-    find_json_path
+    find_json_path,
+    build_unique_folder_aliases
 )
 
 from .detection import dispatch as dispatch_detection, prepare as prepare_detection, unload as unload_detection
@@ -350,6 +351,8 @@ class MangaTranslator:
                 - input_folders: 输入文件夹集合
                 - format: 输出格式（可选）
                 - save_to_source_dir: 是否输出到原图目录的 manga_translator_work/result 子目录
+                - all_parent_dirs: 所有图片的父目录集合（用于生成唯一别名）
+                - parent_dir_aliases: 已计算的父目录别名映射（缓存）
                 
         Returns:
             str: 计算后的输出文件完整路径
@@ -367,21 +370,33 @@ class MangaTranslator:
             # 输出到原图所在目录的 manga_translator_work/result 子目录
             final_output_dir = os.path.join(parent_dir, 'manga_translator_work', 'result')
         else:
-            # 原有逻辑：使用配置的输出目录
+            # 默认输出到输出目录根
             final_output_dir = output_folder
+            output_folder_norm = os.path.normpath(output_folder)
             
-            # 计算相对路径以保持文件夹结构
-            for folder in input_folders:
-                if parent_dir.startswith(folder):
-                    relative_path = os.path.relpath(parent_dir, folder)
-                    # Normalize path and avoid adding '.' as a directory component
-                    if relative_path == '.':
-                        final_output_dir = os.path.join(output_folder, os.path.basename(folder))
-                    else:
-                        final_output_dir = os.path.join(output_folder, os.path.basename(folder), relative_path)
-                    # Normalize to use consistent separators
-                    final_output_dir = os.path.normpath(final_output_dir)
-                    break
+            # 获取图片的直接父目录名（如 "Chapter 74"）
+            parent_name = os.path.basename(parent_dir)
+            
+            # 检查是否需要保留目录结构
+            # 只有当父目录名包含 "chapter" 时才创建子目录
+            if parent_name and 'chapter' in parent_name.lower():
+                # 生成所有图片父目录的唯一别名，避免同名目录冲突
+                parent_dir_aliases = save_info.get('parent_dir_aliases')
+                if parent_dir_aliases is None:
+                    # 收集所有图片的父目录
+                    all_parent_dirs = save_info.get('all_parent_dirs', set())
+                    if not all_parent_dirs:
+                        # 如果没有预先收集，使用 input_folders 作为备用
+                        all_parent_dirs = input_folders
+                    parent_dir_aliases = build_unique_folder_aliases(all_parent_dirs)
+                    save_info['parent_dir_aliases'] = parent_dir_aliases
+                
+                # 获取当前父目录的别名
+                folder_alias = parent_dir_aliases.get(parent_dir) or parent_name
+                final_output_dir = os.path.join(output_folder, folder_alias)
+            # 如果父目录不是 Chapter，直接放到输出根目录（final_output_dir 保持为 output_folder）
+            
+            final_output_dir = os.path.normpath(final_output_dir)
         
         os.makedirs(final_output_dir, exist_ok=True)
         
@@ -4830,6 +4845,8 @@ class MangaTranslator:
         
         当HQ翻译器遇到安全限制时，降级到对应的普通文本翻译器批量处理
         openai_hq → openai, gemini_hq → gemini
+        
+        如果批量翻译失败或数量不匹配，会自动拆分成单条逐个翻译
         """
         if not texts:
             return []
@@ -4858,21 +4875,72 @@ class MangaTranslator:
         
         # 配置降级翻译器
         fallback_translator.parse_args(config.translator)
-        fallback_translator.attempts = 2  # 降级翻译允许2次尝试
-        fallback_translator._max_total_attempts = 2  # 重置全局尝试次数
+        fallback_translator.attempts = 4  # 降级翻译允许4次尝试（每次循环都会计数）
+        fallback_translator._max_total_attempts = 4  # 重置全局尝试次数
         fallback_translator._global_attempt_count = 0  # 重置计数器
         
         if self._cancel_check_callback:
             fallback_translator.set_cancel_check_callback(self._cancel_check_callback)
         
-        # 执行批量翻译
-        result = await fallback_translator._translate(
-            ctx.from_lang,
-            config.translator.target_lang,
-            texts,
-            ctx
-        )
-        return result if result else texts
+        # 尝试批量翻译
+        batch_failed = False
+        result = None
+        try:
+            result = await fallback_translator._translate(
+                ctx.from_lang,
+                config.translator.target_lang,
+                texts,
+                ctx
+            )
+            # 检查结果数量是否匹配
+            if not result or len(result) != len(texts):
+                logger.warning(f"[降级翻译] 批量翻译数量不匹配: 期望 {len(texts)} 条，实际得到 {len(result) if result else 0} 条")
+                batch_failed = True
+        except asyncio.CancelledError:
+            raise
+        except Exception as batch_e:
+            logger.warning(f"[降级翻译] 批量翻译失败: {batch_e}")
+            batch_failed = True
+        
+        # 如果批量翻译成功且数量匹配，直接返回
+        if not batch_failed and result and len(result) == len(texts):
+            return result
+        
+        # 批量翻译失败，拆分成单条逐个翻译
+        logger.info(f"[降级翻译] 批量翻译失败，拆分成 {len(texts)} 条单独翻译")
+        single_results = []
+        
+        for i, text in enumerate(texts):
+            try:
+                # 重置翻译器计数器
+                fallback_translator._global_attempt_count = 0
+                fallback_translator.attempts = 3  # 单条翻译允许3次尝试
+                fallback_translator._max_total_attempts = 3
+                
+                single_result = await fallback_translator._translate(
+                    ctx.from_lang,
+                    config.translator.target_lang,
+                    [text],
+                    ctx
+                )
+                
+                if single_result and len(single_result) > 0:
+                    single_results.append(single_result[0])
+                    logger.debug(f"[降级翻译] 单条翻译 {i+1}/{len(texts)} 成功")
+                else:
+                    # 单条翻译返回空，使用原文
+                    logger.warning(f"[降级翻译] 单条翻译 {i+1}/{len(texts)} 返回空，使用原文")
+                    single_results.append(text)
+                    
+            except asyncio.CancelledError:
+                raise
+            except Exception as single_e:
+                # 单条翻译失败，使用原文
+                logger.warning(f"[降级翻译] 单条翻译 {i+1}/{len(texts)} 失败: {single_e}，使用原文")
+                single_results.append(text)
+        
+        logger.info(f"[降级翻译] 单条翻译完成: {len(single_results)}/{len(texts)} 条")
+        return single_results
     
     async def _fallback_text_translate(self, text: str, config: Config, ctx: Context) -> str:
         """
