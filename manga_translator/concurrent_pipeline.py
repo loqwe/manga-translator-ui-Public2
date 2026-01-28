@@ -996,6 +996,7 @@ class ConcurrentPipeline:
         # 网络错误和401错误：2次重试（含初始），即最多整批重试1次
         max_network_retries = 1
         max_auth_retries = 1  # 401认证错误重试次数
+        max_quality_retries = 1  # 数量不匹配/BR缺失/质量检查失败重试次数
         logger.info(f"[翻译] 批量翻译 {len(batch)} 张图片")
         
         try:
@@ -1155,24 +1156,47 @@ class ConcurrentPipeline:
                         prev_ctxs.append(ctx)
                     return
             
-            # 安全限制/数量不匹配/BR缺失/质量检查/HQ空内容错误：放入延迟重试队列，等主队列完成后统一处理
-            if is_safety_error or is_count_mismatch or is_br_error or is_quality_error or is_empty_content_error:
+            # 数量不匹配/BR缺失/质量检查失败：先整批重试1次，仍失败再进入延迟队列
+            if is_count_mismatch or is_br_error or is_quality_error:
                 # 确定错误类型
-                if is_safety_error:
-                    error_type_str = 'safety_limit'
-                    error_desc = '安全限制'
-                elif is_count_mismatch:
+                if is_count_mismatch:
                     error_type_str = 'count_mismatch'
                     error_desc = '数量不匹配'
                 elif is_br_error:
                     error_type_str = 'br_missing'
                     error_desc = 'BR标记缺失'
-                elif is_empty_content_error:
-                    error_type_str = 'empty_content'
-                    error_desc = 'HQ空内容'
                 else:
                     error_type_str = 'quality_failed'
                     error_desc = '质量检查失败'
+                
+                if retry_count < max_quality_retries:
+                    # 第一次失败：等待2秒后整批重试
+                    retry_count += 1
+                    logger.warning(f"[翻译] {error_desc}，2秒后整批重试 ({retry_count}/{max_quality_retries}): {error_type}")
+                    await asyncio.sleep(2)
+                    # 递归重试：跳过速率限制器（不等待令牌），但仍占用原semaphore槽位
+                    await self._process_translation_batch(batch, retry_count, skip_rate_limiter=True)
+                    return
+                else:
+                    # 整批重试失败：放入延迟队列
+                    logger.warning(f"[翻译] {error_desc}整批重试失败，将 {len(batch)} 张图片放入延迟队列")
+                    prev_ctxs = []
+                    for ctx, config in batch:
+                        if prev_ctxs:
+                            ctx.local_prev_context = self._format_same_batch_prev_original_context(prev_ctxs[-2:])
+                        await self.retry_queue.put((ctx, config, error_type_str))
+                        prev_ctxs.append(ctx)
+                    return
+            
+            # 安全限制/HQ空内容错误：直接放入延迟重试队列，等主队列完成后统一处理
+            if is_safety_error or is_empty_content_error:
+                # 确定错误类型
+                if is_safety_error:
+                    error_type_str = 'safety_limit'
+                    error_desc = '安全限制'
+                else:
+                    error_type_str = 'empty_content'
+                    error_desc = 'HQ空内容'
                 
                 if len(batch) > 1:
                     # 批次错误：拆分放入延迟队列

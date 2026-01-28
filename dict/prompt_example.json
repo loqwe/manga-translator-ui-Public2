@@ -379,6 +379,10 @@
           {
             "original": "한수진",
             "translation": "韩秀珍"
+          },
+          {
+            "original": "송하린",
+            "translation": "宋荷琳"
           }
         ],
         "Location": [],
@@ -686,16 +690,97 @@
         "Creature": []
       },
       "人妻猎人": {
-        "Person": [],
-        "Location": [],
+        "Person": [
+          {
+            "original": "금태양",
+            "translation": "金太阳"
+          },
+          {
+            "original": "세실",
+            "translation": "塞西尔"
+          },
+          {
+            "original": "양지혁",
+            "translation": "梁智赫"
+          },
+          {
+            "original": "참치",
+            "translation": "金枪鱼"
+          },
+          {
+            "original": "그렐린",
+            "translation": "格蕾琳"
+          },
+          {
+            "original": "키르네",
+            "translation": "基尔内"
+          },
+          {
+            "original": "아리엘라",
+            "translation": "阿丽埃拉"
+          },
+          {
+            "original": "송하린",
+            "translation": "宋荷琳"
+          }
+        ],
+        "Location": [
+          {
+            "original": "TRAVELER'S REST",
+            "translation": "旅人休憩所"
+          }
+        ],
         "Org": [],
         "Item": [],
         "Skill": [],
-        "Creature": []
+        "Creature": [
+          {
+            "original": "서큐버스",
+            "translation": "魅魔"
+          }
+        ]
       },
       "教你防身术": {
-        "Person": [],
-        "Location": [],
+        "Person": [
+          {
+            "original": "예솔",
+            "translation": "艺率"
+          },
+          {
+            "original": "이유진",
+            "translation": "李宥真"
+          },
+          {
+            "original": "정예솔",
+            "translation": "郑艺率"
+          },
+          {
+            "original": "한솔",
+            "translation": "翰率"
+          },
+          {
+            "original": "성현",
+            "translation": "成贤"
+          },
+          {
+            "original": "주성현",
+            "translation": "朱成贤"
+          }
+        ],
+        "Location": [
+          {
+            "original": "合氣",
+            "translation": "合气"
+          },
+          {
+            "original": "MT",
+            "translation": "迎新会"
+          },
+          {
+            "original": "도장",
+            "translation": "道馆"
+          }
+        ],
         "Org": [],
         "Item": [],
         "Skill": [],
@@ -703,8 +788,30 @@
       }
     },
     "unassigned": {
-      "Person": [],
-      "Location": [],
+      "Person": [
+        {
+          "original": "아리엘라",
+          "translation": "爱丽艾拉"
+        },
+        {
+          "original": "송하린",
+          "translation": "宋夏凛"
+        },
+        {
+          "original": "모모",
+          "translation": "桃桃"
+        },
+        {
+          "original": "정다은",
+          "translation": "郑多恩"
+        }
+      ],
+      "Location": [
+        {
+          "original": "한국대학교",
+          "translation": "韩国大学"
+        }
+      ],
       "Org": [],
       "Item": [
         {
@@ -1098,6 +1205,58 @@
         "original": "연주",
         "translation": "妍珠",
         "lang": "ko"
+      },
+      {
+        "original": "금태양",
+        "translation": "金太阳"
+      },
+      {
+        "original": "세실",
+        "translation": "塞西尔"
+      },
+      {
+        "original": "양지혁",
+        "translation": "梁智赫"
+      },
+      {
+        "original": "참치",
+        "translation": "金枪鱼"
+      },
+      {
+        "original": "그렐린",
+        "translation": "格蕾琳"
+      },
+      {
+        "original": "키르네",
+        "translation": "基尔内"
+      },
+      {
+        "original": "아리엘라",
+        "translation": "阿丽埃拉"
+      },
+      {
+        "original": "예솔",
+        "translation": "艺率"
+      },
+      {
+        "original": "이유진",
+        "translation": "李宥真"
+      },
+      {
+        "original": "정예솔",
+        "translation": "郑艺率"
+      },
+      {
+        "original": "한솔",
+        "translation": "翰率"
+      },
+      {
+        "original": "성현",
+        "translation": "成贤"
+      },
+      {
+        "original": "주성현",
+        "translation": "朱成贤"
       }
     ],
     "Location": [
@@ -1143,6 +1302,22 @@
         "original": "서남호수공원",
         "translation": "西南湖水公园",
         "lang": "ko"
+      },
+      {
+        "original": "TRAVELER'S REST",
+        "translation": "旅人休憩所"
+      },
+      {
+        "original": "合氣",
+        "translation": "合气"
+      },
+      {
+        "original": "MT",
+        "translation": "迎新会"
+      },
+      {
+        "original": "도장",
+        "translation": "道馆"
       }
     ],
     "Org": [
@@ -1259,6 +1434,10 @@
         "original": "염생",
         "translation": "鬼魂",
         "lang": "ko"
+      },
+      {
+        "original": "서큐버스",
+        "translation": "魅魔"
       }
     ]
   }
