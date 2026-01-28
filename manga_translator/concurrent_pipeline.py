@@ -996,7 +996,7 @@ class ConcurrentPipeline:
         # 网络错误和401错误：2次重试（含初始），即最多整批重试1次
         max_network_retries = 1
         max_auth_retries = 1  # 401认证错误重试次数
-        max_quality_retries = 1  # 数量不匹配/BR缺失/质量检查失败重试次数
+        # 数量不匹配/BR缺失/质量检查失败：主队列不重试，直接进延迟队列（延迟队列中先整批重试，再单张重试）
         logger.info(f"[翻译] 批量翻译 {len(batch)} 张图片")
         
         try:
@@ -1156,7 +1156,7 @@ class ConcurrentPipeline:
                         prev_ctxs.append(ctx)
                     return
             
-            # 数量不匹配/BR缺失/质量检查失败：先整批重试1次，仍失败再进入延迟队列
+            # 数量不匹配/BR缺失/质量检查失败：直接进入延迟队列（延迟队列中先整批重试，再单张重试）
             if is_count_mismatch or is_br_error or is_quality_error:
                 # 确定错误类型
                 if is_count_mismatch:
@@ -1169,24 +1169,15 @@ class ConcurrentPipeline:
                     error_type_str = 'quality_failed'
                     error_desc = '质量检查失败'
                 
-                if retry_count < max_quality_retries:
-                    # 第一次失败：等待2秒后整批重试
-                    retry_count += 1
-                    logger.warning(f"[翻译] {error_desc}，2秒后整批重试 ({retry_count}/{max_quality_retries}): {error_type}")
-                    await asyncio.sleep(2)
-                    # 递归重试：跳过速率限制器（不等待令牌），但仍占用原semaphore槽位
-                    await self._process_translation_batch(batch, retry_count, skip_rate_limiter=True)
-                    return
-                else:
-                    # 整批重试失败：放入延迟队列
-                    logger.warning(f"[翻译] {error_desc}整批重试失败，将 {len(batch)} 张图片放入延迟队列")
-                    prev_ctxs = []
-                    for ctx, config in batch:
-                        if prev_ctxs:
-                            ctx.local_prev_context = self._format_same_batch_prev_original_context(prev_ctxs[-2:])
-                        await self.retry_queue.put((ctx, config, error_type_str))
-                        prev_ctxs.append(ctx)
-                    return
+                # 直接放入延迟队列（保持整批，延迟队列中先整批重试）
+                logger.warning(f"[翻译] {error_desc}，将整批 {len(batch)} 张图片放入延迟队列（稍后整批重试）")
+                # 保存整批信息，供延迟队列整批重试使用
+                batch_id = id(batch)
+                for ctx, config in batch:
+                    ctx._retry_batch_id = batch_id
+                    ctx._retry_batch_size = len(batch)
+                await self.retry_queue.put((batch, None, error_type_str))  # 放入整批
+                return
             
             # 安全限制/HQ空内容错误：直接放入延迟重试队列，等主队列完成后统一处理
             if is_safety_error or is_empty_content_error:
@@ -1414,7 +1405,7 @@ class ConcurrentPipeline:
                 break
 
             try:
-                ctx, config, error_type = await asyncio.wait_for(self.retry_queue.get(), timeout=1.0)
+                item, config, error_type = await asyncio.wait_for(self.retry_queue.get(), timeout=1.0)
             except asyncio.TimeoutError:
                 # ✅ 所有 Worker 都已进入延迟模式且队列为空，则退出
                 if self._main_workers_finished >= self._main_workers_target and self.retry_queue.empty():
@@ -1422,15 +1413,29 @@ class ConcurrentPipeline:
                 continue
 
             try:
-                logger.info(f"[延迟重试] Worker-{worker_id} 处理: {ctx.image_name} (错误类型: {error_type})")
-                ok = await self._retry_single_image(ctx, config, error_type)
-                if ok:
-                    success_count += 1
+                # 判断是整批还是单张
+                if isinstance(item, list):
+                    # 整批重试（数量不匹配/BR缺失/质量检查失败）
+                    batch = item
+                    logger.info(f"[延迟重试] Worker-{worker_id} 整批重试: {len(batch)} 张图片 (错误类型: {error_type})")
+                    batch_ok, batch_success, batch_fail = await self._retry_batch_then_single(batch, error_type, worker_id)
+                    success_count += batch_success
+                    fail_count += batch_fail
                 else:
-                    fail_count += 1
+                    # 单张重试（超时/安全限制/HQ空内容等）
+                    ctx = item
+                    logger.info(f"[延迟重试] Worker-{worker_id} 处理: {ctx.image_name} (错误类型: {error_type})")
+                    ok = await self._retry_single_image(ctx, config, error_type)
+                    if ok:
+                        success_count += 1
+                    else:
+                        fail_count += 1
             except Exception as e:
                 logger.error(f"[延迟重试] Worker-{worker_id} 任务异常: {e}")
-                fail_count += 1
+                if isinstance(item, list):
+                    fail_count += len(item)
+                else:
+                    fail_count += 1
             finally:
                 self.retry_queue.task_done()
 
@@ -1503,6 +1508,59 @@ class ConcurrentPipeline:
             # ✅ 失败也增加翻译计数（表示已处理）
             self.stats['translation'] += 1
             return False
+    
+    async def _retry_batch_then_single(self, batch: List[tuple], error_type: str, worker_id: int) -> tuple:
+        """
+        延迟队列中的整批重试：先整批重试1次，失败后拆分为单张重试
+        
+        Args:
+            batch: 整批图片 [(ctx, config), ...]
+            error_type: 错误类型
+            worker_id: Worker ID
+            
+        Returns:
+            (batch_ok, success_count, fail_count)
+        """
+        success_count = 0
+        fail_count = 0
+        
+        # 第一步：整批重试
+        try:
+            logger.info(f"[延迟重试] Worker-{worker_id} 尝试整批翻译 {len(batch)} 张图片")
+            async with self.rate_limiter:
+                translated_batch = await self.translator._batch_translate_contexts(batch, len(batch))
+            
+            # 整批成功
+            await self._mark_translation_done(translated_batch)
+            self.stats['translation'] += len(batch)
+            self.rate_limiter.report_success()
+            
+            # 移除失败记录
+            for ctx, config in batch:
+                try:
+                    remove_failure_record(ctx.image_name)
+                except Exception:
+                    pass
+            
+            logger.info(f"[延迟重试] Worker-{worker_id} 整批重试成功: {len(batch)} 张图片")
+            return (True, len(batch), 0)
+            
+        except Exception as e:
+            logger.warning(f"[延迟重试] Worker-{worker_id} 整批重试失败: {e}，开始拆分为单张重试")
+        
+        # 第二步：拆分为单张重试
+        for ctx, config in batch:
+            try:
+                ok = await self._retry_single_image(ctx, config, error_type)
+                if ok:
+                    success_count += 1
+                else:
+                    fail_count += 1
+            except Exception as e:
+                logger.error(f"[延迟重试] Worker-{worker_id} 单张重试异常: {ctx.image_name} - {e}")
+                fail_count += 1
+        
+        return (False, success_count, fail_count)
     
     async def _wait_for_inpaint_stop(self):
         """
