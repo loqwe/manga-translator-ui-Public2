@@ -4928,16 +4928,14 @@ class MangaTranslator:
                     single_results.append(single_result[0])
                     logger.debug(f"[降级翻译] 单条翻译 {i+1}/{len(texts)} 成功")
                 else:
-                    # 单条翻译返回空，使用原文
-                    logger.warning(f"[降级翻译] 单条翻译 {i+1}/{len(texts)} 返回空，使用原文")
-                    single_results.append(text)
+                    # 单条翻译返回空，抛出异常
+                    raise Exception(f"降级翻译失败: 单条翻译 {i+1}/{len(texts)} 返回空")
                     
             except asyncio.CancelledError:
                 raise
             except Exception as single_e:
-                # 单条翻译失败，使用原文
-                logger.warning(f"[降级翻译] 单条翻译 {i+1}/{len(texts)} 失败: {single_e}，使用原文")
-                single_results.append(text)
+                # 单条翻译失败，抛出异常
+                raise Exception(f"降级翻译失败: 单条翻译 {i+1}/{len(texts)} 失败 - {single_e}")
         
         logger.info(f"[降级翻译] 单条翻译完成: {len(single_results)}/{len(texts)} 条")
         return single_results
