@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QFormLayout,
     QPushButton, QLineEdit, QTextEdit, QLabel, QTreeView,
     QHeaderView, QAbstractItemView, QFileDialog,
-    QMessageBox, QSplitter, QScrollArea
+    QMessageBox, QSplitter, QScrollArea, QCheckBox
 )
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QStandardItemModel, QStandardItem
 
@@ -201,6 +201,12 @@ class CustomComicPanel(QWidget):
         output_layout.addWidget(output_btn)
         layout.addRow("输出文件夹:", output_layout)
         
+        # 语言后缀选项
+        self.language_suffix_checkbox = QCheckBox("非韩文漫画章节名加 [R] 后缀")
+        self.language_suffix_checkbox.setToolTip("韩文漫画不加后缀，其他语言加 [R] 标记")
+        self.language_suffix_checkbox.stateChanged.connect(self._save_paths)
+        layout.addRow("", self.language_suffix_checkbox)
+        
         btn_layout = QHBoxLayout()
         self.process_btn = QPushButton("开始一键处理")
         self.process_btn.clicked.connect(self.start_processing)
@@ -342,7 +348,8 @@ class CustomComicPanel(QWidget):
         self.result_text.append("开始一键处理...")
         self.process_btn.setEnabled(False)
         
-        processor = OneClickProcessor(input_folder, output_folder)
+        add_suffix = self.language_suffix_checkbox.isChecked()
+        processor = OneClickProcessor(input_folder, output_folder, add_language_suffix=add_suffix)
         self.process_thread = ProcessThread(processor)
         self.process_thread.progress.connect(self.on_progress)
         self.process_thread.finished.connect(self.on_finished)
@@ -371,14 +378,17 @@ class CustomComicPanel(QWidget):
         self.input_folder_edit.blockSignals(True)
         self.output_folder_edit.blockSignals(True)
         self.analysis_folder_edit.blockSignals(True)
+        self.language_suffix_checkbox.blockSignals(True)
         
         self.input_folder_edit.setText(s.value("paths/input", ""))
         self.output_folder_edit.setText(s.value("paths/output", ""))
         self.analysis_folder_edit.setText(s.value("paths/analysis", ""))
+        self.language_suffix_checkbox.setChecked(s.value("options/language_suffix", False, type=bool))
         
         self.input_folder_edit.blockSignals(False)
         self.output_folder_edit.blockSignals(False)
         self.analysis_folder_edit.blockSignals(False)
+        self.language_suffix_checkbox.blockSignals(False)
         
         # Splitter sizes - 延迟恢复确保 UI已完全初始化
         from PyQt6.QtCore import QTimer
@@ -406,6 +416,7 @@ class CustomComicPanel(QWidget):
         s.setValue("paths/input", self.input_folder_edit.text())
         s.setValue("paths/output", self.output_folder_edit.text())
         s.setValue("paths/analysis", self.analysis_folder_edit.text())
+        s.setValue("options/language_suffix", self.language_suffix_checkbox.isChecked())
     
     def analyze_chapters(self):
         """分析章节并填充表格"""

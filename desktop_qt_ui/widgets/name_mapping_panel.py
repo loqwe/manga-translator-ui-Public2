@@ -12,7 +12,7 @@ from PyQt6.QtCore import Qt, QSettings, QSortFilterProxyModel
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
     QPushButton, QLineEdit, QTextEdit, QLabel, QTreeView,
-    QHeaderView, QAbstractItemView, QMessageBox
+    QHeaderView, QAbstractItemView, QMessageBox, QApplication, QToolTip
 )
 from PyQt6.QtGui import QStandardItemModel, QStandardItem
 
@@ -99,6 +99,11 @@ class NameMappingPanel(QWidget):
         self.mapping_view.doubleClicked.connect(self.edit_mapping)
         self.mapping_view.expanded.connect(self._on_tree_expanded)
         self.mapping_view.collapsed.connect(self._on_tree_collapsed)
+        
+        # Ctrl+C shortcut for copy
+        from PyQt6.QtGui import QShortcut, QKeySequence
+        copy_shortcut = QShortcut(QKeySequence.StandardKey.Copy, self.mapping_view)
+        copy_shortcut.activated.connect(self._copy_selected)
         # 调淡选中/悬停行颜色
         self.mapping_view.setStyleSheet("""
             QTreeView::item:hover {
@@ -272,6 +277,30 @@ class NameMappingPanel(QWidget):
         except Exception:
             pass
 
+    # ============ Copy handling ============
+    def _copy_selected(self):
+        """复制选中项的名称 (Ctrl+C)"""
+        index = self.mapping_view.currentIndex()
+        if not index.isValid():
+            return
+        
+        src_idx = self.mapping_proxy.mapToSource(index)
+        model = src_idx.model()
+        
+        # Get the display text from column 0 (name column)
+        text = model.data(src_idx, Qt.ItemDataRole.DisplayRole)
+        if text:
+            # Remove count suffix for parent items, e.g. "名称 (3)" -> "名称"
+            if not src_idx.parent().isValid() and text.endswith(')'):
+                import re
+                text = re.sub(r'\s*\(\d+\)$', '', text)
+            
+            QApplication.clipboard().setText(text)
+            # Show brief tooltip feedback
+            pos = self.mapping_view.visualRect(index).center()
+            global_pos = self.mapping_view.viewport().mapToGlobal(pos)
+            QToolTip.showText(global_pos, f"已复制: {text[:30]}{'...' if len(text) > 30 else ''}", self.mapping_view, self.mapping_view.visualRect(index), 1500)
+    
     # ============ 映射操作 ============
     def load_mappings(self):
         """加载映射到树（分组：熟肉名 -> 生肉名列表）"""

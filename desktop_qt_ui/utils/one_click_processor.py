@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Callable, Optional
 
 from name_replacer import NameReplacer
-from cbz_compressor import CBZCompressor
+from cbz_compressor import CBZCompressor, is_cjk_origin
 from cbz_transfer import CBZTransfer
 
 
@@ -19,7 +19,8 @@ class OneClickProcessor:
     def __init__(self, 
                  input_folder: str, 
                  output_folder: str,
-                 progress_callback: Optional[Callable[[str], None]] = None):
+                 progress_callback: Optional[Callable[[str], None]] = None,
+                 add_language_suffix: bool = False):
         """
         初始化一键处理器
         
@@ -27,10 +28,12 @@ class OneClickProcessor:
             input_folder: 输入文件夹路径（翻译输出文件夹）
             output_folder: 输出文件夹路径（存储文件夹）
             progress_callback: 进度回调函数
+            add_language_suffix: 是否根据语言添加后缀（韩文不加，其他加 [R]）
         """
         self.input_folder = Path(input_folder)
         self.output_folder = Path(output_folder)
         self.progress_callback = progress_callback
+        self.add_language_suffix = add_language_suffix
         
         # 初始化各个处理器
         self.replacer = NameReplacer()
@@ -49,6 +52,29 @@ class OneClickProcessor:
         """报告进度"""
         if self.progress_callback:
             self.progress_callback(message)
+    
+    def _get_original_comic_name(self, chapter_folder: Path) -> str:
+        """
+        从章节文件夹的 _source_path.txt 读取原始漫画名
+        
+        Args:
+            chapter_folder: 章节文件夹路径
+            
+        Returns:
+            原始漫画名，读取失败返回空字符串
+        """
+        try:
+            source_path_file = chapter_folder / "_source_path.txt"
+            if source_path_file.exists():
+                with open(source_path_file, 'r', encoding='utf-8') as f:
+                    source_path = f.read().strip()
+                # 提取漫画名（倒数第二级目录）
+                path_parts = Path(source_path).parts
+                if len(path_parts) >= 2:
+                    return path_parts[-2]
+        except Exception:
+            pass
+        return ""
     
     def process_all(self) -> Dict[str, List]:
         """
@@ -235,8 +261,17 @@ class OneClickProcessor:
                     continue
                 
                 try:
+                    # 根据原始漫画名语言决定是否添加后缀
+                    suffix = ""
+                    if self.add_language_suffix:
+                        # 从 _source_path.txt 读取原始漫画名
+                        original_comic_name = self._get_original_comic_name(chapter_folder)
+                        # 韩文/日文不加后缀，其他语言加 [R]
+                        if original_comic_name and not is_cjk_origin(original_comic_name):
+                            suffix = " [R]"
+                    
                     # 压缩章节文件夹
-                    cbz_path = self.compressor.compress_folder(chapter_folder)
+                    cbz_path = self.compressor.compress_folder(chapter_folder, suffix=suffix)
                     if cbz_path:
                         compressed.append((str(chapter_folder), str(cbz_path)))
                         self._report_progress(f"  • {comic_folder.name}/{chapter_folder.name} → {Path(cbz_path).name}")

@@ -10,6 +10,63 @@ from zipfile import ZipFile, ZIP_STORED
 from typing import List, Tuple, Set
 
 
+def is_korean(text: str) -> bool:
+    """
+    检测文本是否包含韩文字符
+    
+    Args:
+        text: 要检测的文本
+        
+    Returns:
+        是否包含韩文
+    """
+    for char in text:
+        # Hangul Syllables: U+AC00 - U+D7A3
+        # Hangul Jamo: U+1100 - U+11FF
+        # Hangul Compatibility Jamo: U+3130 - U+318F
+        code = ord(char)
+        if (0xAC00 <= code <= 0xD7A3 or 
+            0x1100 <= code <= 0x11FF or 
+            0x3130 <= code <= 0x318F):
+            return True
+    return False
+
+
+def is_japanese(text: str) -> bool:
+    """
+    检测文本是否包含日文字符（平假名/片假名）
+    
+    Args:
+        text: 要检测的文本
+        
+    Returns:
+        是否包含日文
+    """
+    for char in text:
+        code = ord(char)
+        # Hiragana: U+3040 - U+309F
+        # Katakana: U+30A0 - U+30FF
+        # Katakana Phonetic Extensions: U+31F0 - U+31FF
+        if (0x3040 <= code <= 0x309F or 
+            0x30A0 <= code <= 0x30FF or 
+            0x31F0 <= code <= 0x31FF):
+            return True
+    return False
+
+
+def is_cjk_origin(text: str) -> bool:
+    """
+    检测文本是否为韩文或日文来源（不加后缀）
+    
+    Args:
+        text: 要检测的文本
+        
+    Returns:
+        是否为韩文或日文
+    """
+    return is_korean(text) or is_japanese(text)
+
+
 class CBZCompressor:
     """CBZ 压缩器"""
     
@@ -140,12 +197,13 @@ class CBZCompressor:
                 cbz_path.unlink()
             return False
     
-    def compress_folder(self, chapter_folder: Path) -> str:
+    def compress_folder(self, chapter_folder: Path, suffix: str = "") -> str:
         """
         压缩单个章节文件夹为 CBZ 格式
         
         Args:
             chapter_folder: 章节文件夹路径
+            suffix: CBZ 文件名后缀（如 " [R]" 或 "")
             
         Returns:
             CBZ文件路径，失败返回None
@@ -159,11 +217,13 @@ class CBZCompressor:
             return None
         
         # 生成 CBZ 文件路径（与章节文件夹同级）
-        cbz_path = chapter_folder.parent / f"{chapter_folder.name}.cbz"
+        cbz_name = f"{chapter_folder.name}{suffix}.cbz"
+        cbz_path = chapter_folder.parent / cbz_name
         
-        # 如果 CBZ 已存在，跳过
-        if cbz_path.exists():
-            return str(cbz_path)
+        # 如果 CBZ 已存在（包括无后缀版本），跳过
+        cbz_path_no_suffix = chapter_folder.parent / f"{chapter_folder.name}.cbz"
+        if cbz_path.exists() or (suffix and cbz_path_no_suffix.exists()):
+            return str(cbz_path) if cbz_path.exists() else str(cbz_path_no_suffix)
         
         # 执行压缩
         try:
