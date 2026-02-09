@@ -26,10 +26,12 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
 try:
     from utils.one_click_processor import OneClickProcessor
     from utils.comic_analyzer import ComicAnalyzer
+    from utils.name_replacer import NameReplacer
 except ImportError:
     # 降级处理
     OneClickProcessor = None
     ComicAnalyzer = None
+    NameReplacer = None
 
 
 class MappingFilterProxy(QSortFilterProxyModel):
@@ -37,22 +39,38 @@ class MappingFilterProxy(QSortFilterProxyModel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._kw = ""
+        self._status_filter = ""  # Empty = all, "连载" or "完结"
 
     def setFilterKeyword(self, text: str):
         self._kw = (text or "").strip().lower()
         self.invalidateFilter()
 
+    def setStatusFilter(self, status: str):
+        """Set status filter: '' = all, '连载' or '完结'"""
+        self._status_filter = status
+        self.invalidateFilter()
+
     def filterAcceptsRow(self, source_row: int, source_parent) -> bool:
-        if not self._kw:
-            return True
         model = self.sourceModel()
         idx0 = model.index(source_row, 0, source_parent)
-        idx1 = model.index(source_row, 1, source_parent)
         def _t(idx):
             v = model.data(idx, Qt.ItemDataRole.DisplayRole)
             return (v or "").lower()
-        # 当前行匹配
-        if self._kw in _t(idx0) or self._kw in _t(idx1):
+        
+        # Status filter: only apply to top-level (parent) rows
+        if self._status_filter and not source_parent.isValid():
+            idx2 = model.index(source_row, 2, source_parent)
+            status_text = model.data(idx2, Qt.ItemDataRole.DisplayRole) or "连载"
+            if status_text != self._status_filter:
+                return False
+        
+        # Keyword filter
+        if not self._kw:
+            return True
+        idx1 = model.index(source_row, 1, source_parent)
+        idx2 = model.index(source_row, 2, source_parent)
+        # 当前行匹配（名称、生肉名称、状态列）
+        if self._kw in _t(idx0) or self._kw in _t(idx1) or self._kw in _t(idx2):
             return True
         # 子项匹配则保留父项
         child_count = model.rowCount(idx0)
@@ -249,7 +267,16 @@ class CustomComicPanel(QWidget):
         collapse_all_btn.clicked.connect(lambda: self.analysis_view.collapseAll() if hasattr(self, 'analysis_view') else None)
         export_btn = QPushButton("导出报告")
         export_btn.clicked.connect(self._export_analysis_report)
+        # Restore saved status filter mode
+        saved_mode = self._settings().value("analysis/status_filter", "全部")
+        if saved_mode not in ("全部", "连载", "完结"):
+            saved_mode = "全部"
+        self._status_filter_mode = saved_mode
+        self.status_filter_btn = QPushButton(saved_mode)
+        self.status_filter_btn.setToolTip("筛选状态：全部 / 连载 / 完结")
+        self.status_filter_btn.clicked.connect(self._cycle_status_filter)
         btn_layout.addWidget(analyze_btn)
+        btn_layout.addWidget(self.status_filter_btn)
         btn_layout.addWidget(self.sort_asc_btn)
         btn_layout.addWidget(self.sort_desc_btn)
         btn_layout.addWidget(expand_all_btn)
@@ -282,6 +309,10 @@ class CustomComicPanel(QWidget):
         self.analysis_view.customContextMenuRequested.connect(self._show_analysis_context_menu)
         self.analysis_view.expanded.connect(lambda: self._save_analysis_tree_state())
         self.analysis_view.collapsed.connect(lambda: self._save_analysis_tree_state())
+        # Ctrl+C copy current cell
+        from PyQt6.QtGui import QShortcut, QKeySequence
+        copy_shortcut = QShortcut(QKeySequence.StandardKey.Copy, self.analysis_view)
+        copy_shortcut.activated.connect(self._copy_current_cell)
         # 调淡选中/悬停行颜色
         self.analysis_view.setStyleSheet("""
             QTreeView::item:hover {
@@ -304,14 +335,14 @@ class CustomComicPanel(QWidget):
         
         # 初始化空模型
         empty_model = QStandardItemModel()
-        empty_model.setHorizontalHeaderLabels(["名称", "类型", "最新章节", "文件夹章节", "CBZ章节"])
+        empty_model.setHorizontalHeaderLabels(["名称", "生肉名称", "状态", "最新章节", "CBZ章节"])
         self.analysis_view.setModel(empty_model)
         
         # 设置表头的基本属性
         header = self.analysis_view.header()
         header.setDefaultSectionSize(100)
         header.setMinimumSectionSize(50)
-        header.setStretchLastSection(False)  # 不使用自动伸展
+        header.setStretchLastSection(True)  # 最后一列自动填充剩余空间
         header.setSectionsMovable(False)  # 禁止列移动
         
         # 连接信号并优化性能
@@ -451,35 +482,44 @@ class CustomComicPanel(QWidget):
             
             # 构建表格模型
             model = QStandardItemModel()
-            model.setHorizontalHeaderLabels(["名称", "类型", "最新章节", "文件夹章节", "CBZ章节"])
+            model.setHorizontalHeaderLabels(["名称", "生肉名称", "状态", "最新章节", "CBZ章节"])
+            
+            # Reverse lookup: Chinese name -> raw name (Korean preferred)
+            replacer = NameReplacer() if NameReplacer else None
+            comic_status = self._load_comic_status()
             
             total_comics = len(results)
             for comic in sorted(results.keys()):
                 data = results[comic]
                 all_chapters = data['chapters'] + data['cbz_files']
                 latest = self._get_latest_chapter(all_chapters) if all_chapters else ""
-                ch_count = len(data['chapters'])
                 cbz_count = len(data['cbz_files'])
+                
+                # Reverse lookup raw name
+                raw_name = replacer.get_raw_name(comic) if replacer else ""
+                status = comic_status.get(comic, "连载")
                 
                 # 父项（漫画）
                 name_item = QStandardItem(comic)
                 name_item.setData(data['path'], Qt.ItemDataRole.UserRole)  # 存储路径
-                type_item = QStandardItem("漫画")
+                raw_name_item = QStandardItem(raw_name)
+                status_item = QStandardItem(status)
                 latest_item = QStandardItem(latest)
-                ch_count_item = QStandardItem(str(ch_count))
                 cbz_count_item = QStandardItem(str(cbz_count))
                 
-                for it in (name_item, type_item, latest_item, ch_count_item, cbz_count_item):
+                row_items = [name_item, raw_name_item, status_item, latest_item, cbz_count_item]
+                for it in row_items:
                     it.setEditable(False)
+                self._apply_status_style(row_items, status)
                 
-                model.appendRow([name_item, type_item, latest_item, ch_count_item, cbz_count_item])
+                model.appendRow(row_items)
                 
                 # 子项（章节文件夹）
                 for ch in data['chapters']:
                     ch_path = os.path.join(data['path'], ch)
                     r0 = QStandardItem(ch)
                     r0.setData(ch_path, Qt.ItemDataRole.UserRole)
-                    r1 = QStandardItem("章节")
+                    r1 = QStandardItem("")
                     r2 = QStandardItem("")
                     r3 = QStandardItem("")
                     r4 = QStandardItem("")
@@ -492,7 +532,7 @@ class CustomComicPanel(QWidget):
                     cbz_path = os.path.join(data['path'], cbz + '.cbz')
                     r0 = QStandardItem(cbz)
                     r0.setData(cbz_path, Qt.ItemDataRole.UserRole)
-                    r1 = QStandardItem("章节")  # CBZ也显示为章节
+                    r1 = QStandardItem("")
                     r2 = QStandardItem("")
                     r3 = QStandardItem("")
                     r4 = QStandardItem("")
@@ -510,7 +550,7 @@ class CustomComicPanel(QWidget):
             header = self.analysis_view.header()
             header.setDefaultSectionSize(100)
             header.setMinimumSectionSize(50)
-            header.setStretchLastSection(False)  # 不使用自动伸展
+            header.setStretchLastSection(True)  # 最后一列自动填充剩余空间
             header.setSectionsMovable(False)  # 禁止列移动
             
             # 确保信号只连接一次
@@ -529,6 +569,9 @@ class CustomComicPanel(QWidget):
             from PyQt6.QtCore import QTimer
             QTimer.singleShot(50, self._restore_analysis_column_widths)
             QTimer.singleShot(100, self._restore_analysis_tree_state)
+            
+            # 恢复状态筛选
+            self._apply_current_status_filter()
             
             # 更新计数
             self._analysis_total_comics = total_comics
@@ -561,13 +604,36 @@ class CustomComicPanel(QWidget):
         if hasattr(self, 'analysis_count_label'):
             self.analysis_count_label.setText(f"显示 {visible} / 总 {total}")
     
+    def _cycle_status_filter(self):
+        """循环切换状态筛选：全部 → 连载 → 完结 → 全部"""
+        cycle = ["全部", "连载", "完结"]
+        idx = cycle.index(self._status_filter_mode) if self._status_filter_mode in cycle else 0
+        self._status_filter_mode = cycle[(idx + 1) % len(cycle)]
+        self.status_filter_btn.setText(self._status_filter_mode)
+        
+        # Apply to proxy
+        self._apply_current_status_filter()
+        
+        # Persist
+        self._settings().setValue("analysis/status_filter", self._status_filter_mode)
+        
+        # Update count
+        self.apply_analysis_filter()
+    
+    def _apply_current_status_filter(self):
+        """Apply the current status filter mode to proxy"""
+        proxy = getattr(self, 'analysis_proxy', None)
+        if proxy is not None:
+            status = "" if self._status_filter_mode == "全部" else self._status_filter_mode
+            proxy.setStatusFilter(status)
+    
     def _set_default_analysis_column_widths(self):
         """设置默认列宽"""
         if not hasattr(self, 'analysis_view'):
             return
         header = self.analysis_view.header()
-        # 默认列宽: 名称(300), 类型(80), 最新章节(150), 文件夹章节(100), CBZ章节(100)
-        default_widths = [300, 80, 150, 100, 100]
+        # 默认列宽: 名称(200), 生肉名称(180), 状态(60), 最新章节(130), CBZ章节(80)
+        default_widths = [200, 180, 60, 130, 80]
         header.blockSignals(True)
         
         # 全部设置为Interactive模式，不使用Stretch
@@ -582,7 +648,7 @@ class CustomComicPanel(QWidget):
         header.blockSignals(False)
     
     def _save_analysis_column_widths(self):
-        """保存章节分析列宽（保存所有5列）"""
+        """保存章节分析列宽"""
         if not hasattr(self, 'analysis_view'):
             return
         # 防抖动：避免频繁保存
@@ -605,14 +671,19 @@ class CustomComicPanel(QWidget):
             print(f"保存列宽失败: {e}")
     
     def _restore_analysis_column_widths(self):
-        """恢复章节分析列宽（恢复所有5列）"""
+        """恢复章节分析列宽"""
         if not hasattr(self, 'analysis_view'):
             return
         try:
             s = self._settings()
             widths = s.value("analysis/column_widths")
-            if widths and isinstance(widths, list) and len(widths) >= 5:
-                header = self.analysis_view.header()
+            header = self.analysis_view.header()
+            col_count = header.count()
+            # 旧的 5 列布局保存值，重置为新的 6 列默认宽度
+            if widths and isinstance(widths, list) and len(widths) < col_count:
+                self._set_default_analysis_column_widths()
+                return
+            if widths and isinstance(widths, list) and len(widths) >= col_count:
                 # 阻止信号避免触发保存
                 header.blockSignals(True)
                 for i, w in enumerate(widths):
@@ -702,10 +773,48 @@ class CustomComicPanel(QWidget):
         copy_action.triggered.connect(lambda: self._copy_analysis_name(index))
         menu.addAction(copy_action)
         
+        # 复制生肉名称（仅父行且有生肉名时显示）
+        src_idx_for_raw = self.analysis_proxy.mapToSource(index)
+        if not src_idx_for_raw.parent().isValid():
+            raw_idx = src_idx_for_raw.model().index(src_idx_for_raw.row(), 1)
+            raw_text = src_idx_for_raw.model().data(raw_idx, Qt.ItemDataRole.DisplayRole) or ""
+            if raw_text:
+                copy_raw_action = QAction("复制生肉名称", self)
+                copy_raw_action.triggered.connect(lambda checked, t=raw_text: self._copy_text(t))
+                menu.addAction(copy_raw_action)
+        
+        # 复制生肉名称子菜单（展示当前漫画的全部生肉名称供选择）
+        if not src_idx_for_raw.parent().isValid():
+            comic_name = src_idx_for_raw.model().item(src_idx_for_raw.row(), 0).text()
+            if NameReplacer:
+                replacer = NameReplacer()
+                all_raw_names = replacer.get_all_raw_names(comic_name)
+                if all_raw_names:
+                    raw_names_submenu = QMenu("复制生肉名称...", self)
+                    for rn in all_raw_names:
+                        action = QAction(rn, self)
+                        action.triggered.connect(lambda checked, t=rn: self._copy_text(t))
+                        raw_names_submenu.addAction(action)
+                    menu.addMenu(raw_names_submenu)
+        
         # 打开文件夹
         open_action = QAction("打开文件夹", self)
         open_action.triggered.connect(lambda: self._on_analysis_double_click(index))
         menu.addAction(open_action)
+        
+        # 完结/连载 切换（仅父行）
+        src_idx = self.analysis_proxy.mapToSource(index)
+        is_parent = not src_idx.parent().isValid()
+        if is_parent:
+            menu.addSeparator()
+            model = src_idx.model()
+            status_idx = model.index(src_idx.row(), 2)
+            current_status = model.data(status_idx, Qt.ItemDataRole.DisplayRole) or "连载"
+            label = "标记为完结" if current_status == "连载" else "标记为连载"
+            status_action = QAction(label, self)
+            # Capture index by value
+            status_action.triggered.connect(lambda checked, idx=index: self._toggle_comic_status(idx))
+            menu.addAction(status_action)
         
         menu.addSeparator()
         
@@ -724,10 +833,28 @@ class CustomComicPanel(QWidget):
         """复制分析结果名称到剪贴板"""
         if not index.isValid():
             return
-        from PyQt6.QtWidgets import QApplication
         text = index.data(Qt.ItemDataRole.DisplayRole)
         if text:
-            QApplication.clipboard().setText(text)
+            self._copy_text(text)
+    
+    def _copy_text(self, text: str):
+        """复制文本到剪贴板"""
+        from PyQt6.QtWidgets import QApplication
+        QApplication.clipboard().setText(text)
+    
+    def _copy_current_cell(self):
+        """复制当前选中单元格的内容（Ctrl+C）"""
+        index = self.analysis_view.currentIndex()
+        if index.isValid():
+            text = index.data(Qt.ItemDataRole.DisplayRole)
+            if text:
+                self._copy_text(text)
+                # Show brief tooltip feedback
+                from PyQt6.QtWidgets import QToolTip
+                pos = self.analysis_view.visualRect(index).center()
+                global_pos = self.analysis_view.viewport().mapToGlobal(pos)
+                tip = f"已复制: {text[:30]}{'...' if len(text) > 30 else ''}"
+                QToolTip.showText(global_pos, tip, self.analysis_view, self.analysis_view.visualRect(index), 1500)
     
     def _save_analysis_results(self, results: dict):
         """保存分析结果到JSON文件"""
@@ -787,34 +914,43 @@ class CustomComicPanel(QWidget):
             
             # 构建表格模型
             model = QStandardItemModel()
-            model.setHorizontalHeaderLabels(["名称", "类型", "最新章节", "文件夹章节", "CBZ章节"])
+            model.setHorizontalHeaderLabels(["名称", "生肉名称", "状态", "最新章节", "CBZ章节"])
+            
+            # Reverse lookup: Chinese name -> raw name (Korean preferred)
+            replacer = NameReplacer() if NameReplacer else None
+            comic_status = self._load_comic_status()
             
             total_comics = len(data['comics'])
             for comic, comic_data in sorted(data['comics'].items()):
                 latest = comic_data.get('latest', '')
-                ch_count = len(comic_data.get('chapters', []))
                 cbz_count = len(comic_data.get('cbz_files', []))
                 comic_path = comic_data.get('path', '')
+                
+                # Reverse lookup raw name
+                raw_name = replacer.get_raw_name(comic) if replacer else ""
+                status = comic_status.get(comic, "连载")
                 
                 # 父项（漫画）
                 name_item = QStandardItem(comic)
                 name_item.setData(comic_path, Qt.ItemDataRole.UserRole)
-                type_item = QStandardItem("漫画")
+                raw_name_item = QStandardItem(raw_name)
+                status_item = QStandardItem(status)
                 latest_item = QStandardItem(latest)
-                ch_count_item = QStandardItem(str(ch_count))
                 cbz_count_item = QStandardItem(str(cbz_count))
                 
-                for it in (name_item, type_item, latest_item, ch_count_item, cbz_count_item):
+                row_items = [name_item, raw_name_item, status_item, latest_item, cbz_count_item]
+                for it in row_items:
                     it.setEditable(False)
+                self._apply_status_style(row_items, status)
                 
-                model.appendRow([name_item, type_item, latest_item, ch_count_item, cbz_count_item])
+                model.appendRow(row_items)
                 
                 # 子项（章节文件夹）
                 for ch in comic_data.get('chapters', []):
                     ch_path = os.path.join(comic_path, ch) if comic_path else ch
                     r0 = QStandardItem(ch)
                     r0.setData(ch_path, Qt.ItemDataRole.UserRole)
-                    r1 = QStandardItem("章节")
+                    r1 = QStandardItem("")
                     r2 = QStandardItem("")
                     r3 = QStandardItem("")
                     r4 = QStandardItem("")
@@ -827,7 +963,7 @@ class CustomComicPanel(QWidget):
                     cbz_path = os.path.join(comic_path, cbz + '.cbz') if comic_path else cbz
                     r0 = QStandardItem(cbz)
                     r0.setData(cbz_path, Qt.ItemDataRole.UserRole)
-                    r1 = QStandardItem("章节")
+                    r1 = QStandardItem("")
                     r2 = QStandardItem("")
                     r3 = QStandardItem("")
                     r4 = QStandardItem("")
@@ -845,7 +981,7 @@ class CustomComicPanel(QWidget):
             header = self.analysis_view.header()
             header.setDefaultSectionSize(100)
             header.setMinimumSectionSize(50)
-            header.setStretchLastSection(False)  # 不使用自动伸展
+            header.setStretchLastSection(True)  # 最后一列自动填充剩余空间
             header.setSectionsMovable(False)  # 禁止列移动
             
             # 确保信号只连接一次
@@ -864,6 +1000,9 @@ class CustomComicPanel(QWidget):
             from PyQt6.QtCore import QTimer
             QTimer.singleShot(50, self._restore_analysis_column_widths)
             QTimer.singleShot(100, self._restore_analysis_tree_state)
+            
+            # 恢复状态筛选
+            self._apply_current_status_filter()
             
             # 更新计数
             self._analysis_total_comics = total_comics
@@ -901,7 +1040,7 @@ class CustomComicPanel(QWidget):
                     row_data = {
                         'name': parent_item.child(i, 0).text(),
                         'path': parent_item.child(i, 0).data(Qt.ItemDataRole.UserRole),
-                        'type': parent_item.child(i, 1).text()
+                        'type': parent_item.child(i, 2).text() if parent_item.child(i, 2) else ""
                     }
                     children_data.append(row_data)
                 
@@ -920,8 +1059,8 @@ class CustomComicPanel(QWidget):
                 for data in children_data:
                     r0 = QStandardItem(data['name'])
                     r0.setData(data['path'], Qt.ItemDataRole.UserRole)
-                    r1 = QStandardItem(data['type'])
-                    r2 = QStandardItem("")
+                    r1 = QStandardItem("")  # raw name
+                    r2 = QStandardItem(data['type'])
                     r3 = QStandardItem("")
                     r4 = QStandardItem("")
                     for it in (r0, r1, r2, r3, r4):
@@ -958,19 +1097,19 @@ class CustomComicPanel(QWidget):
             with open(file_path, 'w', encoding='utf-8-sig', newline='') as f:
                 import csv
                 writer = csv.writer(f)
-                writer.writerow(['漫画名', '章节名', '类型', '最新章节', '文件夹章节数', 'CBZ章节数'])
+                writer.writerow(['漫画名', '生肉名称', '状态', '章节名', '最新章节', 'CBZ章节数'])
                 
                 for row in range(source_model.rowCount()):
                     comic_name = source_model.item(row, 0).text()
-                    latest = source_model.item(row, 2).text()
-                    ch_count = source_model.item(row, 3).text()
+                    raw_name = source_model.item(row, 1).text() if source_model.item(row, 1) else ""
+                    status = source_model.item(row, 2).text() if source_model.item(row, 2) else ""
+                    latest = source_model.item(row, 3).text()
                     cbz_count = source_model.item(row, 4).text()
                     
                     parent_item = source_model.item(row, 0)
                     for i in range(parent_item.rowCount()):
                         chapter_name = parent_item.child(i, 0).text()
-                        chapter_type = parent_item.child(i, 1).text()
-                        writer.writerow([comic_name, chapter_name, chapter_type, latest, ch_count, cbz_count])
+                        writer.writerow([comic_name, raw_name, status, chapter_name, latest, cbz_count])
             
             self.result_text.append(f"✓ 报告已导出: {file_path}")
             QMessageBox.information(self, "成功", f"报告已导出至\n{file_path}")
@@ -986,3 +1125,65 @@ class CustomComicPanel(QWidget):
             return float(match.group(1)) if match else 0
         sorted_chapters = sorted(chapters, key=extract_number)
         return sorted_chapters[-1] if sorted_chapters else "未知"
+    
+    # ============ 完结/连载 状态管理 ============
+    _STATUS_FILE = Path(__file__).parent.parent.parent / "comic_status.json"
+    
+    def _load_comic_status(self) -> dict:
+        """Load comic completion status from JSON file"""
+        try:
+            if self._STATUS_FILE.exists():
+                with open(self._STATUS_FILE, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+        except Exception as e:
+            print(f"加载漫画状态失败: {e}")
+        return {}
+    
+    def _save_comic_status(self, status: dict):
+        """Save comic completion status to JSON file"""
+        try:
+            with open(self._STATUS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(status, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"保存漫画状态失败: {e}")
+    
+    def _toggle_comic_status(self, proxy_index):
+        """切换漫画的完结/连载状态"""
+        if not proxy_index.isValid():
+            return
+        src_idx = self.analysis_proxy.mapToSource(proxy_index)
+        if src_idx.parent().isValid():
+            return  # Only toggle parent (manga) rows
+        
+        model = src_idx.model()
+        row = src_idx.row()
+        
+        # Get comic name and current status
+        comic_name = model.item(row, 0).text()
+        status_item = model.item(row, 2)
+        current = status_item.text() if status_item else "连载"
+        new_status = "完结" if current == "连载" else "连载"
+        
+        # Update model items
+        status_item.setText(new_status)
+        row_items = [model.item(row, col) for col in range(model.columnCount())]
+        self._apply_status_style(row_items, new_status)
+        
+        # Persist
+        all_status = self._load_comic_status()
+        if new_status == "连载":
+            all_status.pop(comic_name, None)  # Default is 连载, remove entry
+        else:
+            all_status[comic_name] = new_status
+        self._save_comic_status(all_status)
+    
+    def _apply_status_style(self, row_items, status: str):
+        """根据状态设置行的视觉样式（完结=灰色）"""
+        from PyQt6.QtGui import QColor, QBrush
+        if status == "完结":
+            color = QBrush(QColor("#999999"))
+        else:
+            color = QBrush(QColor("#000000"))
+        for item in row_items:
+            if item:
+                item.setForeground(color)

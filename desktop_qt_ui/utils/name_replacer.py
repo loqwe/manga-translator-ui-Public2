@@ -6,8 +6,9 @@
 """
 
 import json
+import re
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 
 class NameReplacer:
@@ -98,6 +99,53 @@ class NameReplacer:
                     return value
         
         return raw_name
+    
+    def get_raw_name(self, translated_name: str) -> str:
+        """
+        Reverse lookup: get raw name from translated name, preferring Korean.
+        
+        Args:
+            translated_name: translated comic name (e.g. Chinese)
+            
+        Returns:
+            raw name (Korean preferred), empty string if not found
+        """
+        candidates = []
+        for key, value in self.mapping.items():
+            if value == translated_name:
+                if '|' in key:
+                    candidates.extend(v.strip() for v in key.split('|'))
+                else:
+                    candidates.append(key)
+        
+        if not candidates:
+            return ""
+        
+        # Prefer Korean (Hangul syllables: AC00-D7A3, Jamo: 3131-3163)
+        korean = [c for c in candidates if re.search(r'[\uAC00-\uD7A3]', c)]
+        if korean:
+            return korean[0]
+        
+        return candidates[0]
+    
+    def get_all_raw_names(self, translated_name: str) -> List[str]:
+        """
+        Get ALL raw names for a translated name (not just Korean-preferred).
+        
+        Args:
+            translated_name: translated comic name (e.g. Chinese)
+            
+        Returns:
+            list of all raw names mapped to this translated name
+        """
+        candidates = []
+        for key, value in self.mapping.items():
+            if value == translated_name:
+                if '|' in key:
+                    candidates.extend(v.strip() for v in key.split('|'))
+                else:
+                    candidates.append(key)
+        return candidates
     
     def replace_folder_names(self, base_folder: Path) -> List[Tuple[str, str]]:
         """
