@@ -138,7 +138,10 @@ class ScanWorker(QObject):
                                     'source': source_name
                                 })
                             
-                            folder_data[mapped_name]['chapters'][source_name] = chapters
+                            if source_name in folder_data[mapped_name]['chapters']:
+                                folder_data[mapped_name]['chapters'][source_name].extend(chapters)
+                            else:
+                                folder_data[mapped_name]['chapters'][source_name] = chapters
                         else:
                             # 三层结构：根目录/来源/作品/章节
                             source_name = first_level_dir.name
@@ -177,7 +180,10 @@ class ScanWorker(QObject):
                                             'source': source_name
                                         })
                                 
-                                folder_data[mapped_name]['chapters'][source_name] = chapters
+                                if source_name in folder_data[mapped_name]['chapters']:
+                                    folder_data[mapped_name]['chapters'][source_name].extend(chapters)
+                                else:
+                                    folder_data[mapped_name]['chapters'][source_name] = chapters
                                 
                     except PermissionError:
                         self.progress.emit(f"⚠️ 跳过无权限访问的文件夹: {first_level_dir.name}")
@@ -578,6 +584,7 @@ class SplitWorker(QObject):
     async def _split_chapter_images_async(self, chapter_path: str) -> List[str]:
         """异步拆分章节内的图片"""
         import cv2
+        import numpy as np
         
         image_extensions = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'}
         image_files = []
@@ -606,8 +613,9 @@ class SplitWorker(QObject):
             
             filename = os.path.basename(image_path)
             
-            # 读取图片获取尺寸
-            img = cv2.imread(image_path)
+            # 读取图片获取尺寸（支持中文路径）
+            data = np.fromfile(image_path, dtype=np.uint8)
+            img = cv2.imdecode(data, cv2.IMREAD_COLOR) if data is not None else None
             if img is None:
                 self.progress.emit(f"[长图拆分] ⚠️ 无法读取: {filename}")
                 continue
@@ -863,6 +871,14 @@ class AdvancedFolderDialog(QDialog):
         manage_roots_btn.setFixedWidth(120)
         manage_roots_btn.clicked.connect(self._show_roots_dialog)
         address_layout.addWidget(manage_roots_btn)
+        
+        # 来源筛选下拉框
+        address_layout.addWidget(QLabel("来源:"))
+        self.source_filter_combo = QComboBox()
+        self.source_filter_combo.setMinimumWidth(120)
+        self.source_filter_combo.addItem("全部", None)
+        self.source_filter_combo.currentIndexChanged.connect(self._on_source_filter_changed)
+        address_layout.addWidget(self.source_filter_combo)
         
         address_layout.addStretch()
         
@@ -1727,6 +1743,9 @@ class AdvancedFolderDialog(QDialog):
         
         # 自动填充搜索框（优先使用映射名称）
         self._populate_search_combo_with_mapping()
+        
+        # 更新来源筛选下拉框
+        self._update_source_filter_combo()
     
     def _load_chapters_for_item(self, item: QTreeWidgetItem):
         """为指定作品项加载章节（三层结构：作品 → 来源 → 章节）"""
@@ -2024,18 +2043,56 @@ class AdvancedFolderDialog(QDialog):
         return sorted_list
     
     def apply_filter(self):
-        """应用搜索过滤"""
+        """应用搜索过滤（同时考虑关键词和来源筛选）"""
         keyword = self.search_combo.currentText().strip().lower()
+        selected_source = self.source_filter_combo.currentData()
         
         for i in range(self.title_tree.topLevelItemCount()):
             item = self.title_tree.topLevelItem(i)
             title = item.text(0).lower()
             sources = item.text(1).lower()
             
-            if not keyword or keyword in title or keyword in sources:
-                item.setHidden(False)
-            else:
-                item.setHidden(True)
+            # Check keyword filter
+            keyword_match = not keyword or keyword in title or keyword in sources
+            
+            # Check source filter
+            source_match = selected_source is None or selected_source.lower() in sources
+            
+            item.setHidden(not (keyword_match and source_match))
+    
+    def _on_source_filter_changed(self):
+        """来源筛选改变时触发"""
+        selected_source = self.source_filter_combo.currentText()
+        if selected_source == "全部":
+            self._log("✓ 显示全部来源")
+        else:
+            self._log(f"✓ 筛选来源: {selected_source}")
+        self.apply_filter()
+    
+    def _update_source_filter_combo(self):
+        """更新来源筛选下拉框"""
+        # Collect all sources from folder_data
+        all_sources = set()
+        for data in self.folder_data.values():
+            all_sources.update(data.get('sources', set()))
+        
+        # Remember current selection
+        current_selection = self.source_filter_combo.currentData()
+        
+        # Update combo box
+        self.source_filter_combo.blockSignals(True)
+        self.source_filter_combo.clear()
+        self.source_filter_combo.addItem("全部", None)
+        for source in sorted(all_sources):
+            self.source_filter_combo.addItem(source, source)
+        
+        # Restore selection if still valid
+        if current_selection:
+            index = self.source_filter_combo.findData(current_selection)
+            if index >= 0:
+                self.source_filter_combo.setCurrentIndex(index)
+        
+        self.source_filter_combo.blockSignals(False)
     
     def _populate_search_combo(self):
         """填充搜索框（使用当前扫描到的作品名称）"""

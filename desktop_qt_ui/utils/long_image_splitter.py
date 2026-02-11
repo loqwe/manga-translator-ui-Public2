@@ -27,6 +27,15 @@ import numpy as np
 import cv2
 from PIL import Image
 
+
+def _imread_unicode(path) -> Optional[np.ndarray]:
+    """Read image supporting non-ASCII paths (e.g. Chinese) on Windows."""
+    try:
+        data = np.fromfile(str(path), dtype=np.uint8)
+        return cv2.imdecode(data, cv2.IMREAD_COLOR)
+    except Exception:
+        return None
+
 # Debug 目录配置（从模块位置推算项目根目录）
 _MODULE_DIR = Path(__file__).resolve().parent  # desktop_qt_ui/utils
 _PROJECT_ROOT = _MODULE_DIR.parent.parent       # 项目根目录
@@ -383,7 +392,7 @@ class LocalSplitter:
             (cuts, total_height): 切割点 Y 坐标列表和图片总高度
         """
         # 读取图片
-        img = cv2.imread(str(image_path))
+        img = _imread_unicode(image_path)
         if img is None:
             raise ValueError(f"无法读取图片: {image_path}")
         
@@ -775,7 +784,7 @@ def split_image_sync(
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # 读取图片
-    img = cv2.imread(str(image_path))
+    img = _imread_unicode(image_path)
     if img is None:
         raise ValueError(f"无法读取图片: {image_path}")
     
