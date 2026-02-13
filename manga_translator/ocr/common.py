@@ -1,14 +1,74 @@
+import os
 import numpy as np
 from abc import abstractmethod
-from typing import List, Union
+from typing import List, Tuple, Union
 from collections import Counter
 import networkx as nx
 import itertools
 
 from ..config import OcrConfig
-from ..utils import InfererModule, TextBlock, ModelWrapper, Quadrilateral
+from ..utils import InfererModule, TextBlock, ModelWrapper, Quadrilateral, detect_bubbles_with_mangalens, imwrite_unicode
 
 class CommonOCR(InfererModule):
+    @staticmethod
+    def _calc_bbox_overlap_ratio(
+        text_bbox: Tuple[int, int, int, int],
+        bubble_bbox: Tuple[float, float, float, float],
+    ) -> float:
+        """
+        Calculates intersection ratio using text box area as denominator.
+        """
+        tx, ty, tw, th = text_bbox
+        bx1, by1, bx2, by2 = bubble_bbox
+
+        tx1, ty1 = tx, ty
+        tx2, ty2 = tx + tw, ty + th
+
+        inter_x1 = max(tx1, bx1)
+        inter_y1 = max(ty1, by1)
+        inter_x2 = min(tx2, bx2)
+        inter_y2 = min(ty2, by2)
+
+        inter_w = max(0.0, inter_x2 - inter_x1)
+        inter_h = max(0.0, inter_y2 - inter_y1)
+        inter_area = inter_w * inter_h
+        text_area = max(float(tw * th), 1.0)
+        return inter_area / text_area
+
+    def _get_model_bubble_boxes(self, full_image: np.ndarray) -> List[Tuple[float, float, float, float]]:
+        """
+        Runs the bubble detector once per image and caches the bounding boxes.
+        When MANGA_OCR_RESULT_DIR is set (verbose mode), saves an annotated image.
+        """
+        cache_key = (id(full_image), full_image.shape[0], full_image.shape[1])
+        if getattr(self, '_model_bubble_cache_key', None) == cache_key:
+            return getattr(self, '_model_bubble_cache_boxes', [])
+
+        try:
+            ocr_result_dir = os.environ.get('MANGA_OCR_RESULT_DIR', '')
+            want_annotated = bool(ocr_result_dir)
+            result = detect_bubbles_with_mangalens(full_image, return_annotated=want_annotated, verbose=False)
+            boxes = [det.xyxy for det in result.detections]
+            self.logger.info(f"Model bubble filter: detected {len(boxes)} bubbles")
+
+            # Save annotated debug image when verbose
+            if want_annotated and result.annotated_image is not None:
+                try:
+                    import cv2
+                    save_path = os.path.join(ocr_result_dir, 'model_bubble_detection.png')
+                    annotated_bgr = cv2.cvtColor(result.annotated_image, cv2.COLOR_RGB2BGR)
+                    imwrite_unicode(save_path, annotated_bgr, self.logger)
+                    self.logger.info(f"Saved bubble detection debug image: {save_path}")
+                except Exception as e:
+                    self.logger.warning(f"Failed to save bubble detection debug image: {e}")
+        except Exception as e:
+            self.logger.warning(f"Model bubble filter failed, fallback to heuristic filter: {e}")
+            boxes = []
+
+        self._model_bubble_cache_key = cache_key
+        self._model_bubble_cache_boxes = boxes
+        return boxes
+
     def _generate_text_direction(self, bboxes: List[Union[Quadrilateral, TextBlock]]):
         if len(bboxes) > 0:
             if isinstance(bboxes[0], TextBlock):
@@ -38,30 +98,59 @@ class CommonOCR(InfererModule):
                     for node in nodes:
                         yield bboxes[node], majority_dir
 
-    def _should_ignore_region(self, region_img: np.ndarray, ignore_bubble: float, 
-                              full_image: np.ndarray = None, textline: Quadrilateral = None) -> bool:
+    def _should_ignore_region(self, region_img: np.ndarray, ignore_bubble: float,
+                              full_image: np.ndarray = None, textline: Quadrilateral = None,
+                              ocr_config: OcrConfig = None) -> bool:
         """
         通用的气泡过滤方法，判断文本区域是否应该被忽略
-        
+
         Args:
             region_img: 裁剪后的文本区域图像（用于简单方法）
             ignore_bubble: 忽略气泡阈值 (0-1)
             full_image: 完整图像（可选，用于高级方法）
             textline: 文本行对象（可选，用于获取坐标）
-            
+            ocr_config: OCR配置（可选，用于模型气泡过滤）
+
         Returns:
             True: 应该忽略（非气泡区域）
             False: 应该保留（气泡区域）
         """
         from ..utils.bubble import is_ignore
-        
+
+        # 模型气泡过滤（与 ignore_bubble 同阶段，但基于检测模型）
+        use_model_filter = bool(getattr(ocr_config, 'use_model_bubble_filter', False)) if ocr_config is not None else False
+        if use_model_filter and full_image is not None and textline is not None:
+            bbox = textline.aabb
+            text_bbox = (int(bbox.x), int(bbox.y), int(bbox.w), int(bbox.h))
+
+            bubble_boxes = self._get_model_bubble_boxes(full_image)
+            if not bubble_boxes:
+                if not getattr(self, '_model_bubble_no_boxes_logged', False):
+                    self.logger.info("Model bubble filter: no bubble boxes detected, skip model gating for this image")
+                    self._model_bubble_no_boxes_logged = True
+            else:
+                overlap_threshold = float(getattr(ocr_config, 'model_bubble_overlap_threshold', 0.1))
+                overlap_threshold = max(0.0, min(1.0, overlap_threshold))
+
+                max_overlap_ratio = 0.0
+                for bubble_bbox in bubble_boxes:
+                    ratio = self._calc_bbox_overlap_ratio(text_bbox, bubble_bbox)
+                    if ratio > max_overlap_ratio:
+                        max_overlap_ratio = ratio
+
+                if max_overlap_ratio < overlap_threshold:
+                    self.logger.info(
+                        f"Model bubble filter: overlap={max_overlap_ratio:.3f} < threshold={overlap_threshold:.3f}, filtering region"
+                    )
+                    return True
+
         # 如果提供了完整图像和文本行，使用高级方法
         if full_image is not None and textline is not None:
             # 获取文本行的边界框
             bbox = textline.aabb
             x, y, w, h = int(bbox.x), int(bbox.y), int(bbox.w), int(bbox.h)
             return is_ignore(region_img, ignore_bubble, full_image, [x, y, w, h])
-        
+
         # 否则使用简单方法
         return is_ignore(region_img, ignore_bubble)
 
@@ -70,6 +159,13 @@ class CommonOCR(InfererModule):
         Performs the optical character recognition, using the `textlines` as areas of interests.
         Returns a `textlines` list with the `textline.text` property set to the detected text string.
         '''
+        # Reset per-image model bubble cache
+        self._model_bubble_cache_key = None
+        self._model_bubble_cache_boxes = []
+        self._model_bubble_no_boxes_logged = False
+        if bool(getattr(config, 'use_model_bubble_filter', False)):
+            threshold = float(getattr(config, 'model_bubble_overlap_threshold', 0.1))
+            self.logger.info(f"Model bubble filter enabled (overlap_threshold={threshold:.3f})")
         return await self._recognize(image, textlines, config, verbose)
 
     @abstractmethod

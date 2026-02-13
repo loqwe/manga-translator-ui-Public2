@@ -428,6 +428,7 @@ class ModelPaddleOCRVL(OfflineOCR):
         """
         text_height = 48  # 默认文本高度
         ignore_bubble = config.ignore_bubble
+        use_model_bubble_filter = bool(getattr(config, 'use_model_bubble_filter', False))
 
         # 生成文本方向信息
         quadrilaterals = list(self._generate_text_direction(textlines))
@@ -439,9 +440,9 @@ class ModelPaddleOCRVL(OfflineOCR):
             region_img = q.get_transformed_region(image, direction, text_height)
 
             # 过滤非气泡区域
-            if ignore_bubble > 0:
-                if self._should_ignore_region(region_img, ignore_bubble, image, q):
-                    self.logger.info(f'[FILTERED] Region {idx} ignored - Non-bubble area detected (ignore_bubble={ignore_bubble})')
+            if ignore_bubble > 0 or use_model_bubble_filter:
+                if self._should_ignore_region(region_img, ignore_bubble, image, q, config):
+                    self.logger.info(f'[FILTERED] Region {idx} ignored - Non-bubble area detected (ignore_bubble={ignore_bubble}, model_filter={use_model_bubble_filter})')
                     continue
 
             try:

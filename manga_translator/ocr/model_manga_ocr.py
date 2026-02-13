@@ -295,6 +295,7 @@ class ModelMangaOCR(OfflineOCR):
         text_height = 48
         max_chunk_size = 16
         ignore_bubble = config.ignore_bubble
+        use_model_bubble_filter = bool(getattr(config, 'use_model_bubble_filter', False))
 
         quadrilaterals = list(self._generate_text_direction(textlines))
         region_imgs = [q.get_transformed_region(image, d, text_height) for q, d in quadrilaterals]
@@ -337,10 +338,10 @@ class ModelMangaOCR(OfflineOCR):
             
             for idx in indices:
                 # 使用基类的通用气泡过滤方法（支持高级检测）
-                if ignore_bubble > 0:
+                if ignore_bubble > 0 or use_model_bubble_filter:
                     textline = quadrilaterals[idx][0]
-                    if self._should_ignore_region(region_imgs[idx], ignore_bubble, image, textline):
-                        self.logger.info(f'[FILTERED] Region {ix} ignored - Non-bubble area detected (ignore_bubble={ignore_bubble})')
+                    if self._should_ignore_region(region_imgs[idx], ignore_bubble, image, textline, config):
+                        self.logger.info(f'[FILTERED] Region {ix} ignored - Non-bubble area detected (ignore_bubble={ignore_bubble}, model_filter={use_model_bubble_filter})')
                         ix += 1
                         continue
                 valid_indices.append(idx)

@@ -41,6 +41,9 @@ class OcrSettings(BaseModel):
     secondary_ocr: str = "mocr"
     min_text_length: int = 0
     ignore_bubble: float = 0.0
+    use_model_bubble_filter: bool = False
+    model_bubble_overlap_threshold: float = 0.1
+    use_model_bubble_repair_intersection: bool = False
     prob: float = 0.1
     merge_gamma: float = 0.8
     merge_sigma: float = 2.5

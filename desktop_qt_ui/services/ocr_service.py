@@ -99,6 +99,9 @@ class OcrService:
             # 其他OCR参数
             ocr_config.min_text_length = ocr_config_dict.get('min_text_length', 0)
             ocr_config.ignore_bubble = ocr_config_dict.get('ignore_bubble', 0)
+            ocr_config.use_model_bubble_filter = ocr_config_dict.get('use_model_bubble_filter', False)
+            ocr_config.model_bubble_overlap_threshold = ocr_config_dict.get('model_bubble_overlap_threshold', 0.1)
+            ocr_config.use_model_bubble_repair_intersection = ocr_config_dict.get('use_model_bubble_repair_intersection', False)
             ocr_config.prob = ocr_config_dict.get('prob', 0.3)
             ocr_config.use_mocr_merge = ocr_config_dict.get('use_mocr_merge', False)
             
@@ -397,6 +400,9 @@ class OcrService:
             'ocr': self.default_config.ocr.value,
             'min_text_length': self.default_config.min_text_length,
             'ignore_bubble': self.default_config.ignore_bubble,
+            'use_model_bubble_filter': self.default_config.use_model_bubble_filter,
+            'model_bubble_overlap_threshold': self.default_config.model_bubble_overlap_threshold,
+            'use_model_bubble_repair_intersection': self.default_config.use_model_bubble_repair_intersection,
             'prob': self.default_config.prob,
             'use_mocr_merge': self.default_config.use_mocr_merge,
             'device': self.device

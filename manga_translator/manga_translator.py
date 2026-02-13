@@ -2691,8 +2691,16 @@ class MangaTranslator:
         await asyncio.sleep(0)
         self._check_cancelled()
         
-        return await dispatch_mask_refinement(ctx.text_regions, ctx.img_rgb, ctx.mask_raw, 'fit_text',
-                                              config.mask_dilation_offset, config.ocr.ignore_bubble, self.verbose,self.kernel_size)
+        return await dispatch_mask_refinement(
+            ctx.text_regions,
+            ctx.img_rgb,
+            ctx.mask_raw,
+            method='fit_text',
+            dilation_offset=config.mask_dilation_offset,
+            verbose=self.verbose,
+            kernel_size=self.kernel_size,
+            use_model_bubble_repair_intersection=bool(getattr(config.ocr, 'use_model_bubble_repair_intersection', False)),
+        )
 
     async def _run_inpainting(self, config: Config, ctx: Context):
         # ✅ 检查停止标志

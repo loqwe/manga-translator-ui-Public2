@@ -531,7 +531,7 @@ class EditorController(QObject):
                     return {'type': 'translated', 'image_path': image_path, 'image': image}
 
                 # 3. 加载JSON
-                regions, raw_mask, original_size = self.file_service.load_translation_json(image_path)
+                regions, raw_mask, original_size, mask_is_refined = self.file_service.load_translation_json(image_path)
 
                 # 4. 查找和加载inpainted图片
                 inpainted_path = find_inpainted_path(image_path)
@@ -552,6 +552,7 @@ class EditorController(QObject):
                     'image': image,
                     'regions': regions,
                     'raw_mask': raw_mask,
+                    'mask_is_refined': mask_is_refined,
                     'inpainted_path': inpainted_path,
                     'inpainted_image': inpainted_image
                 }
@@ -585,6 +586,7 @@ class EditorController(QObject):
                     result['image'],
                     result['regions'],
                     result['raw_mask'],
+                    result.get('mask_is_refined', False),
                     result['inpainted_path'],
                     result['inpainted_image']
                 )
@@ -612,14 +614,14 @@ class EditorController(QObject):
         except Exception as e:
             self.logger.error(f"Error applying translated image to model: {e}")
     
-    def _apply_loaded_data_to_model(self, image_path, image, regions, raw_mask, inpainted_path, inpainted_image):
+    def _apply_loaded_data_to_model(self, image_path, image, regions, raw_mask, mask_is_refined, inpainted_path, inpainted_image):
         """在主线程应用加载的数据到Model"""
         try:
             # 关闭加载提示
             if hasattr(self, '_loading_toast') and self._loading_toast:
                 self._loading_toast.close()
                 self._loading_toast = None
-            
+
             # 导入渲染参数
             if regions:
                 from services import get_render_parameter_service
@@ -639,8 +641,12 @@ class EditorController(QObject):
                 from desktop_qt_ui.editor.core.types import MaskType
                 self.resource_manager.set_mask(MaskType.RAW, raw_mask)
                 self.model.set_raw_mask(raw_mask)
-
-            self.model.set_refined_mask(None)
+                if mask_is_refined:
+                    self.model.set_refined_mask(raw_mask)
+                else:
+                    self.model.set_refined_mask(None)
+            else:
+                self.model.set_refined_mask(None)
 
             if inpainted_path:
                 self.model.set_inpainted_image_path(inpainted_path)
@@ -710,11 +716,13 @@ class EditorController(QObject):
             config = self.config_service.get_config()
             dilation_offset = config.mask_dilation_offset
             kernel_size = config.kernel_size
-            ignore_bubble = config.ocr.ignore_bubble
+
+            use_model_bubble_repair = bool(getattr(config.ocr, 'use_model_bubble_repair_intersection', False))
 
             refined_mask = await refine_mask_dispatch(
                 text_blocks, image_np, raw_mask_contiguous, method='fit_text',
-                dilation_offset=dilation_offset, ignore_bubble=ignore_bubble, kernel_size=kernel_size
+                dilation_offset=dilation_offset, kernel_size=kernel_size,
+                use_model_bubble_repair_intersection=use_model_bubble_repair,
             )
 
             if refined_mask is None:
@@ -2050,6 +2058,9 @@ class EditorController(QObject):
                         secondary_ocr=current_ocr_config.secondary_ocr,
                         min_text_length=current_ocr_config.min_text_length,
                         ignore_bubble=current_ocr_config.ignore_bubble,
+                        use_model_bubble_filter=current_ocr_config.use_model_bubble_filter,
+                        model_bubble_overlap_threshold=current_ocr_config.model_bubble_overlap_threshold,
+                        use_model_bubble_repair_intersection=current_ocr_config.use_model_bubble_repair_intersection,
                         prob=current_ocr_config.prob,
                         merge_gamma=current_ocr_config.merge_gamma,
                         merge_sigma=current_ocr_config.merge_sigma,

@@ -13,3 +13,10 @@ from .replace_translation import (
     create_matched_regions,
     filter_raw_regions_for_inpainting,
 )
+from .mangalens_detector import (
+    BubbleDetection,
+    BubbleDetectionResult,
+    MangaLensBubbleDetector,
+    get_mangalens_detector,
+    detect_bubbles_with_mangalens,
+)
