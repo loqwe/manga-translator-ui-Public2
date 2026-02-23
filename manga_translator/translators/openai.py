@@ -113,6 +113,11 @@ class OpenAITranslator(CommonTranslator):
             base_url=self.base_url,
             headers=BROWSER_HEADERS,
         )
+
+    async def _abort_inflight_request(self):
+        """Cancel: drop the shared client reference to stop waiting."""
+        # Client is shared via get_openai_client; just drop the reference.
+        self.client = None
     
     def _build_system_prompt(self, source_lang: str, target_lang: str, custom_prompt_json: Dict[str, Any] = None, line_break_prompt_json: Dict[str, Any] = None, retry_attempt: int = 0, retry_reason: str = "", extract_glossary: bool = False) -> str:
         """构建系统提示词"""
@@ -285,20 +290,24 @@ class OpenAITranslator(CommonTranslator):
                 if retry_attempt > 0 and current_temperature != self.temperature:
                     self.logger.info(f"[重试] 温度调整: {self.temperature} -> {current_temperature}")
 
-                result = await chat_completions(
-                    api_key=self.api_key,
-                    base_url=self.base_url,
-                    model=self.model,
-                    messages=messages,
-                    temperature=current_temperature,
-                    max_tokens=self.max_tokens,
-                    stream=False,
-                    timeout=httpx.Timeout(300.0, connect=60.0),
-                    max_requests_per_minute=self._MAX_REQUESTS_PER_MINUTE,
-                    headers=BROWSER_HEADERS,
-                    metrics_logger=self.log_ai_metrics,
-                    logger=self.logger,
-                    worker_id=getattr(ctx, 'worker_id', None),
+                result = await self._await_with_cancel_polling(
+                    chat_completions(
+                        api_key=self.api_key,
+                        base_url=self.base_url,
+                        model=self.model,
+                        messages=messages,
+                        temperature=current_temperature,
+                        max_tokens=self.max_tokens,
+                        stream=False,
+                        timeout=httpx.Timeout(300.0, connect=60.0),
+                        max_requests_per_minute=self._MAX_REQUESTS_PER_MINUTE,
+                        headers=BROWSER_HEADERS,
+                        metrics_logger=self.log_ai_metrics,
+                        logger=self.logger,
+                        worker_id=getattr(ctx, 'worker_id', None),
+                    ),
+                    poll_interval=0.2,
+                    on_cancel=self._abort_inflight_request,
                 )
                 response = result.response
 
@@ -371,7 +380,7 @@ class OpenAITranslator(CommonTranslator):
                         if not is_infinite and attempt >= max_retries:
                             raise Exception(f"Translation count mismatch after {max_retries} attempts: expected {len(texts)}, got {len(translations)}")
 
-                        await asyncio.sleep(2)
+                        await self._sleep_with_cancel_polling(2)
                         continue
 
                     # 质量验证：检查空翻译、合并翻译、可疑符号等
@@ -388,7 +397,7 @@ class OpenAITranslator(CommonTranslator):
                         if not is_infinite and attempt >= max_retries:
                             raise Exception(f"Quality check failed after {max_retries} attempts: {error_msg}")
 
-                        await asyncio.sleep(2)
+                        await self._sleep_with_cancel_polling(2)
                         continue
 
                     self.logger.info("--- Translation Results ---")
@@ -416,7 +425,7 @@ class OpenAITranslator(CommonTranslator):
                                 tolerance=max(1, len(texts) // 10)
                             )
                         
-                        await asyncio.sleep(2)
+                        await self._sleep_with_cancel_polling(2)
                         continue
 
                     return translations[:len(texts)]
@@ -451,7 +460,7 @@ class OpenAITranslator(CommonTranslator):
                     self.logger.error("OpenAI翻译在多次重试后仍然失败。即将终止程序。")
                     raise last_exception
                 
-                await asyncio.sleep(1)
+                await self._sleep_with_cancel_polling(1)
 
             except Exception as e:
                 attempt += 1
@@ -463,7 +472,7 @@ class OpenAITranslator(CommonTranslator):
                     self.logger.error("OpenAI翻译在多次重试后仍然失败。即将终止程序。")
                     raise last_exception
                 
-                await asyncio.sleep(1)
+                await self._sleep_with_cancel_polling(1)
 
         # 只有在所有重试都失败后才会执行到这里
         raise last_exception if last_exception else Exception("OpenAI translation failed after all retries")

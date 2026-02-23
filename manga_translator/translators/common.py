@@ -1,12 +1,13 @@
 import re
 import time
 import asyncio
+import contextlib
 import json
 import os
 import sys
 import sqlite3
 import logging
-from typing import List, Tuple, Dict, Any, Optional
+from typing import List, Tuple, Dict, Any, Optional, Callable, Awaitable
 from abc import abstractmethod
 import numpy as np
 import cv2
@@ -418,6 +419,51 @@ class CommonTranslator(InfererModule):
         """检查任务是否被取消"""
         if self._cancel_check_callback and self._cancel_check_callback():
             raise asyncio.CancelledError("Translation cancelled by user")
+
+    async def _await_with_cancel_polling(
+        self,
+        awaitable: Awaitable,
+        poll_interval: float = 0.2,
+        on_cancel: Optional[Callable[[], Awaitable[None] | None]] = None,
+    ):
+        """
+        Wait for a long-running awaitable while polling for cancellation.
+        On cancel, attempt to cancel the inner task and run the on_cancel cleanup callback.
+        """
+        task = asyncio.create_task(awaitable)
+        try:
+            while True:
+                done, _ = await asyncio.wait({task}, timeout=poll_interval)
+                if done:
+                    return task.result()
+                self._check_cancelled()
+        except asyncio.CancelledError:
+            if not task.done():
+                task.cancel()
+                with contextlib.suppress(Exception):
+                    done, _ = await asyncio.wait({task}, timeout=max(poll_interval, 0.2))
+                    if not done:
+                        self.logger.debug("取消请求任务超时，直接退出等待")
+            if on_cancel:
+                try:
+                    cleanup_result = on_cancel()
+                    if asyncio.iscoroutine(cleanup_result):
+                        await asyncio.wait_for(cleanup_result, timeout=max(poll_interval, 0.3))
+                except asyncio.TimeoutError:
+                    self.logger.debug("取消时清理请求超时，直接退出等待")
+                except Exception as cleanup_error:
+                    self.logger.debug(f"取消时清理请求失败（可忽略）: {cleanup_error}")
+            raise
+
+    async def _sleep_with_cancel_polling(self, seconds: float, poll_interval: float = 0.2):
+        """Cancellable sleep that polls for stop signals during the wait."""
+        if seconds <= 0:
+            self._check_cancelled()
+            return
+        await self._await_with_cancel_polling(
+            asyncio.sleep(seconds),
+            poll_interval=min(poll_interval, max(seconds, 0.05)),
+        )
 
     def _now_iso(self) -> str:
         """返回当前时间的 ISO 格式字符串（带毫秒）"""

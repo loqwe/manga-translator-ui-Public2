@@ -175,6 +175,11 @@ class OpenAIHighQualityTranslator(CommonTranslator):
             headers=BROWSER_HEADERS,
         )
 
+    async def _abort_inflight_request(self):
+        """Cancel: drop the shared client reference to stop waiting."""
+        # Client is shared via get_openai_client; just drop the reference.
+        self.client = None
+
     
     def _build_system_prompt(self, source_lang: str, target_lang: str, custom_prompt_json: Dict[str, Any] = None, line_break_prompt_json: Dict[str, Any] = None, retry_attempt: int = 0, retry_reason: str = "", extract_glossary: bool = False) -> str:
         """构建系统提示词"""
@@ -441,22 +446,26 @@ This is an incorrect response because it includes extra text and explanations.
                     self.logger.info(f"[Stream] use_stream={self.use_stream}")
 
                 stream_options = {"include_usage": True} if self.use_stream else None
-                result = await chat_completions(
-                    api_key=self.api_key,
-                    base_url=self.base_url,
-                    model=self.model,
-                    messages=messages,
-                    temperature=current_temperature,
-                    max_tokens=self.max_tokens,
-                    stream=self.use_stream,
-                    stream_options=stream_options,
-                    timeout=httpx.Timeout(timeout=400.0, connect=30.0, read=120.0, write=60.0, pool=30.0),
-                    max_requests_per_minute=self._MAX_REQUESTS_PER_MINUTE,
-                    headers=BROWSER_HEADERS,
-                    metrics_logger=self.log_ai_metrics,
-                    logger=self.logger,
-                    extra_metrics={"send_images": send_images, "batch": len(batch_data)},
-                    worker_id=getattr(ctx, 'worker_id', None),
+                result = await self._await_with_cancel_polling(
+                    chat_completions(
+                        api_key=self.api_key,
+                        base_url=self.base_url,
+                        model=self.model,
+                        messages=messages,
+                        temperature=current_temperature,
+                        max_tokens=self.max_tokens,
+                        stream=self.use_stream,
+                        stream_options=stream_options,
+                        timeout=httpx.Timeout(timeout=400.0, connect=30.0, read=120.0, write=60.0, pool=30.0),
+                        max_requests_per_minute=self._MAX_REQUESTS_PER_MINUTE,
+                        headers=BROWSER_HEADERS,
+                        metrics_logger=self.log_ai_metrics,
+                        logger=self.logger,
+                        extra_metrics={"send_images": send_images, "batch": len(batch_data)},
+                        worker_id=getattr(ctx, 'worker_id', None),
+                    ),
+                    poll_interval=0.2,
+                    on_cancel=self._abort_inflight_request,
                 )
 
                 response = result.response
@@ -573,7 +582,7 @@ This is an incorrect response because it includes extra text and explanations.
                         if quality_retry_count >= max_quality_retries:
                             raise Exception(f"Translation count mismatch after {max_quality_retries} quality retries: expected {len(texts)}, got {len(translations)}")
 
-                        await asyncio.sleep(2)
+                        await self._sleep_with_cancel_polling(2)
                         continue
 
                     # 质量验证：检查空翻译、合并翻译、可疑符号等
@@ -591,7 +600,7 @@ This is an incorrect response because it includes extra text and explanations.
                         if quality_retry_count >= max_quality_retries:
                             raise Exception(f"Quality check failed after {max_quality_retries} quality retries: {error_msg}")
 
-                        await asyncio.sleep(2)
+                        await self._sleep_with_cancel_polling(2)
                         continue
 
                     self.logger.info("--- Translation Results ---")
@@ -621,7 +630,7 @@ This is an incorrect response because it includes extra text and explanations.
                                 tolerance=max(1, len(texts) // 10)
                             )
                         
-                        await asyncio.sleep(2)
+                        await self._sleep_with_cancel_polling(2)
                         continue
 
                     self._rate_limit_attempt = 0  # 成功后重置429计数器
@@ -657,7 +666,7 @@ This is an incorrect response because it includes extra text and explanations.
                     self.logger.error("OpenAI翻译在多次重试后仍然失败。即将终止程序。")
                     raise last_exception
                 
-                await asyncio.sleep(1)
+                await self._sleep_with_cancel_polling(1)
 
             except openai.BadRequestError as e:
                 # 专门处理400错误，检查是否是多模态不支持问题
@@ -684,7 +693,7 @@ This is an incorrect response because it includes extra text and explanations.
                         self.logger.error("OpenAI翻译在多次重试后仍然失败。即将终止程序。")
                         raise last_exception
                     
-                    await asyncio.sleep(1)
+                    await self._sleep_with_cancel_polling(1)
                     
             except Exception as e:
                 error_msg = str(e).lower()
@@ -713,7 +722,7 @@ This is an incorrect response because it includes extra text and explanations.
                         last_exception = Exception(f"429限速错误: 已重试{max_rate_limit_attempts}次仍失败")
                         raise last_exception
                     
-                    await asyncio.sleep(wait_time)
+                    await self._sleep_with_cancel_polling(wait_time)
                     continue  # 不计入 max_retries，继续重试
                 
                 # 其他错误：正常计数
@@ -732,7 +741,7 @@ This is an incorrect response because it includes extra text and explanations.
                     self.logger.error("OpenAI翻译在多次重试后仍然失败。即将终止程序。")
                     raise last_exception
                 
-                await asyncio.sleep(1)
+                await self._sleep_with_cancel_polling(1)
 
         # 只有在所有重试都失败后才会执行到这里
         raise last_exception if last_exception else Exception("OpenAI translation failed after all retries")

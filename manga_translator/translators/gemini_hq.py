@@ -214,7 +214,22 @@ class GeminiHighQualityTranslator(CommonTranslator):
             
             self.logger.info("安全设置策略：默认发送 OFF，如遇错误自动回退")
 
-    
+    async def _abort_inflight_request(self):
+        """Cancel: try to close the current client connection to interrupt blocking requests."""
+        if not self.client:
+            return
+
+        close_fn = getattr(self.client, "close", None)
+        try:
+            if callable(close_fn):
+                close_result = close_fn()
+                if asyncio.iscoroutine(close_result):
+                    await close_result
+        except Exception as e:
+            self.logger.debug(f"中断Gemini HQ请求时关闭客户端失败（可忽略）: {e}")
+        finally:
+            self.client = None
+
     
     def _build_system_prompt(self, source_lang: str, target_lang: str, custom_prompt_json: Dict[str, Any] = None, line_break_prompt_json: Dict[str, Any] = None, retry_attempt: int = 0, retry_reason: str = "", extract_glossary: bool = False) -> str:
         """构建系统提示词"""
@@ -474,7 +489,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
                     if elapsed < delay:
                         sleep_time = delay - elapsed
                         self.logger.info(f'Ratelimit sleep: {sleep_time:.2f}s')
-                        await asyncio.sleep(sleep_time)
+                        await self._sleep_with_cancel_polling(sleep_time)
                 
                 if retry_attempt > 0 and current_temperature != self.temperature:
                     self.logger.info(f"[重试] 温度调整: {self.temperature} -> {current_temperature}")
@@ -487,11 +502,15 @@ class GeminiHighQualityTranslator(CommonTranslator):
 
                 try:
                     # 使用新版 SDK 的 generate_content 方法
-                    response = await asyncio.to_thread(
-                        self.client.models.generate_content,
-                        model=self.model_name,
-                        contents=content_parts,
-                        config=generation_config
+                    response = await self._await_with_cancel_polling(
+                        asyncio.to_thread(
+                            self.client.models.generate_content,
+                            model=self.model_name,
+                            contents=content_parts,
+                            config=generation_config
+                        ),
+                        poll_interval=0.2,
+                        on_cancel=self._abort_inflight_request,
                     )
                     
                     # 根据 finish_reason 粗分状态
@@ -572,7 +591,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
                             if not is_infinite and attempt >= max_retries:
                                 self.logger.error(f"Gemini翻译在多次重试后仍失败: {finish_reason}")
                                 break
-                            await asyncio.sleep(1)
+                            await self._sleep_with_cancel_polling(1)
                             continue
 
                 # 尝试访问 .text 属性，如果API因安全原因等返回空内容，这里会触发异常
@@ -661,7 +680,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
                     if not is_infinite and attempt >= max_retries:
                         raise Exception(f"Translation count mismatch after {max_retries} attempts: expected {len(texts)}, got {len(translations)}")
 
-                    await asyncio.sleep(2)
+                    await self._sleep_with_cancel_polling(2)
                     continue
 
                 # 质量验证：检查空翻译、合并翻译、可疑符号等
@@ -678,7 +697,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
                     if not is_infinite and attempt >= max_retries:
                         raise Exception(f"Quality check failed after {max_retries} attempts: {error_msg}")
 
-                    await asyncio.sleep(2)
+                    await self._sleep_with_cancel_polling(2)
                     continue
 
                 # 打印原文和译文的对应关系
@@ -708,7 +727,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
                             tolerance=max(1, len(texts) // 10)
                         )
                     
-                    await asyncio.sleep(2)
+                    await self._sleep_with_cancel_polling(2)
                     continue
 
                 return translations[:len(texts)]
@@ -745,7 +764,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
                     self.logger.warning(f"检测到安全设置相关错误，将在下次重试时移除安全设置参数: {error_message}")
                     should_retry_without_safety = True
                     # 不增加attempt计数，直接重试
-                    await asyncio.sleep(1)
+                    await self._sleep_with_cancel_polling(1)
                     continue
                     
                 attempt += 1
@@ -761,7 +780,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
                     self.logger.error("Gemini翻译在多次重试后仍然失败。即将终止程序。")
                     raise e
                 
-                await asyncio.sleep(1) # Wait before retrying
+                await self._sleep_with_cancel_polling(1) # Wait before retrying
         
         return texts # Fallback in case loop finishes unexpectedly
 
@@ -832,7 +851,7 @@ class GeminiHighQualityTranslator(CommonTranslator):
                 if elapsed < delay:
                     sleep_time = delay - elapsed
                     self.logger.info(f'Ratelimit sleep: {sleep_time:.2f}s')
-                    await asyncio.sleep(sleep_time)
+                    await self._sleep_with_cancel_polling(sleep_time)
             
             # AI_METRICS: 记录请求开始时间
             send_ts = self._now_iso()

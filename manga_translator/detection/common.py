@@ -80,22 +80,8 @@ class CommonDetector(InfererModule):
 
     def _remove_border(self, image: np.ndarray, old_w: int, old_h: int, textlines: List[Quadrilateral], raw_mask, mask):
         new_h, new_w = image.shape[:2]
-        raw_mask = cv2.resize(raw_mask, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-        raw_mask = raw_mask[:old_h, :old_w]
-        if mask is not None:
-            if isinstance(mask, tuple):
-                resized_masks = []
-                for m in mask:
-                    if m is not None and hasattr(m, 'shape'):
-                        resized = cv2.resize(m, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-                        resized = resized[:old_h, :old_w]
-                        resized_masks.append(resized)
-                    else:
-                        resized_masks.append(m)
-                mask = tuple(resized_masks)
-            else:
-                mask = cv2.resize(mask, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-                mask = mask[:old_h, :old_w]
+        raw_mask = self._resize_and_crop_mask(raw_mask, new_w, new_h, old_w, old_h)
+        mask = self._resize_and_crop_mask(mask, new_w, new_h, old_w, old_h)
 
         # Filter out regions within the border and clamp the points of the remaining regions
         new_textlines = []
@@ -108,6 +94,27 @@ class CommonDetector(InfererModule):
             new_txtln = Quadrilateral(points, txtln.text, txtln.prob)
             new_textlines.append(new_txtln)
         return new_textlines, raw_mask, mask
+
+    def _resize_and_crop_mask(self, mask, resize_w: int, resize_h: int, crop_w: int, crop_h: int):
+        if mask is None:
+            return None
+
+        if isinstance(mask, tuple):
+            return tuple(self._resize_and_crop_mask(m, resize_w, resize_h, crop_w, crop_h) for m in mask)
+
+        if isinstance(mask, list):
+            return [self._resize_and_crop_mask(m, resize_w, resize_h, crop_w, crop_h) for m in mask]
+
+        if not isinstance(mask, np.ndarray):
+            self.logger.warning(f'Unexpected mask type in _remove_border: {type(mask)}')
+            return mask
+
+        if mask.size == 0 or len(mask.shape) < 2:
+            self.logger.warning(f'Invalid mask shape in _remove_border: {mask.shape}')
+            return mask
+
+        resized = cv2.resize(mask, (resize_w, resize_h), interpolation=cv2.INTER_LINEAR)
+        return resized[:crop_h, :crop_w]
 
     def _add_rotation(self, image: np.ndarray):
         return np.rot90(image, k=-1)
