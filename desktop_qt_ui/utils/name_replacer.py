@@ -86,16 +86,20 @@ class NameReplacer:
         Returns:
             熟肉漫画名，如果没有映射则返回原名
         """
-        # 首先检查直接匹配
+        # Normalize underscores to spaces for matching
+        normalized = raw_name.replace('_', ' ')
+
+        # Direct match (original and normalized)
         if raw_name in self.mapping:
             return self.mapping[raw_name]
-        
-        # 检查是否匹配任何包含 | 的映射键
+        if normalized != raw_name and normalized in self.mapping:
+            return self.mapping[normalized]
+
+        # Check pipe-separated variant keys
         for key, value in self.mapping.items():
             if '|' in key:
-                # 分割多个名称
                 variants = [v.strip() for v in key.split('|')]
-                if raw_name in variants:
+                if raw_name in variants or normalized in variants:
                     return value
         
         return raw_name

@@ -258,10 +258,16 @@ def download_url_with_progressbar(url: str, path: str, min_speed_kbps: float = 1
         headers['Accept-Encoding'] = 'deflate'
 
     r = requests.get(url, stream=True, allow_redirects=True, headers=headers, timeout=timeout)
-    if downloaded_size and r.headers.get('Accept-Ranges') != 'bytes':
-        print('Error: Webserver does not support partial downloads. Restarting from the beginning.')
-        r = requests.get(url, stream=True, allow_redirects=True, timeout=timeout)
-        downloaded_size = 0
+    # Resume safety: some servers ignore Range requests and return 200/full body.
+    # In that case appending would corrupt the file, so restart from scratch.
+    if downloaded_size:
+        accept_ranges = (r.headers.get('Accept-Ranges') or '').lower()
+        content_range = r.headers.get('Content-Range')
+        if accept_ranges != 'bytes' or r.status_code != 206 or not content_range:
+            print('Error: Webserver does not reliably support partial downloads. Restarting from the beginning.')
+            r.close()
+            r = requests.get(url, stream=True, allow_redirects=True, timeout=timeout)
+            downloaded_size = 0
     total = int(r.headers.get('content-length', 0))
     chunk_size = 1024
 
@@ -1161,6 +1167,208 @@ def square_pad_resize(img: np.ndarray, tgt_size: int):
         img = cv2.resize(img, (tgt_size, tgt_size), interpolation=cv2.INTER_LINEAR)
 
     return img, down_scale_ratio, pad_h, pad_w
+
+def build_det_rearrange_plan(img: np.ndarray, tgt_size: int = 1280) -> Optional[dict]:
+    """
+    Build a shared rearrange plan for long-image detection.
+    Returns None if rearrangement is not required.
+    """
+    h, w = img.shape[:2]
+    transpose = False
+    if h < w:
+        transpose = True
+        h, w = img.shape[1], img.shape[0]
+
+    asp_ratio = h / w
+    down_scale_ratio = h / tgt_size
+
+    # Rearrangement condition shared by all detectors.
+    require_rearrange = down_scale_ratio > 2.5 and asp_ratio > 3
+    if not require_rearrange:
+        return None
+
+    img_for_split = einops.rearrange(img, 'h w c -> w h c') if transpose else img
+
+    pw_num = max(int(np.floor(2 * tgt_size / w)), 2)
+    patch_size = ph = pw_num * w
+
+    ph_num = int(np.ceil(h / ph))
+    ph_step = int((h - ph) / (ph_num - 1)) if ph_num > 1 else 0
+    rel_step_list = []
+    patch_list = []
+    for ii in range(ph_num):
+        t = ii * ph_step
+        b = t + ph
+        rel_step_list.append(t / h)
+        patch_list.append(img_for_split[t:b])
+
+    p_num = int(np.ceil(ph_num / pw_num))
+    pad_num = p_num * pw_num - ph_num
+    for _ in range(pad_num):
+        patch_list.append(np.zeros_like(patch_list[0]))
+
+    return {
+        'transpose': transpose,
+        'h': h,
+        'w': w,
+        'pw_num': pw_num,
+        'patch_size': patch_size,
+        'ph_num': ph_num,
+        'ph_step': ph_step,
+        'rel_step_list': rel_step_list,
+        'patch_list': patch_list,
+        'p_num': p_num,
+        'pad_num': pad_num,
+    }
+
+def det_rearrange_patch_array(plan: dict) -> np.ndarray:
+    """
+    Rearrange plan patch list into square patch batches.
+    Output shape is (p_num, patch_size, patch_size[, c]).
+    """
+    patch_array = np.stack(plan['patch_list'], axis=0)
+    squeeze_channel = False
+    if patch_array.ndim == 3:
+        patch_array = patch_array[..., None]
+        squeeze_channel = True
+    if plan['transpose']:
+        patch_array = einops.rearrange(
+            patch_array,
+            '(p_num pw_num) ph pw c -> p_num (pw_num pw) ph c',
+            p_num=plan['p_num'],
+        )
+    else:
+        patch_array = einops.rearrange(
+            patch_array,
+            '(p_num pw_num) ph pw c -> p_num ph (pw_num pw) c',
+            p_num=plan['p_num'],
+        )
+    if squeeze_channel:
+        patch_array = patch_array[..., 0]
+    return patch_array
+
+def det_rearrange_split_view(arr: np.ndarray, transpose: bool) -> np.ndarray:
+    """
+    Convert input array into the internal long-side split coordinate view.
+    """
+    if not transpose:
+        return arr
+    if arr.ndim == 3:
+        return einops.rearrange(arr, 'h w c -> w h c')
+    if arr.ndim == 2:
+        return einops.rearrange(arr, 'h w -> w h')
+    raise ValueError(f'Unsupported array ndim for split view: {arr.ndim}')
+
+def det_restore_split_view(arr: np.ndarray, transpose: bool) -> np.ndarray:
+    """
+    Restore array from internal split coordinate view back to original orientation.
+    """
+    # Axis swap is symmetric.
+    return det_rearrange_split_view(arr, transpose)
+
+def det_rearrange_patch_spans(plan: dict) -> List[Tuple[int, int]]:
+    """
+    Returns patch spans (top, bottom) in the internal split coordinate view.
+    """
+    h = int(plan['h'])
+    patch_size = int(plan['patch_size'])
+    spans = []
+    for ii in range(int(plan['ph_num'])):
+        rel_t = float(plan['rel_step_list'][ii])
+        t = int(round(rel_t * h))
+        b = min(t + patch_size, h)
+        spans.append((t, b))
+    return spans
+
+def det_collect_plan_patches(arr: np.ndarray, plan: dict) -> List[np.ndarray]:
+    """
+    Collect per-span patches from an array using a rearrange plan.
+    Output includes zero-padding patches to match plan['pad_num'].
+    """
+    split_view = det_rearrange_split_view(arr, bool(plan['transpose']))
+    spans = det_rearrange_patch_spans(plan)
+    patch_list = [split_view[t:b].copy() for (t, b) in spans]
+    if not patch_list:
+        return patch_list
+    for _ in range(int(plan['pad_num'])):
+        patch_list.append(np.zeros_like(patch_list[0]))
+    return patch_list
+
+def _to_chw_patch(patch: np.ndarray, data_format: str) -> np.ndarray:
+    if data_format == 'chw':
+        if patch.ndim != 3:
+            raise ValueError(f'Expected 3D CHW patch, got shape={patch.shape}')
+        return patch
+    if data_format == 'hwc':
+        if patch.ndim != 3:
+            raise ValueError(f'Expected 3D HWC patch, got shape={patch.shape}')
+        return einops.rearrange(patch, 'h w c -> c h w')
+    if data_format == 'hw':
+        if patch.ndim != 2:
+            raise ValueError(f'Expected 2D HW patch, got shape={patch.shape}')
+        return patch[None, ...]
+    raise ValueError(f'Unsupported data_format: {data_format}')
+
+def det_unrearrange_patch_maps(
+    patch_lst: List[np.ndarray],
+    plan: dict,
+    data_format: str = 'chw',
+) -> np.ndarray:
+    """
+    Merge rearranged patch outputs back into original image coordinates.
+    Supports patch inputs in CHW / HWC / HW.
+    """
+    if not patch_lst:
+        raise ValueError('patch_lst must not be empty')
+
+    transpose = bool(plan['transpose'])
+    h = int(plan['h'])
+    w = int(plan['w'])
+    pw_num = int(plan['pw_num'])
+    patch_size = int(plan['patch_size'])
+    ph_step = int(plan['ph_step'])
+    rel_step_list = plan['rel_step_list']
+    pad_num = int(plan['pad_num'])
+
+    patch0 = _to_chw_patch(patch_lst[0], data_format)
+    _psize = int(patch0.shape[-1])
+    _step = int(ph_step * _psize / patch_size)
+    _pw = int(_psize / pw_num)
+    _h = int(_pw / w * h)
+
+    tgtmap = np.zeros((patch0.shape[0], _h, _pw), dtype=np.float32)
+    num_patches = len(patch_lst) * pw_num - pad_num
+
+    for ii, patch in enumerate(patch_lst):
+        p = _to_chw_patch(patch, data_format)
+        if transpose:
+            p = einops.rearrange(p, 'c h w -> c w h')
+        for jj in range(pw_num):
+            pidx = ii * pw_num + jj
+            if pidx >= len(rel_step_list):
+                break
+            rel_t = float(rel_step_list[pidx])
+            t = int(round(rel_t * _h))
+            b = min(t + _psize, _h)
+            l = jj * _pw
+            r = l + _pw
+            tgtmap[..., t:b, :] += p[..., : b - t, l:r]
+            if pidx > 0 and _step < _psize:
+                interleave = _psize - _step
+                tgtmap[..., t:t + interleave, :] /= 2.
+            if pidx >= num_patches - 1:
+                break
+
+    if transpose:
+        tgtmap = einops.rearrange(tgtmap, 'c h w -> c w h')
+
+    if data_format == 'chw':
+        return tgtmap
+    if data_format == 'hwc':
+        return einops.rearrange(tgtmap, 'c h w -> h w c')
+    if data_format == 'hw':
+        return tgtmap[0]
+    raise ValueError(f'Unsupported data_format: {data_format}')
 
 def det_rearrange_forward(
     img: np.ndarray, 

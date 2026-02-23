@@ -15,15 +15,13 @@ from ..utils import Quadrilateral, det_rearrange_forward
 
 class YOLOOBBDetector(OfflineDetector):
     """YOLO OBB 检测器 - 基于ONNX Runtime"""
+    _MODEL_FILENAME = 'ysgyolo_1.2_OS1.0_1600.onnx'
     
     _MODEL_MAPPING = {
         'model': {
-            'url': [
-                'https://github.com/hgmzhn/manga-translator-ui/releases/download/v1.7.1/ysgyolo_1.2_OS1.0.onnx',
-                'https://www.modelscope.cn/models/hgmzhn/manga-translator-ui/resolve/master/ysgyolo_1.2_OS1.0.onnx',
-            ],
-            'hash': '6f3202925f01fdf045f8c31a3bf62e6c44944f56ce09107eb436bc5a5b185ebe',
-            'file': '.',
+            'url': 'https://www.modelscope.cn/models/hgmzhn/manga-translator-ui/resolve/master/ysgyolo_1.2_OS1.0_1600.onnx',
+            'hash': '94d4c1fd89f26b15e85c30484843ab809bdf1ff8932f07cc450ea289e039b0f4',
+            'file': _MODEL_FILENAME,
         }
     }
     
@@ -38,7 +36,9 @@ class YOLOOBBDetector(OfflineDetector):
     
     async def _load(self, device: str):
         """加载ONNX模型"""
-        model_path = self._get_file_path('ysgyolo_1.2_OS1.0.onnx')
+        model_path = self._get_file_path(self._MODEL_FILENAME)
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"YOLO OBB 模型不存在: {model_path}")
         
         # 设置会话选项
         sess_options = ort.SessionOptions()

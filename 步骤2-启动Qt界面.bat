@@ -12,7 +12,7 @@ set "SCRIPT_DIR=%~dp0"
 if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 
 REM 检查conda环境（兼容命名环境和路径环境）
-set CONDA_ENV_NAME=manga-env
+set CONDA_ENV_NAME=manga-12
 set CONDA_ENV_PATH=%SCRIPT_DIR%\conda_env
 set MINICONDA_ROOT=%SCRIPT_DIR%\Miniconda3
 

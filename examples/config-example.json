@@ -12,8 +12,8 @@
       "interval_ms": 500,
       "log_expanded": false
     },
-    "window_x": 537,
-    "window_y": 365,
+    "window_x": 346,
+    "window_y": 314,
     "window_width": 1302,
     "window_height": 777,
     "window_maximized": false
@@ -115,7 +115,7 @@
     "use_gpu": true,
     "context_size": 3,
     "format": "不指定",
-    "overwrite": true,
+    "overwrite": false,
     "skip_no_text": false,
     "save_text": true,
     "load_text": false,

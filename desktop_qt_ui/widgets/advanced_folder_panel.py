@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
     QFileDialog, QMessageBox, QComboBox, QTreeWidget, QTreeWidgetItem,
     QDialog, QSplitter, QScrollArea, QToolButton, QStyle, QMenu,
     QCheckBox, QSpinBox, QListWidget, QListWidgetItem, QFormLayout,
-    QProgressBar, QApplication
+    QProgressBar, QApplication, QFrame
 )
 from PyQt6.QtGui import QColor, QPalette, QDragEnterEvent, QDropEvent
 from PyQt6.QtCore import pyqtSignal
@@ -1033,7 +1033,20 @@ class AdvancedFolderDialog(QDialog):
         title_bar_layout.addWidget(title_label)
         
         title_bar_layout.addStretch()
-        
+
+        # 全选按钮
+        select_all_title_btn = QPushButton("全选")
+        select_all_title_btn.setFixedWidth(68)
+        select_all_title_btn.setToolTip("全选所有章节")
+        select_all_title_btn.clicked.connect(self.select_all_chapters)
+        title_bar_layout.addWidget(select_all_title_btn)
+
+        # 分隔线
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.VLine)
+        sep.setFrameShadow(QFrame.Shadow.Sunken)
+        title_bar_layout.addWidget(sep)
+
         # 排序方式下拉框
         sort_label = QLabel("排序:")
         title_bar_layout.addWidget(sort_label)
@@ -2083,8 +2096,13 @@ class AdvancedFolderDialog(QDialog):
         self.source_filter_combo.blockSignals(True)
         self.source_filter_combo.clear()
         self.source_filter_combo.addItem("全部", None)
+        # Pin "网站漫画下载文件夹" to the top
+        pinned = "网站漫画下载文件夹"
+        if pinned in all_sources:
+            self.source_filter_combo.addItem(pinned, pinned)
         for source in sorted(all_sources):
-            self.source_filter_combo.addItem(source, source)
+            if source != pinned:
+                self.source_filter_combo.addItem(source, source)
         
         # Restore selection if still valid
         if current_selection:
