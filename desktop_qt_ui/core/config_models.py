@@ -1,7 +1,7 @@
 from typing import Optional, List, Union
 import os
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 
 
 class TranslatorSettings(BaseModel):
@@ -117,8 +117,17 @@ class ColorizerSettings(BaseModel):
     colorizer: str = "none"
 
 class CliSettings(BaseModel):
-    verbose: bool = False  # 默认关闭详细日志
+    verbose: str = "standard"  # standard / verbose / diagnostic
     attempts: int = -1
+
+    @validator('verbose', pre=True)
+    def _compat_verbose(cls, v):
+        """Backward compat: convert old bool values to new str."""
+        if isinstance(v, bool):
+            return "verbose" if v else "standard"
+        if v not in ("standard", "verbose", "diagnostic"):
+            return "standard"
+        return v
     ignore_errors: bool = False
     use_gpu: bool = True
     context_size: int = 3

@@ -1107,12 +1107,18 @@ class MainAppLogic(QObject):
                     "CUSTOM_OPENAI_MODEL": self._t("label_CUSTOM_OPENAI_MODEL"),
                     "CUSTOM_OPENAI_API_KEY": self._t("label_CUSTOM_OPENAI_API_KEY"),
                     "CUSTOM_OPENAI_MODEL_CONF": self._t("label_CUSTOM_OPENAI_MODEL_CONF")
+                },
+                "verbose": {
+                    "standard": self._t("verbose_standard"),
+                    "verbose": self._t("verbose_verbose"),
+                    "diagnostic": self._t("verbose_diagnostic"),
                 }
             }
         return display_name_maps.get(key)
 
     def get_options_for_key(self, key: str) -> Optional[List[str]]:
         options_map = {
+            "verbose": ["standard", "verbose", "diagnostic"],
             "format": [self._t("format_not_specified")] + list(OUTPUT_FORMATS.keys()),
             "renderer": [member.value for member in Renderer],
             "alignment": [member.value for member in Alignment],
@@ -2882,8 +2888,16 @@ class TranslationWorker(QObject):
         manga_logger.addHandler(log_handler)
         
         # 根据 verbose 配置设置日志级别
-        verbose = self.config_dict.get('cli', {}).get('verbose', False)
-        log_level = logging.DEBUG if verbose else logging.INFO
+        verbose_level = self.config_dict.get('cli', {}).get('verbose', 'standard')
+        # 向后兼容：旧配置可能是 bool
+        if isinstance(verbose_level, bool):
+            verbose_level = 'verbose' if verbose_level else 'standard'
+        log_level = logging.DEBUG if verbose_level in ('verbose', 'diagnostic') else logging.INFO
+        # 诊断模式：同时开启 HQ 诊断日志
+        if verbose_level == 'diagnostic':
+            os.environ['OPENAI_HQ_DIAG'] = '1'
+        else:
+            os.environ.pop('OPENAI_HQ_DIAG', None)
         manga_logger.setLevel(log_level)
         
         # 根日志器设为 DEBUG 以允许所有日志通过
@@ -2918,9 +2932,11 @@ class TranslationWorker(QObject):
             translator_params.update(self.config_dict)
             
             # 根据 verbose 设置设置日志级别
-            verbose = translator_params.get('verbose', False)
+            verbose_level = translator_params.get('verbose', 'standard')
+            if isinstance(verbose_level, bool):
+                verbose_level = 'verbose' if verbose_level else 'standard'
             if hasattr(self, 'log_service') and self.log_service:
-                self.log_service.set_console_log_level(verbose)
+                self.log_service.set_console_log_level(verbose_level)
             
             font_filename = self.config_dict.get('render', {}).get('font_path')
             if font_filename:

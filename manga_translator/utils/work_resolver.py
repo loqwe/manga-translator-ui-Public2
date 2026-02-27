@@ -75,7 +75,9 @@ def _is_chapter_like_dir(name: str) -> bool:
     if not n:
         return False
 
-    lower = n.lower()
+    # 先把 _ 和 - 替换成空格，让 word boundary 正确工作
+    # 例如 Chapter_82 -> chapter 82，\bchapter\b 才能匹配
+    lower = re.sub(r"[_\-]+", " ", n.lower()).strip()
 
     # 英文常见
     if re.search(r"\b(chapter|chap|ch\.?\s*\d+|episode|ep\.?\s*\d+|vol\.?\s*\d+|volume)\b", lower):

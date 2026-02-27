@@ -506,14 +506,29 @@ class MainView(QWidget):
                 widget = container
 
             elif full_key == "cli.verbose":
-                # 详细日志 + 旁边两个快捷按钮：使用日志、术语日志
+                # 日志级别下拉框 + 快捷按钮
                 container = QWidget()
                 hbox = QHBoxLayout(container)
                 hbox.setContentsMargins(0, 0, 0, 0)
 
-                checkbox = QCheckBox()
-                checkbox.setChecked(value)
-                checkbox.stateChanged.connect(lambda state, k=full_key: self._on_setting_changed(bool(state), k, None))
+                combo = QComboBox()
+                verbose_options = options or ["standard", "verbose", "diagnostic"]
+                combo.addItems([display_map.get(o, o) if display_map else o for o in verbose_options])
+                # 设置当前值
+                current_val = str(value) if value else "standard"
+                # 向后兼容 bool
+                if current_val in ("True", "true"):
+                    current_val = "verbose"
+                elif current_val in ("False", "false"):
+                    current_val = "standard"
+                display_val = display_map.get(current_val, current_val) if display_map else current_val
+                combo.setCurrentText(display_val)
+                # 反向映射：显示名 → 内部值
+                reverse_map = {v: k for k, v in display_map.items()} if display_map else {}
+                combo.currentTextChanged.connect(
+                    lambda text, k=full_key, rm=reverse_map: self._on_setting_changed(rm.get(text, text), k, None)
+                )
+                combo.setFixedWidth(90)
 
                 usage_btn = QPushButton(self._t("btn_usage_log"))
                 usage_btn.setFixedWidth(90)
@@ -523,7 +538,7 @@ class MainView(QWidget):
                 glossary_btn.setFixedWidth(90)
                 glossary_btn.clicked.connect(self._open_glossary_log)
 
-                hbox.addWidget(checkbox)
+                hbox.addWidget(combo)
                 hbox.addWidget(usage_btn)
                 hbox.addWidget(glossary_btn)
                 hbox.addStretch()

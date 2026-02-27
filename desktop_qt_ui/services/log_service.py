@@ -122,14 +122,18 @@ class LogService:
         
         return MemoryHandler(self)
     
-    def set_console_log_level(self, verbose: bool = False):
+    def set_console_log_level(self, verbose='standard'):
         """
         根据 verbose 配置设置控制台日志级别
         
         Args:
-            verbose: 是否启用详细日志（DEBUG 级别）
+            verbose: 'standard' / 'verbose' / 'diagnostic'，也兼容旧的 bool
         """
-        level = logging.DEBUG if verbose else logging.INFO
+        # 向后兼容 bool
+        if isinstance(verbose, bool):
+            verbose = 'verbose' if verbose else 'standard'
+        
+        level = logging.DEBUG if verbose in ('verbose', 'diagnostic') else logging.INFO
         
         # 设置控制台处理器级别
         if hasattr(self, 'console_handler'):
@@ -150,11 +154,9 @@ class LogService:
             logging.warning(f"无法设置manga_translator日志级别: {e}")
         
         # 日志提示
+        level_names = {'standard': 'INFO（标准）', 'verbose': 'DEBUG（详细）', 'diagnostic': 'DEBUG+DIAG（诊断）'}
         logger = logging.getLogger(self.app_name)
-        if verbose:
-            logger.info("[日志服务] 控制台日志级别已设置为 DEBUG（详细日志）")
-        else:
-            logger.info("[日志服务] 控制台日志级别已设置为 INFO（正常日志）")
+        logger.info(f"[日志服务] 控制台日志级别已设置为 {level_names.get(verbose, verbose)}")
     
     def get_logger(self, name: str = None) -> logging.Logger:
         """获取日志器"""
