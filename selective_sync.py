@@ -189,8 +189,8 @@ def resolve_conflict():
 def main():
     print_color("\n=== 选择性同步主项目工具 (Python版) ===", Colors.HEADER)
     
-    upstream = "origin"
-    private_remote = "myfork"
+    upstream = "upstream"
+    private_remote = "origin"
     
     # 检查Git
     run_cmd("git --version")

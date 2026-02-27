@@ -936,11 +936,8 @@ class MainAppLogic(QObject):
                 "mangajanai": "MangaJaNai"
             },
             "layout_mode": {
-                'default': self._t("layout_mode_default"),
                 'smart_scaling': self._t("layout_mode_smart_scaling"),
                 'strict': self._t("layout_mode_strict"),
-                'fixed_font': self._t("layout_mode_fixed_font"),
-                'disable_all': self._t("layout_mode_disable_all"),
                 'balloon_fill': self._t("layout_mode_balloon_fill")
             },
                 "realcugan_model": {

@@ -2700,6 +2700,7 @@ class MangaTranslator:
             verbose=self.verbose,
             kernel_size=self.kernel_size,
             use_model_bubble_repair_intersection=bool(getattr(config.ocr, 'use_model_bubble_repair_intersection', False)),
+            limit_mask_dilation_to_bubble_mask=bool(getattr(config.ocr, 'limit_mask_dilation_to_bubble_mask', False)),
         )
 
     async def _run_inpainting(self, config: Config, ctx: Context):

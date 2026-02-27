@@ -204,7 +204,7 @@ class MangaLensBubbleDetector(ModelWrapper):
                     self.logger.warning(f"onnxruntime.preload_dlls() failed: {exc}")
             available = ort.get_available_providers()
             if not self._provider_logged:
-                self.logger.info(f"MangaLens ONNX available providers: {available}")
+                self.logger.debug(f"MangaLens ONNX available providers: {available}")
                 self._provider_logged = True
             if "CUDAExecutionProvider" in available:
                 providers = [("CUDAExecutionProvider", {"device_id": 0}), "CPUExecutionProvider"]
@@ -213,7 +213,7 @@ class MangaLensBubbleDetector(ModelWrapper):
 
         session = ort.InferenceSession(str(self.model_path), sess_options=sess_options, providers=providers)
         active = "cuda" if "CUDAExecutionProvider" in session.get_providers() else "cpu"
-        self.logger.info(f"MangaLens ONNX session providers: {session.get_providers()}")
+        self.logger.debug(f"MangaLens ONNX session providers: {session.get_providers()}")
         return session, active
 
     def load_model(self, device: Optional[str] = None):
@@ -235,7 +235,7 @@ class MangaLensBubbleDetector(ModelWrapper):
         self._input_name = session.get_inputs()[0].name
         self._output_names = [o.name for o in session.get_outputs()]
         self._session_device = active
-        self.logger.info(f"MangaLens model loaded: {self.model_path} (device={self._session_device})")
+        self.logger.debug(f"MangaLens model loaded: {self.model_path} (device={self._session_device})")
         return self.model
 
     def unload_model(self):
@@ -840,3 +840,58 @@ def detect_bubbles_with_mangalens(
 ) -> BubbleDetectionResult:
     detector = get_mangalens_detector(model_path=model_path)
     return detector.detect(image, **kwargs)
+
+
+def build_bubble_mask_from_mangalens_result(
+    result: Optional[BubbleDetectionResult],
+    image_shape: tuple[int, int],
+) -> np.ndarray:
+    h, w = int(image_shape[0]), int(image_shape[1])
+    mask = np.zeros((h, w), dtype=np.uint8)
+    if result is None or h <= 0 or w <= 0:
+        return mask
+
+    raw_result = getattr(result, "raw_result", None)
+    raw_masks = getattr(raw_result, "masks", None) if raw_result is not None else None
+
+    # Prefer full segmentation masks from model output.
+    if raw_masks is not None:
+        mask_data = getattr(raw_masks, "data", None)
+        if mask_data is not None:
+            try:
+                if hasattr(mask_data, "detach"):
+                    mask_data = mask_data.detach().cpu().numpy()
+                mask_data = np.asarray(mask_data)
+                if mask_data.ndim == 3 and mask_data.shape[0] > 0:
+                    merged = (mask_data > 0).any(axis=0).astype(np.uint8) * 255
+                    if merged.shape != (h, w):
+                        merged = cv2.resize(merged, (w, h), interpolation=cv2.INTER_NEAREST)
+                    mask = np.maximum(mask, merged)
+            except Exception:
+                pass
+
+        polygons = getattr(raw_masks, "xy", None)
+        if polygons is not None:
+            for polygon in polygons:
+                pts = np.asarray(polygon, dtype=np.int32)
+                if pts.ndim != 2 or pts.shape[0] < 3:
+                    continue
+                pts[:, 0] = np.clip(pts[:, 0], 0, max(w - 1, 0))
+                pts[:, 1] = np.clip(pts[:, 1], 0, max(h - 1, 0))
+                cv2.fillPoly(mask, [pts], 255)
+
+    # Fallback to boxes if segmentation is unavailable.
+    if np.count_nonzero(mask) == 0:
+        for det in getattr(result, "detections", []):
+            try:
+                x1, y1, x2, y2 = det.xyxy
+            except Exception:
+                continue
+            ix1 = max(0, min(w - 1, int(round(x1))))
+            iy1 = max(0, min(h - 1, int(round(y1))))
+            ix2 = max(0, min(w, int(round(x2))))
+            iy2 = max(0, min(h, int(round(y2))))
+            if ix2 > ix1 and iy2 > iy1:
+                cv2.rectangle(mask, (ix1, iy1), (ix2, iy2), 255, -1)
+
+    return mask

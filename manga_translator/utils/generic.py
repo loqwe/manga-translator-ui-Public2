@@ -1122,6 +1122,15 @@ def color_difference(rgb1: List, rgb2: List) -> float:
     diff = np.linalg.norm(diff, axis=2) 
     return diff.item()
 
+def fg_bg_compare(fg, bg):
+    """比较前景色和背景色，如果对比度不足则自动修正背景色。
+    描边是灰色或色差不足时，根据前景亮度选纯黑或纯白。"""
+    fg_avg = np.mean(fg)
+    bg_is_gray = (max(bg) - min(bg)) < 10
+    if bg_is_gray or color_difference(fg, bg) < 30:
+        bg = (255, 255, 255) if fg_avg <= 127 else (0, 0, 0)
+    return fg, bg
+
 def rgb2hex(r,g,b):
     return "#{:02x}{:02x}{:02x}".format(r,g,b)
 

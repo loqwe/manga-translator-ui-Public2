@@ -12,8 +12,8 @@
       "interval_ms": 500,
       "log_expanded": false
     },
-    "window_x": 346,
-    "window_y": 314,
+    "window_x": 708,
+    "window_y": 327,
     "window_width": 1302,
     "window_height": 777,
     "window_maximized": false
@@ -28,6 +28,7 @@
     "gpt_config": "examples/gpt_config-example.yaml",
     "high_quality_prompt_path": "dict/prompt_example.json",
     "extract_glossary": true,
+    "use_custom_api_params": false,
     "use_stream": false,
     "attempts": -1
   },
@@ -38,14 +39,18 @@
     "secondary_ocr": "paddleocr_korean",
     "min_text_length": 0,
     "ignore_bubble": 0.0,
-    "use_model_bubble_filter": true,
+    "use_model_bubble_filter": false,
     "model_bubble_overlap_threshold": 0.1,
-    "use_model_bubble_repair_intersection": true,
+    "use_model_bubble_repair_intersection": false,
+    "limit_mask_dilation_to_bubble_mask": true,
     "prob": 0.1,
     "merge_gamma": 0.5,
     "merge_sigma": 2.5,
     "merge_edge_ratio_threshold": 0.0,
-    "yolo_restrict_merge": false
+    "merge_special_require_full_wrap": true,
+    "yolo_restrict_merge": false,
+    "ocr_vl_language_hint": "auto",
+    "ocr_vl_custom_prompt": null
   },
   "detector": {
     "detector": "default",
@@ -87,7 +92,7 @@
     "font_size": null,
     "auto_rotate_symbols": false,
     "rtl": true,
-    "layout_mode": "smart_scaling",
+    "layout_mode": "balloon_fill",
     "max_font_size": 0,
     "font_scale_ratio": 1.0,
     "center_text_in_bubble": false,
@@ -115,7 +120,7 @@
     "use_gpu": true,
     "context_size": 3,
     "format": "不指定",
-    "overwrite": false,
+    "overwrite": true,
     "skip_no_text": false,
     "save_text": true,
     "load_text": false,

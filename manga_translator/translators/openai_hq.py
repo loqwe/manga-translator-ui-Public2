@@ -734,13 +734,16 @@ This is an incorrect response because it includes extra text and explanations.
                 
                 await self._sleep_with_cancel_polling(1)
 
-            except openai.BadRequestError as e:
+            except Exception as e:
+                error_msg_raw = str(e)
+                error_msg_lower = error_msg_raw.lower()
+
                 # 专门处理400错误，检查是否是多模态不支持问题
-                error_message = str(e)
-                is_multimodal_unsupported = any(keyword in error_message.lower() for keyword in [
+                is_bad_request = '400' in error_msg_raw or 'bad request' in error_msg_lower
+                is_multimodal_unsupported = is_bad_request and any(keyword in error_msg_lower for keyword in [
                     'image_url', 'multimodal', 'vision', 'expected `text`', 'unknown variant'
                 ])
-                
+
                 if is_multimodal_unsupported:
                     self.logger.error(f"❌ 模型 {self.model} 不支持多模态输入（图片+文本）")
                     self.logger.error("💡 解决方案：")
@@ -748,7 +751,7 @@ This is an incorrect response because it includes extra text and explanations.
                     self.logger.error("   2. 或者切换到普通翻译模式（不使用 _hq 高质量翻译器）")
                     self.logger.error("   3. DeepSeek模型不支持多模态，请勿使用 openai_hq 翻译器")
                     raise Exception(f"模型不支持多模态输入: {self.model}") from e
-                else:
+                elif is_bad_request:
                     # 其他400错误，正常重试
                     attempt += 1
                     log_attempt = f"{attempt}/{max_retries}" if not is_infinite else f"Attempt {attempt}"
@@ -760,8 +763,9 @@ This is an incorrect response because it includes extra text and explanations.
                         raise last_exception
                     
                     await self._sleep_with_cancel_polling(1)
-                    
-            except Exception as e:
+                    continue
+
+                # --- 以下为原来的通用 except Exception 逻辑 ---
                 error_msg = str(e).lower()
                 
                 # 429 限速错误：独立计数，不受 max_retries 限制

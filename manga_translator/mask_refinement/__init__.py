@@ -3,73 +3,47 @@ import cv2
 import numpy as np
 
 from .text_mask_utils import complete_mask_fill, complete_mask
-from ..utils import TextBlock, Quadrilateral, detect_bubbles_with_mangalens
+from ..utils import (
+    TextBlock,
+    Quadrilateral,
+    detect_bubbles_with_mangalens,
+    build_bubble_mask_from_mangalens_result,
+)
 from ..utils.log import get_logger
 
 logger = get_logger('mask_refinement')
 
+# 气泡 mask 向内收缩像素，避免气泡边框被修复模型擦除
+BUBBLE_MASK_ERODE_PX = 3
+
+
+def _erode_bubble_mask(bubble_mask: np.ndarray) -> np.ndarray:
+    """Erode the bubble mask inward by a fixed number of pixels."""
+    if np.count_nonzero(bubble_mask) == 0:
+        return bubble_mask
+    h, w = bubble_mask.shape[:2]
+    erode_px = max(int(BUBBLE_MASK_ERODE_PX), 0)
+    if erode_px == 0:
+        return bubble_mask
+    kernel_size = 2 * erode_px + 1
+    erode_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+    logger.info(f"Bubble mask erosion: image={w}x{h}, erode_px={erode_px}")
+    eroded = cv2.erode(bubble_mask, erode_kernel, iterations=1)
+    if np.count_nonzero(eroded) == 0:
+        logger.warning("Bubble mask fully eroded; falling back to original mask")
+        return bubble_mask
+    return eroded
+
 
 def _build_model_bubble_mask(image_shape: Tuple[int, int], result: Any) -> Tuple[np.ndarray, str]:
-    h, w = image_shape
-    bubble_mask = np.zeros((h, w), dtype=np.uint8)
+    bubble_mask = build_bubble_mask_from_mangalens_result(result, image_shape)
+    if np.count_nonzero(bubble_mask) == 0:
+        return bubble_mask, 'none'
 
     raw_result = getattr(result, 'raw_result', None) if result is not None else None
     raw_masks = getattr(raw_result, 'masks', None) if raw_result is not None else None
-
-    # Prefer segmentation masks from the model output.
-    if raw_masks is not None:
-        polygons = getattr(raw_masks, 'xy', None)
-        if polygons is not None:
-            for polygon in polygons:
-                pts = np.asarray(polygon, dtype=np.int32)
-                if pts.ndim != 2 or pts.shape[0] < 3:
-                    continue
-                pts[:, 0] = np.clip(pts[:, 0], 0, w - 1)
-                pts[:, 1] = np.clip(pts[:, 1], 0, h - 1)
-                cv2.fillPoly(bubble_mask, [pts], 255)
-            if np.count_nonzero(bubble_mask) > 0:
-                return bubble_mask, 'mask'
-
-        mask_data = getattr(raw_masks, 'data', None)
-        if mask_data is not None:
-            try:
-                if hasattr(mask_data, 'detach'):
-                    mask_data = mask_data.detach().cpu().numpy()
-                mask_data = np.asarray(mask_data)
-                if mask_data.ndim == 3 and mask_data.shape[0] > 0:
-                    merged_mask = (mask_data > 0.5).any(axis=0).astype(np.uint8) * 255
-                    if merged_mask.shape != bubble_mask.shape:
-                        merged_mask = cv2.resize(
-                            merged_mask,
-                            (w, h),
-                            interpolation=cv2.INTER_NEAREST,
-                        )
-                    bubble_mask = np.maximum(bubble_mask, merged_mask)
-                    if np.count_nonzero(bubble_mask) > 0:
-                        return bubble_mask, 'mask'
-            except Exception:
-                pass
-
-    # Fallback for non-segmentation results.
-    detections: Sequence = getattr(result, 'detections', []) if result is not None else []
-    for det in detections:
-        try:
-            x1, y1, x2, y2 = det.xyxy
-        except Exception:
-            continue
-
-        ix1 = max(0, min(w - 1, int(round(x1))))
-        iy1 = max(0, min(h - 1, int(round(y1))))
-        ix2 = max(0, min(w, int(round(x2))))
-        iy2 = max(0, min(h, int(round(y2))))
-
-        if ix2 <= ix1 or iy2 <= iy1:
-            continue
-        cv2.rectangle(bubble_mask, (ix1, iy1), (ix2, iy2), 255, -1)
-
-    if np.count_nonzero(bubble_mask) > 0:
-        return bubble_mask, 'box'
-    return bubble_mask, 'none'
+    source = 'mask' if raw_masks is not None else 'box'
+    return _erode_bubble_mask(bubble_mask), source
 
 
 def _keep_bubble_components_intersecting_refined_mask(
@@ -100,6 +74,47 @@ def _keep_bubble_components_intersecting_refined_mask(
 
     return kept_mask, total_components, kept_components
 
+
+def _clip_refined_components_by_bubble_mask(
+    refined_mask: np.ndarray,
+    bubble_mask: np.ndarray,
+) -> Tuple[np.ndarray, int, int, int]:
+    """
+    Clip refined-mask connected components by bubble mask:
+    - If a refined component intersects bubble mask: keep only the intersection part.
+    - If a refined component has no intersection: keep the whole component.
+    """
+    refined_bin = np.where(refined_mask > 0, 255, 0).astype(np.uint8)
+    bubble_bin = np.where(bubble_mask > 0, 255, 0).astype(np.uint8)
+
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(refined_bin, connectivity=8)
+    clipped_mask = np.zeros_like(refined_bin)
+
+    total_components = max(num_labels - 1, 0)
+    intersected_components = 0
+    preserved_components = 0
+
+    for label_idx in range(1, num_labels):
+        x, y, w, h, area = stats[label_idx]
+        if area <= 0:
+            continue
+
+        label_view = labels[y:y + h, x:x + w]
+        region = label_view == label_idx
+        bubble_region = bubble_bin[y:y + h, x:x + w] > 0
+        intersection = region & bubble_region
+
+        dst = clipped_mask[y:y + h, x:x + w]
+        if np.any(intersection):
+            dst[intersection] = 255
+            intersected_components += 1
+        else:
+            dst[region] = 255
+            preserved_components += 1
+        clipped_mask[y:y + h, x:x + w] = dst
+
+    return clipped_mask, total_components, intersected_components, preserved_components
+
 async def dispatch(
     text_regions: List[TextBlock],
     raw_image: np.ndarray,
@@ -109,6 +124,7 @@ async def dispatch(
     verbose: bool = False,
     kernel_size: int = 3,
     use_model_bubble_repair_intersection: bool = False,
+    limit_mask_dilation_to_bubble_mask: bool = False,
 ) -> np.ndarray:
     # Larger sized mask images will probably have crisper and thinner mask segments due to being able to fit the text pixels better
     # so we dont want to size them down as much to not lose information
@@ -131,26 +147,23 @@ async def dispatch(
         final_mask = cv2.resize(final_mask, (raw_image.shape[1], raw_image.shape[0]), interpolation = cv2.INTER_LINEAR)
         final_mask[final_mask > 0] = 255
 
-    if use_model_bubble_repair_intersection:
+    if use_model_bubble_repair_intersection or limit_mask_dilation_to_bubble_mask:
         try:
             result = detect_bubbles_with_mangalens(raw_image, return_annotated=False, verbose=False)
             detections = result.detections if result is not None else []
             bubble_mask, bubble_source = _build_model_bubble_mask(final_mask.shape[:2], result)
 
             if np.count_nonzero(bubble_mask) == 0:
-                logger.info("Bubble repair intersection enabled, but no bubble detections found; keep refined mask unchanged")
-            else:
+                logger.info(
+                    "Model bubble mask post-process enabled, but no bubble detections found; keep refined mask unchanged"
+                )
+            elif use_model_bubble_repair_intersection:
                 filtered_mask, total_components, kept_components = _keep_bubble_components_intersecting_refined_mask(
                     bubble_mask=bubble_mask,
                     refined_mask=final_mask,
                 )
-                # Only use bubble boundary to constrain text mask dilation,
-                # instead of merging the entire bubble interior.
-                dilate_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size * 2 + 1, kernel_size * 2 + 1))
-                dilated_text_mask = cv2.dilate(final_mask, dilate_kernel, iterations=2)
-                bubble_constrained = cv2.bitwise_and(dilated_text_mask, filtered_mask)
-                merged_mask = cv2.bitwise_or(final_mask, bubble_constrained)
-                added_pixels = int(np.count_nonzero((merged_mask > 0) & (final_mask == 0)))
+                merged_mask = cv2.bitwise_or(final_mask, filtered_mask)
+                added_pixels = int(np.count_nonzero((filtered_mask > 0) & (final_mask == 0)))
                 logger.info(
                     f"Bubble repair intersection: detections={len(detections)}, source={bubble_source}, "
                     f"bubble_components={total_components}, kept_components={kept_components}, "
@@ -159,7 +172,21 @@ async def dispatch(
                     f"added_pixels={added_pixels}, output_pixels={int(np.count_nonzero(merged_mask))}"
                 )
                 final_mask = merged_mask
+
+            if np.count_nonzero(bubble_mask) > 0 and limit_mask_dilation_to_bubble_mask:
+                clipped_mask, total_components, intersected_components, preserved_components = _clip_refined_components_by_bubble_mask(
+                    refined_mask=final_mask,
+                    bubble_mask=bubble_mask,
+                )
+                removed_pixels = int(np.count_nonzero((final_mask > 0) & (clipped_mask == 0)))
+                logger.info(
+                    f"Bubble constrained dilation: detections={len(detections)}, source={bubble_source}, "
+                    f"refined_components={total_components}, intersected_components={intersected_components}, "
+                    f"preserved_components={preserved_components}, removed_pixels={removed_pixels}, "
+                    f"output_pixels={int(np.count_nonzero(clipped_mask))}"
+                )
+                final_mask = clipped_mask
         except Exception as exc:
-            logger.warning(f"Bubble repair intersection failed, keep refined mask unchanged: {exc}")
+            logger.warning(f"Model bubble mask post-process failed, keep refined mask unchanged: {exc}")
 
     return final_mask

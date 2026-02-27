@@ -1403,6 +1403,11 @@
           "original": "야경",
           "translation": "夜景",
           "raw_work_name": "Chapter_61"
+        },
+        {
+          "original": "쇼타네암컷",
+          "translation": "正太的母狗",
+          "raw_work_name": "无生肉名"
         }
       ],
       "Location": [
@@ -1423,9 +1428,25 @@
           "original": "무선연결 오나홀",
           "translation": "无线连接名器",
           "lang": "ko"
+        },
+        {
+          "original": "토큰",
+          "translation": "代币",
+          "raw_work_name": "无生肉名"
         }
       ],
-      "Skill": [],
+      "Skill": [
+        {
+          "original": "귀르가즘",
+          "translation": "耳骚",
+          "raw_work_name": "无生肉名"
+        },
+        {
+          "original": "매도",
+          "translation": "辱骂",
+          "raw_work_name": "无生肉名"
+        }
+      ],
       "Creature": []
     },
     "Person": [
