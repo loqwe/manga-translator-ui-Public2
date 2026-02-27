@@ -2985,6 +2985,14 @@ class TranslationWorker(QObject):
                 if k in Config.__fields__ and k not in explicit_keys
             }
 
+            # 上游 CliConfig.verbose 仍为 bool，需将 UI 的 str 值转回 bool
+            if 'cli' in remaining_config and isinstance(remaining_config['cli'], dict):
+                _cli_cfg = remaining_config['cli'].copy()
+                _v = _cli_cfg.get('verbose', False)
+                if isinstance(_v, str):
+                    _cli_cfg['verbose'] = _v in ('verbose', 'diagnostic')
+                remaining_config['cli'] = _cli_cfg
+
             render_config_data = self.config_dict.get('render', {}).copy()
 
             # 转换 direction 值：'h' -> 'horizontal', 'v' -> 'vertical'

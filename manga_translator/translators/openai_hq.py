@@ -588,46 +588,89 @@ This is an incorrect response because it includes extra text and explanations.
                 streamed_text = None
                 response = None
 
-                if self.use_stream:
-                    # 流式模式：尝试流式传输，失败自动 fallback 到非流式
-                    try:
-                        self._reset_stream_json_preview()
-                        stream_params = dict(api_params)
-                        stream_params["stream"] = True
-                        streamed_text, streamed_finish_reason = await self._run_unified_stream_transport(
-                            create_stream=lambda: self.client.chat.completions.create(**stream_params),
-                            extract_text=_extract_openai_stream_text,
-                            extract_finish_reason=_extract_openai_stream_finish_reason,
-                            on_chunk=_on_stream_chunk,
-                            on_cancel=self._abort_inflight_request,
-                            poll_interval=0.2,
-                            sync_iter_in_thread=False,
-                        )
-                        self._finish_stream_inline()
-                    except Exception as stream_error:
-                        self._finish_stream_inline()
-                        self.logger.warning(f"流式请求不可用，已回退普通请求: {stream_error}")
+                # AI_METRICS: 记录请求开始时间
+                send_ts = self._now_iso()
+                start_perf = time.perf_counter()
+                ai_metrics_status = "error"
+
+                try:
+                    if self.use_stream:
+                        # 流式模式：尝试流式传输，失败自动 fallback 到非流式
+                        try:
+                            self._reset_stream_json_preview()
+                            stream_params = dict(api_params)
+                            stream_params["stream"] = True
+                            streamed_text, streamed_finish_reason = await self._run_unified_stream_transport(
+                                create_stream=lambda: self.client.chat.completions.create(**stream_params),
+                                extract_text=_extract_openai_stream_text,
+                                extract_finish_reason=_extract_openai_stream_finish_reason,
+                                on_chunk=_on_stream_chunk,
+                                on_cancel=self._abort_inflight_request,
+                                poll_interval=0.2,
+                                sync_iter_in_thread=False,
+                            )
+                            self._finish_stream_inline()
+                        except Exception as stream_error:
+                            self._finish_stream_inline()
+                            self.logger.warning(f"流式请求不可用，已回退普通请求: {stream_error}")
+                            response = await self._await_with_cancel_polling(
+                                self.client.chat.completions.create(**api_params),
+                                poll_interval=0.2,
+                                on_cancel=self._abort_inflight_request,
+                            )
+                    else:
+                        # 非流式模式：直接调用
                         response = await self._await_with_cancel_polling(
                             self.client.chat.completions.create(**api_params),
                             poll_interval=0.2,
                             on_cancel=self._abort_inflight_request,
                         )
-                else:
-                    # 非流式模式：直接调用
-                    response = await self._await_with_cancel_polling(
-                        self.client.chat.completions.create(**api_params),
-                        poll_interval=0.2,
-                        on_cancel=self._abort_inflight_request,
-                    )
 
-                if streamed_text is not None:
-                    finish_reason = streamed_finish_reason
-                    has_content = bool(streamed_text)
-                else:
-                    # 验证响应对象是否有效
-                    validate_openai_response(response, self.logger)
-                    finish_reason = response.choices[0].finish_reason if (hasattr(response, 'choices') and response.choices) else None
-                    has_content = response.choices and response.choices[0].message.content
+                    if streamed_text is not None:
+                        finish_reason = streamed_finish_reason
+                        has_content = bool(streamed_text)
+                    else:
+                        # 验证响应对象是否有效
+                        validate_openai_response(response, self.logger)
+                        finish_reason = response.choices[0].finish_reason if (hasattr(response, 'choices') and response.choices) else None
+                        has_content = response.choices and response.choices[0].message.content
+
+                    # 根据 finish_reason 粗分状态
+                    if finish_reason == 'content_filter':
+                        ai_metrics_status = "content_filter"
+                    elif has_content:
+                        ai_metrics_status = "ok"
+
+                except (asyncio.TimeoutError, TimeoutError):
+                    ai_metrics_status = "timeout"
+                    raise
+
+                except Exception as _metrics_exc:
+                    _msg = str(_metrics_exc).lower()
+                    if 'rate limit' in _msg or 'ratelimit' in _msg or '429' in _msg or 'too many requests' in _msg:
+                        ai_metrics_status = "rate_limit"
+                    raise
+
+                finally:
+                    recv_ts = self._now_iso()
+                    duration_ms = (time.perf_counter() - start_perf) * 1000
+                    # OpenAI 的 usage 在 response.usage
+                    _usage = None
+                    if response and hasattr(response, 'usage') and response.usage:
+                        _usage = {
+                            'prompt_tokens': getattr(response.usage, 'prompt_tokens', None),
+                            'completion_tokens': getattr(response.usage, 'completion_tokens', None),
+                            'total_tokens': getattr(response.usage, 'total_tokens', None),
+                        }
+                    self.log_ai_metrics(
+                        model_name=self.model,
+                        status=ai_metrics_status,
+                        send_ts=send_ts,
+                        recv_ts=recv_ts,
+                        duration_ms=duration_ms,
+                        usage=_usage,
+                        stream=self.use_stream,
+                    )
 
                 if has_content:
                     result_text = streamed_text.strip() if streamed_text is not None else response.choices[0].message.content.strip()
@@ -993,11 +1036,48 @@ This is an incorrect response because it includes extra text and explanations.
             if self.max_tokens is not None:
                 api_params["max_tokens"] = self.max_tokens
 
-            response = await self._await_with_cancel_polling(
-                self.client.chat.completions.create(**api_params),
-                poll_interval=0.2,
-                on_cancel=self._abort_inflight_request,
-            )
+            # AI_METRICS: 记录请求开始时间
+            send_ts = self._now_iso()
+            start_perf = time.perf_counter()
+            response = None
+            ai_metrics_status = "error"
+
+            try:
+                response = await self._await_with_cancel_polling(
+                    self.client.chat.completions.create(**api_params),
+                    poll_interval=0.2,
+                    on_cancel=self._abort_inflight_request,
+                )
+                ai_metrics_status = "ok" if (hasattr(response, 'choices') and response.choices) else "error"
+
+            except (asyncio.TimeoutError, TimeoutError):
+                ai_metrics_status = "timeout"
+                raise
+
+            except Exception as _metrics_exc:
+                _msg = str(_metrics_exc).lower()
+                if 'rate limit' in _msg or 'ratelimit' in _msg or '429' in _msg or 'too many requests' in _msg:
+                    ai_metrics_status = "rate_limit"
+                raise
+
+            finally:
+                recv_ts = self._now_iso()
+                duration_ms = (time.perf_counter() - start_perf) * 1000
+                _usage = None
+                if response and hasattr(response, 'usage') and response.usage:
+                    _usage = {
+                        'prompt_tokens': getattr(response.usage, 'prompt_tokens', None),
+                        'completion_tokens': getattr(response.usage, 'completion_tokens', None),
+                        'total_tokens': getattr(response.usage, 'total_tokens', None),
+                    }
+                self.log_ai_metrics(
+                    model_name=self.model,
+                    status=ai_metrics_status,
+                    send_ts=send_ts,
+                    recv_ts=recv_ts,
+                    duration_ms=duration_ms,
+                    usage=_usage,
+                )
 
             result_text = response.choices[0].message.content.strip() if (hasattr(response, 'choices') and response.choices) else None
             if result_text:
