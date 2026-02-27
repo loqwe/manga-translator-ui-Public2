@@ -1,11 +1,125 @@
 import itertools
 import numpy as np
-from typing import List, Set
+from typing import List, Set, Optional, Tuple
 from collections import Counter
 import networkx as nx
 from shapely.geometry import Polygon
 
 from ..utils import TextBlock, Quadrilateral, quadrilateral_can_merge_region
+
+GROUP_BUBBLE_LABELS = {'balloon', 'qipao', 'other'}
+GROUP_STRIP_LABELS = {'changfangtiao'}
+WRAP_ONLY_LABELS = {'other'}
+
+def _get_det_label(txtln: Quadrilateral) -> Optional[str]:
+    label = getattr(txtln, 'det_label', None)
+    if label is None:
+        label = getattr(txtln, 'yolo_label', None)
+    if isinstance(label, str):
+        label = label.strip().lower()
+        if label:
+            return label
+    return None
+
+def _build_text_block_from_txtlns(txtlns: List[Quadrilateral], fg_color: Tuple[int, int, int], bg_color: Tuple[int, int, int], config) -> Optional[TextBlock]:
+    unique_txtlns = []
+    seen_coords = set()
+    for txtln in txtlns:
+        coords_tuple = tuple(txtln.pts.reshape(-1))
+        if coords_tuple not in seen_coords:
+            seen_coords.add(coords_tuple)
+            unique_txtlns.append(txtln)
+
+    if not unique_txtlns:
+        return None
+
+    total_area = sum([txtln.area for txtln in unique_txtlns])
+    if total_area <= 0:
+        return None
+
+    total_logprobs = 0
+    for txtln in unique_txtlns:
+        total_logprobs += np.log(txtln.prob) * txtln.area
+    total_logprobs /= total_area
+
+    font_size = int(min([txtln.font_size for txtln in unique_txtlns]))
+    angle = np.rad2deg(np.mean([txtln.angle for txtln in unique_txtlns])) - 90
+    original_angles_deg = [np.rad2deg(txtln.angle) for txtln in unique_txtlns]
+    has_near_90_degree = any(abs(orig_angle - 90.0) <= 1.0 for orig_angle in original_angles_deg)
+    if has_near_90_degree or abs(angle) < 3:
+        angle = 0
+
+    lines = [txtln.pts for txtln in unique_txtlns]
+    texts = [txtln.text for txtln in unique_txtlns]
+    stroke_width = 0.07
+    if config and hasattr(config, 'render') and hasattr(config.render, 'stroke_width'):
+        stroke_width = config.render.stroke_width
+
+    return TextBlock(
+        lines,
+        texts,
+        font_size=font_size,
+        angle=angle,
+        prob=np.exp(total_logprobs),
+        fg_color=fg_color,
+        bg_color=bg_color,
+        default_stroke_width=stroke_width
+    )
+
+def _is_fully_wrapped(inner: Quadrilateral, outer: Quadrilateral, eps: float = 1.0) -> bool:
+    inner_x1, inner_y1 = np.min(inner.pts[:, 0]), np.min(inner.pts[:, 1])
+    inner_x2, inner_y2 = np.max(inner.pts[:, 0]), np.max(inner.pts[:, 1])
+    outer_x1, outer_y1 = np.min(outer.pts[:, 0]), np.min(outer.pts[:, 1])
+    outer_x2, outer_y2 = np.max(outer.pts[:, 0]), np.max(outer.pts[:, 1])
+    return (
+        inner_x1 >= outer_x1 - eps and
+        inner_y1 >= outer_y1 - eps and
+        inner_x2 <= outer_x2 + eps and
+        inner_y2 <= outer_y2 + eps
+    )
+
+def _group_by_full_wrap(candidates: List[Quadrilateral], wrap_eps: float = 1.0) -> List[Set[int]]:
+    """
+    使用“完全包裹”关系分组：只有存在 A 包裹 B 或 B 包裹 A 才连接。
+    """
+    G = nx.Graph()
+    for i in range(len(candidates)):
+        G.add_node(i)
+    for i, j in itertools.combinations(range(len(candidates)), 2):
+        if _is_fully_wrapped(candidates[i], candidates[j], wrap_eps) or _is_fully_wrapped(candidates[j], candidates[i], wrap_eps):
+            G.add_edge(i, j)
+    return list(nx.algorithms.components.connected_components(G))
+
+def _sort_group_textlines(txtlns: List[Quadrilateral]) -> List[Quadrilateral]:
+    """
+    对特殊预合并分组内文本线做稳定排序，避免 set 导致的随机顺序。
+    规则与原合并流程保持一致：横排按 y 从上到下，竖排按 x 从右到左。
+    """
+    if len(txtlns) <= 1:
+        return txtlns
+
+    dirs = [box.direction for box in txtlns]
+    majority_dir_top_2 = Counter(dirs).most_common(2)
+    if len(majority_dir_top_2) == 1:
+        majority_dir = majority_dir_top_2[0][0]
+    elif majority_dir_top_2[0][1] == majority_dir_top_2[1][1]:
+        max_aspect_ratio = -100
+        majority_dir = majority_dir_top_2[0][0]
+        for box in txtlns:
+            if box.aspect_ratio > max_aspect_ratio:
+                max_aspect_ratio = box.aspect_ratio
+                majority_dir = box.direction
+            inv = 1.0 / box.aspect_ratio if box.aspect_ratio != 0 else float('inf')
+            if inv > max_aspect_ratio:
+                max_aspect_ratio = inv
+                majority_dir = box.direction
+    else:
+        majority_dir = majority_dir_top_2[0][0]
+    if majority_dir == 'h':
+        return sorted(txtlns, key=lambda x: x.centroid[1])
+    if majority_dir == 'v':
+        return sorted(txtlns, key=lambda x: -x.centroid[0])
+    return sorted(txtlns, key=lambda x: (x.centroid[1], x.centroid[0]))
 
 def split_text_region(
         bboxes: List[Quadrilateral],
@@ -223,57 +337,114 @@ async def dispatch(textlines: List[Quadrilateral], width: int, height: int, conf
     debug = verbose
     # 获取边缘距离比例阈值
     edge_ratio_threshold = getattr(config.ocr, 'merge_edge_ratio_threshold', 0.0)
+    enable_model_assisted_merge = bool(getattr(config.ocr, 'merge_special_require_full_wrap', True))
     text_regions: List[TextBlock] = []
-    
-    for idx, (txtlns, fg_color, bg_color) in enumerate(merge_bboxes_text_region(textlines, width, height, debug=debug, edge_ratio_threshold=edge_ratio_threshold, config=config)):
-        # --- 在创建TextBlock之前进行去重 ---
-        unique_txtlns = []
-        seen_coords = set()
-        for txtln in txtlns:
-            # 将坐标数组转换为可哈希的元组以进行比较
-            coords_tuple = tuple(txtln.pts.reshape(-1))
-            if coords_tuple not in seen_coords:
-                seen_coords.add(coords_tuple)
-                unique_txtlns.append(txtln)
-        # --- 去重结束 ---
 
-        # 如果去重后没有任何行，则跳过此区域
-        if not unique_txtlns:
+    # 先做标签预合并（已合并的框不再参与后续原始合并）
+    id_to_idx = {id(txtln): i for i, txtln in enumerate(textlines)}
+    consumed_indices = set()
+
+    def _run_special_stage(target_labels: Set[str]) -> None:
+        candidate_indices = []
+        has_target_label = False
+
+        for i, txtln in enumerate(textlines):
+            if i in consumed_indices:
+                continue
+            det_label = _get_det_label(txtln)
+            if det_label in target_labels:
+                has_target_label = True
+                candidate_indices.append(i)
+            elif det_label == 'other':
+                # other 作为“完全包裹关系”的桥接框参与特殊分组
+                candidate_indices.append(i)
+            elif det_label is None:
+                # 无标签与目标标签同级参与
+                candidate_indices.append(i)
+
+        if not has_target_label or not candidate_indices:
+            return
+
+        candidates = [textlines[i] for i in candidate_indices]
+        candidate_groups = _group_by_full_wrap(candidates, wrap_eps=1.0)
+        for node_set in candidate_groups:
+            # 特殊预合并严格要求完全包裹关系，单框不算“合并”
+            if len(node_set) < 2:
+                continue
+
+            group_txtlns = [candidates[i] for i in node_set]
+            group_txtlns = _sort_group_textlines(group_txtlns)
+            labels_in_region = set()
+            for txtln in group_txtlns:
+                lbl = _get_det_label(txtln)
+                if lbl is not None:
+                    labels_in_region.add(lbl)
+
+            # 至少包含一个目标标签框才作为该组产物
+            if not (labels_in_region & target_labels):
+                continue
+
+            # other 仅用于包裹关系辅助，不参与实际文本块几何合并
+            payload_txtlns = []
+            for txtln in group_txtlns:
+                lbl = _get_det_label(txtln)
+                if lbl in WRAP_ONLY_LABELS:
+                    continue
+                payload_txtlns.append(txtln)
+            payload_txtlns = _sort_group_textlines(payload_txtlns)
+            if not payload_txtlns:
+                # 仅有包裹辅助框时，不产出文本块；但会在 consumed 中移除，避免后续误合并
+                for txtln in group_txtlns:
+                    idx = id_to_idx.get(id(txtln))
+                    if idx is not None:
+                        consumed_indices.add(idx)
+                continue
+
+            fg_r = round(np.mean([box.fg_r for box in payload_txtlns]))
+            fg_g = round(np.mean([box.fg_g for box in payload_txtlns]))
+            fg_b = round(np.mean([box.fg_b for box in payload_txtlns]))
+            bg_r = round(np.mean([box.bg_r for box in payload_txtlns]))
+            bg_g = round(np.mean([box.bg_g for box in payload_txtlns]))
+            bg_b = round(np.mean([box.bg_b for box in payload_txtlns]))
+
+            region = _build_text_block_from_txtlns(
+                payload_txtlns,
+                (fg_r, fg_g, fg_b),
+                (bg_r, bg_g, bg_b),
+                config
+            )
+            if region is not None:
+                text_regions.append(region)
+                for txtln in group_txtlns:
+                    idx = id_to_idx.get(id(txtln))
+                    if idx is not None:
+                        consumed_indices.add(idx)
+
+    if enable_model_assisted_merge:
+        # changfangtiao 独立组优先
+        _run_special_stage(GROUP_STRIP_LABELS)
+        # balloon/qipao/other 组合并组
+        _run_special_stage(GROUP_BUBBLE_LABELS)
+
+    # 剩余框（或禁用模型辅助时的全部框）走原始合并算法
+    remaining_textlines = []
+    for i, txtln in enumerate(textlines):
+        if i in consumed_indices:
             continue
+        lbl = _get_det_label(txtln)
+        if lbl in WRAP_ONLY_LABELS:
+            continue
+        remaining_textlines.append(txtln)
+    for txtlns, fg_color, bg_color in merge_bboxes_text_region(
+        remaining_textlines,
+        width,
+        height,
+        debug=debug,
+        edge_ratio_threshold=edge_ratio_threshold,
+        config=config
+    ):
+        region = _build_text_block_from_txtlns(list(txtlns), fg_color, bg_color, config)
+        if region is not None:
+            text_regions.append(region)
 
-        total_logprobs = 0
-        # 使用去重后的 unique_txtlns
-        for txtln in unique_txtlns:
-            total_logprobs += np.log(txtln.prob) * txtln.area
-        total_logprobs /= sum([txtln.area for txtln in unique_txtlns])
-
-        font_size = int(min([txtln.font_size for txtln in unique_txtlns]))
-        
-        # 计算平均角度
-        angle = np.rad2deg(np.mean([txtln.angle for txtln in unique_txtlns])) - 90
-        
-        # 检查是否有任何原始文本框接近 90 度（即调整后接近 0 度）
-        # 如果有，说明有正常的垂直/水平文本框，整个合并后的文本框角度应该归零
-        original_angles_deg = [np.rad2deg(txtln.angle) for txtln in unique_txtlns]
-        has_near_90_degree = any(abs(orig_angle - 90.0) <= 1.0 for orig_angle in original_angles_deg)
-        
-        if has_near_90_degree:
-            # 如果有接近 90 度的原始文本框，归零
-            angle = 0
-        elif abs(angle) < 3:
-            # 否则，使用原来的小角度归零逻辑
-            angle = 0
-        
-        lines = [txtln.pts for txtln in unique_txtlns]
-        texts = [txtln.text for txtln in unique_txtlns]
-        
-        # 从配置中获取描边宽度
-        stroke_width = 0.07
-        if config and hasattr(config, 'render') and hasattr(config.render, 'stroke_width'):
-            stroke_width = config.render.stroke_width
-        
-        region = TextBlock(lines, texts, font_size=font_size, angle=angle, prob=np.exp(total_logprobs),
-                           fg_color=fg_color, bg_color=bg_color, default_stroke_width=stroke_width)
-        text_regions.append(region)
-    
     return text_regions

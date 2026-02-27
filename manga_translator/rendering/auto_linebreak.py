@@ -105,10 +105,10 @@ def _layout_vertical(font_size: int, text: str, max_height: int) -> Tuple[List[s
 
     返回 (line_text_list, line_height_list)
     """
-    # 先加 <H> 标签，使英文词被识别为横排块
-    text = auto_add_horizontal_tags(text)
-    # 统一 BR 标记
+    # 先统一 BR 标记，再加 <H> 标签。
+    # 若先加标签，"[BR]" 可能被包进 <H> 块导致后续无法识别成换行。
     text = _BR_RE.sub('\n', text)
+    text = auto_add_horizontal_tags(text)
 
     line_text_list: List[str] = []
     line_height_list: List[int] = []
