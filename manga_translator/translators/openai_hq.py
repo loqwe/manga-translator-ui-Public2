@@ -8,11 +8,8 @@ import logging
 from io import BytesIO
 from typing import List, Dict, Any
 from PIL import Image
-import httpx
-import openai
 
-from .openai_gateway import DEFAULT_BROWSER_HEADERS, get_openai_client, chat_completions
-from .common import CommonTranslator, VALID_LANGUAGES, draw_text_boxes_on_image, parse_json_or_text_response, merge_glossary_to_file, get_glossary_extraction_prompt, parse_hq_response, validate_openai_response
+from .common import CommonTranslator, VALID_LANGUAGES, draw_text_boxes_on_image, parse_json_or_text_response, merge_glossary_to_file, get_glossary_extraction_prompt, parse_hq_response, validate_openai_response, AsyncOpenAICurlCffi
 from .keys import OPENAI_API_KEY, OPENAI_MODEL
 from ..utils import Context
 
@@ -21,8 +18,15 @@ logging.getLogger("openai").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # 浏览器风格的请求头，避免被 CF 拦截
-# 注意：移除 Accept-Encoding 让 httpx 自动处理，避免压缩响应导致的 UTF-8 解码错误
-BROWSER_HEADERS = DEFAULT_BROWSER_HEADERS
+BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,ja;q=0.7",
+    "Connection": "keep-alive",
+    "Sec-Ch-Ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+}
 
 
 def encode_image_for_openai(image, max_size=1024):
@@ -112,7 +116,7 @@ class OpenAIHighQualityTranslator(CommonTranslator):
         self.use_stream = False  # 流式输出开关，默认关闭
         self._MAX_REQUESTS_PER_MINUTE = 0  # 默认无限制
         self._rate_limit_attempt = 0  # 429限速错误独立计数器
-        # Client is initialized lazily in async context to bind to the correct event loop.
+        self._setup_client()
     
     def set_prev_context(self, context: str):
         """设置多页上下文（用于context_size > 0时）"""
@@ -159,26 +163,58 @@ class OpenAIHighQualityTranslator(CommonTranslator):
             self.use_stream = use_stream
             self.logger.info(f"[流式] 流式模式: {'已启用' if use_stream else '已关闭'}")
         
-        # If API Key / Base URL changes, reset the cached client (re-created lazily in async context)
+        # 如果 API Key 或 Base URL 变化，重建客户端
         if need_rebuild_client:
             self.client = None
+            self._setup_client()
     
-    async def _ensure_client(self):
-        """Ensure a shared OpenAI client is available (do NOT close it in this instance)."""
-        if self.client:
-            return
+    def _setup_client(self, force_recreate: bool = False):
+        """设置OpenAI客户端
 
-        # The client is shared per event loop; do NOT close it from a translator instance.
-        self.client = await get_openai_client(
-            api_key=self.api_key,
-            base_url=self.base_url,
-            headers=BROWSER_HEADERS,
-        )
+        Args:
+            force_recreate: 是否强制重建客户端（用于重试时断开旧连接）
+        """
+        if force_recreate and self.client:
+            try:
+                import asyncio
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.create_task(self.client.close())
+                else:
+                    loop.run_until_complete(self.client.close())
+            except Exception as e:
+                self.logger.debug(f"关闭旧客户端时出错（可忽略）: {e}")
+            self.client = None
+
+        if not self.client:
+            self.client = AsyncOpenAICurlCffi(
+                api_key=self.api_key,
+                base_url=self.base_url,
+                default_headers=BROWSER_HEADERS,
+                impersonate="chrome110",
+                timeout=600.0,
+                stream_timeout=300.0
+            )
+            self.logger.debug("已创建新的OpenAI HQ客户端连接（curl_cffi 模式）")
+
+    async def _cleanup(self):
+        """清理资源"""
+        if self.client:
+            try:
+                await self.client.close()
+            except Exception:
+                pass
 
     async def _abort_inflight_request(self):
-        """Cancel: drop the shared client reference to stop waiting."""
-        # Client is shared via get_openai_client; just drop the reference.
-        self.client = None
+        """取消时中断当前请求连接，避免长时间阻塞。"""
+        if not self.client:
+            return
+        try:
+            await self.client.close()
+        except Exception as e:
+            self.logger.debug(f"中断请求时关闭客户端失败（可忽略）: {e}")
+        finally:
+            self.client = None
 
     
     def _build_system_prompt(self, source_lang: str, target_lang: str, custom_prompt_json: Dict[str, Any] = None, line_break_prompt_json: Dict[str, Any] = None, retry_attempt: int = 0, retry_reason: str = "", extract_glossary: bool = False) -> str:
@@ -351,7 +387,8 @@ This is an incorrect response because it includes extra text and explanations.
         if not texts:
             return []
         
-        await self._ensure_client()
+        if not self.client:
+            self._setup_client()
         
         # 准备图片
         self.logger.info(f"高质量翻译模式：正在打包 {len(batch_data)} 张图片并发送...")
@@ -445,48 +482,77 @@ This is an incorrect response because it includes extra text and explanations.
                 if retry_attempt == 0 and local_attempt == 1:
                     self.logger.info(f"[Stream] use_stream={self.use_stream}")
 
-                stream_options = {"include_usage": True} if self.use_stream else None
-                result = await self._await_with_cancel_polling(
-                    chat_completions(
-                        api_key=self.api_key,
-                        base_url=self.base_url,
-                        model=self.model,
-                        messages=messages,
-                        temperature=current_temperature,
-                        max_tokens=self.max_tokens,
-                        stream=self.use_stream,
-                        stream_options=stream_options,
-                        timeout=httpx.Timeout(timeout=400.0, connect=30.0, read=120.0, write=60.0, pool=30.0),
-                        max_requests_per_minute=self._MAX_REQUESTS_PER_MINUTE,
-                        headers=BROWSER_HEADERS,
-                        metrics_logger=self.log_ai_metrics,
-                        logger=self.logger,
-                        extra_metrics={"send_images": send_images, "batch": len(batch_data)},
-                        worker_id=getattr(ctx, 'worker_id', None),
-                    ),
-                    poll_interval=0.2,
-                    on_cancel=self._abort_inflight_request,
-                )
+                # 构建API参数
+                api_params = {
+                    "model": self.model,
+                    "messages": messages,
+                    "temperature": current_temperature
+                }
+                if self.max_tokens is not None:
+                    api_params["max_tokens"] = self.max_tokens
 
-                response = result.response
-                result_text = result.text
-                has_content = bool(result_text)
-                finish_reason = result.finish_reason
-                if self.use_stream and not finish_reason:
-                    finish_reason = 'stop'
+                def _extract_openai_stream_text(chunk):
+                    if not (hasattr(chunk, 'choices') and chunk.choices):
+                        return ""
+                    choice = chunk.choices[0]
+                    delta = getattr(choice, 'delta', None)
+                    return getattr(delta, 'content', '') if delta else ""
 
-                first_byte_ms = result.first_byte_ms
-                if self.use_stream and first_byte_ms is not None and first_byte_ms >= 40000:
-                    self.logger.warning(
-                        f"[STREAM_HEALTH] first_chunk_slow first_byte_ms={first_byte_ms:.1f} threshold_ms=40000"
+                def _extract_openai_stream_finish_reason(chunk):
+                    if not (hasattr(chunk, 'choices') and chunk.choices):
+                        return None
+                    return getattr(chunk.choices[0], 'finish_reason', None)
+
+                def _on_stream_chunk(delta_text, _full_text):
+                    if self.logger.isEnabledFor(logging.DEBUG):
+                        self._emit_stream_json_preview("[OpenAI HQ Stream]", _full_text, source_texts=texts)
+
+                streamed_text = None
+                response = None
+
+                if self.use_stream:
+                    # 流式模式：尝试流式传输，失败自动 fallback 到非流式
+                    try:
+                        self._reset_stream_json_preview()
+                        stream_params = dict(api_params)
+                        stream_params["stream"] = True
+                        streamed_text, streamed_finish_reason = await self._run_unified_stream_transport(
+                            create_stream=lambda: self.client.chat.completions.create(**stream_params),
+                            extract_text=_extract_openai_stream_text,
+                            extract_finish_reason=_extract_openai_stream_finish_reason,
+                            on_chunk=_on_stream_chunk,
+                            on_cancel=self._abort_inflight_request,
+                            poll_interval=0.2,
+                            sync_iter_in_thread=False,
+                        )
+                        self._finish_stream_inline()
+                    except Exception as stream_error:
+                        self._finish_stream_inline()
+                        self.logger.warning(f"流式请求不可用，已回退普通请求: {stream_error}")
+                        response = await self._await_with_cancel_polling(
+                            self.client.chat.completions.create(**api_params),
+                            poll_interval=0.2,
+                            on_cancel=self._abort_inflight_request,
+                        )
+                else:
+                    # 非流式模式：直接调用
+                    response = await self._await_with_cancel_polling(
+                        self.client.chat.completions.create(**api_params),
+                        poll_interval=0.2,
+                        on_cancel=self._abort_inflight_request,
                     )
 
-                # 非流式模式：验证响应对象（保持与旧逻辑一致）
-                if not self.use_stream:
+                if streamed_text is not None:
+                    finish_reason = streamed_finish_reason
+                    has_content = bool(streamed_text)
+                else:
+                    # 验证响应对象是否有效
                     validate_openai_response(response, self.logger)
+                    finish_reason = response.choices[0].finish_reason if (hasattr(response, 'choices') and response.choices) else None
+                    has_content = response.choices and response.choices[0].message.content
 
-                # 统一处理：流式和非流式模式都使用 result_text
-                if result_text:
+                if has_content:
+                    result_text = streamed_text.strip() if streamed_text is not None else response.choices[0].message.content.strip()
                     # 统一的编码清理（处理UTF-16-LE等编码问题）
                     from .common import sanitize_text_encoding
                     result_text = sanitize_text_encoding(result_text)
@@ -780,28 +846,27 @@ This is an incorrect response because it includes extra text and explanations.
                 return translations
         
         # 普通单文本翻译（后备方案）
-        await self._ensure_client()
+        if not self.client:
+            self._setup_client()
         
         try:
             simple_prompt = f"Translate the following {from_lang} text to {to_lang}. Provide only the translation:\n\n" + "\n".join(queries)
 
-            result = await chat_completions(
-                api_key=self.api_key,
-                base_url=self.base_url,
-                model=self.model,
-                messages=[{"role": "user", "content": simple_prompt}],
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-                stream=False,
-                timeout=httpx.Timeout(timeout=400.0, connect=30.0, read=120.0, write=60.0, pool=30.0),
-                max_requests_per_minute=self._MAX_REQUESTS_PER_MINUTE,
-                headers=BROWSER_HEADERS,
-                metrics_logger=self.log_ai_metrics,
-                logger=self.logger,
-                worker_id=getattr(ctx, 'worker_id', None),
+            api_params = {
+                "model": self.model,
+                "messages": [{"role": "user", "content": simple_prompt}],
+                "temperature": self.temperature,
+            }
+            if self.max_tokens is not None:
+                api_params["max_tokens"] = self.max_tokens
+
+            response = await self._await_with_cancel_polling(
+                self.client.chat.completions.create(**api_params),
+                poll_interval=0.2,
+                on_cancel=self._abort_inflight_request,
             )
 
-            result_text = result.text
+            result_text = response.choices[0].message.content.strip() if (hasattr(response, 'choices') and response.choices) else None
             if result_text:
                 # 统一的编码清理（处理UTF-16-LE等编码问题）
                 from .common import sanitize_text_encoding

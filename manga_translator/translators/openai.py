@@ -1,18 +1,25 @@
 import os
 import re
 import asyncio
+import time
 # import json
 from typing import List, Dict, Any
-import httpx
 
-from .openai_gateway import DEFAULT_BROWSER_HEADERS, get_openai_client, chat_completions
-from .common import CommonTranslator, VALID_LANGUAGES, parse_json_or_text_response, parse_hq_response, get_glossary_extraction_prompt, merge_glossary_to_file, validate_openai_response
+from .common import CommonTranslator, VALID_LANGUAGES, parse_json_or_text_response, parse_hq_response, get_glossary_extraction_prompt, merge_glossary_to_file, validate_openai_response, AsyncOpenAICurlCffi
 from .keys import OPENAI_API_KEY, OPENAI_MODEL
 from ..utils import Context
 
 # 浏览器风格的请求头，避免被 CF 拦截
 # 注意：移除 Accept-Encoding 让 httpx 自动处理，避免压缩响应导致的 UTF-8 解码错误
-BROWSER_HEADERS = DEFAULT_BROWSER_HEADERS
+BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,ja;q=0.7",
+    "Connection": "keep-alive",
+    "Sec-Ch-Ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+}
 
 
 def _flatten_prompt_data(data: Any, indent: int = 0) -> str:
@@ -42,6 +49,10 @@ class OpenAITranslator(CommonTranslator):
     支持批量文本翻译，不包含图片处理
     """
     _LANGUAGE_CODE_MAP = VALID_LANGUAGES
+    
+    # 类变量: 跨实例共享的RPM限制时间戳
+    _GLOBAL_LAST_REQUEST_TS = {}  # {model_name: timestamp}
+    
     def __init__(self):
         super().__init__()
         self.client = None
@@ -58,7 +69,11 @@ class OpenAITranslator(CommonTranslator):
         self.max_tokens = None  # 不限制，使用模型默认最大值
         self.temperature = 0.1
         self._MAX_REQUESTS_PER_MINUTE = 0  # 默认无限制
-        # Client is initialized lazily in async context to bind to the correct event loop.
+        # 使用全局时间戳,跨实例共享
+        if self.model not in OpenAITranslator._GLOBAL_LAST_REQUEST_TS:
+            OpenAITranslator._GLOBAL_LAST_REQUEST_TS[self.model] = 0
+        self._last_request_ts_key = self.model
+        self._setup_client()
     
     def set_prev_context(self, context: str):
         """设置多页上下文（用于context_size > 0时）"""
@@ -69,14 +84,17 @@ class OpenAITranslator(CommonTranslator):
         # 调用父类的 parse_args 来设置通用参数（包括 attempts、post_check 等）
         super().parse_args(args)
         
-        # 同步 attempts 到 _max_total_attempts
-        self._max_total_attempts = self.attempts
+        # 同步重试次数到"总尝试次数"（首次请求 + 重试）
+        self._max_total_attempts = self._resolve_max_total_attempts()
         
-        # 从配置中读取RPM限制
+        # 从配置中读RPM限制
         max_rpm = getattr(args, 'max_requests_per_minute', 0)
         if max_rpm > 0:
             self._MAX_REQUESTS_PER_MINUTE = max_rpm
             self.logger.info(f"Setting OpenAI max requests per minute to: {max_rpm}")
+        
+        # 读取自定义API参数配置
+        self._configure_custom_api_params(args)
         
         # 从配置中读取用户级 API Key（优先于环境变量）
         need_rebuild_client = False
@@ -98,26 +116,74 @@ class OpenAITranslator(CommonTranslator):
             self.model = user_api_model
             self.logger.info(f"[UserAPIKey] Using user-provided model: {user_api_model}")
         
-        # If API Key / Base URL changes, reset the cached client (re-created lazily in async context)
+        # 如果 API Key 或 Base URL 变化，重建客户端
         if need_rebuild_client:
             self.client = None
+            self._setup_client()
     
-    async def _ensure_client(self):
-        """Ensure a shared OpenAI client is available (do NOT close it in this instance)."""
-        if self.client:
-            return
+    def _setup_client(self, force_recreate: bool = False):
+        """设置OpenAI客户端
 
-        # The client is shared per event loop; do NOT close it from a translator instance.
-        self.client = await get_openai_client(
-            api_key=self.api_key,
-            base_url=self.base_url,
-            headers=BROWSER_HEADERS,
-        )
+        Args:
+            force_recreate: 是否强制重建客户端（用于重试时断开旧连接）
+        """
+        if force_recreate and self.client:
+            # 关闭旧客户端，断开连接
+            try:
+                import asyncio
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # 如果事件循环正在运行，创建任务异步关闭
+                    asyncio.create_task(self.client.close())
+                else:
+                    # 否则同步关闭
+                    loop.run_until_complete(self.client.close())
+            except Exception as e:
+                self.logger.debug(f"关闭旧客户端时出错（可忽略）: {e}")
+            self.client = None
+
+        if not self.client:
+            # 强制使用 curl_cffi 客户端（不回退标准 SDK）
+            self.client = AsyncOpenAICurlCffi(
+                api_key=self.api_key,
+                base_url=self.base_url,
+                default_headers=BROWSER_HEADERS,
+                impersonate="chrome110",
+                timeout=600.0,
+                stream_timeout=300.0
+            )
+            self.logger.debug("已创建新的OpenAI客户端连接（强制 curl_cffi 模式）")
+    
+    async def _cleanup(self):
+        """清理资源"""
+        if self.client:
+            try:
+                await self.client.close()
+            except Exception:
+                pass  # 忽略清理时的错误
 
     async def _abort_inflight_request(self):
-        """Cancel: drop the shared client reference to stop waiting."""
-        # Client is shared via get_openai_client; just drop the reference.
-        self.client = None
+        """取消时中断当前请求连接，避免长时间阻塞。"""
+        if not self.client:
+            return
+        try:
+            await self.client.close()
+        except Exception as e:
+            self.logger.debug(f"中断请求时关闭客户端失败（可忽略）: {e}")
+        finally:
+            self.client = None
+    
+    def __del__(self):
+        """析构函数，确保资源被清理"""
+        if self.client:
+            try:
+                import asyncio
+                loop = asyncio.get_event_loop()
+                if not loop.is_running() and not loop.is_closed():
+                    # 如果事件循环未关闭，同步执行清理
+                    loop.run_until_complete(self._cleanup())
+            except Exception:
+                pass  # 忽略所有清理错误
     
     def _build_system_prompt(self, source_lang: str, target_lang: str, custom_prompt_json: Dict[str, Any] = None, line_break_prompt_json: Dict[str, Any] = None, retry_attempt: int = 0, retry_reason: str = "", extract_glossary: bool = False) -> str:
         """构建系统提示词"""
@@ -236,7 +302,8 @@ class OpenAITranslator(CommonTranslator):
         if not texts:
             return []
         
-        await self._ensure_client()
+        if not self.client:
+            self._setup_client()
         
         # 初始化重试信息
         retry_attempt = 0
@@ -249,7 +316,7 @@ class OpenAITranslator(CommonTranslator):
         _line_break_prompt_json = line_break_prompt_json
         
         # 发送请求
-        max_retries = self.attempts
+        max_retries = self._resolve_max_total_attempts()
         attempt = 0
         is_infinite = max_retries == -1
         last_exception = None
@@ -285,41 +352,91 @@ class OpenAITranslator(CommonTranslator):
             ]
 
             try:
-                # Dynamic temperature adjustment: helps escape failure mode after validation retries
+                # RPM限制
+                if self._MAX_REQUESTS_PER_MINUTE > 0:
+                    now = time.time()
+                    delay = 60.0 / self._MAX_REQUESTS_PER_MINUTE
+                    elapsed = now - OpenAITranslator._GLOBAL_LAST_REQUEST_TS[self._last_request_ts_key]
+                    if elapsed < delay:
+                        sleep_time = delay - elapsed
+                        self.logger.info(f'Ratelimit sleep: {sleep_time:.2f}s')
+                        await self._sleep_with_cancel_polling(sleep_time)
+                
+                # 动态调整温度：质量检查或BR检查失败时提高温度帮助跳出错误模式
                 current_temperature = self._get_retry_temperature(self.temperature, retry_attempt, retry_reason)
                 if retry_attempt > 0 and current_temperature != self.temperature:
                     self.logger.info(f"[重试] 温度调整: {self.temperature} -> {current_temperature}")
-
-                result = await self._await_with_cancel_polling(
-                    chat_completions(
-                        api_key=self.api_key,
-                        base_url=self.base_url,
-                        model=self.model,
-                        messages=messages,
-                        temperature=current_temperature,
-                        max_tokens=self.max_tokens,
-                        stream=False,
-                        timeout=httpx.Timeout(300.0, connect=60.0),
-                        max_requests_per_minute=self._MAX_REQUESTS_PER_MINUTE,
-                        headers=BROWSER_HEADERS,
-                        metrics_logger=self.log_ai_metrics,
-                        logger=self.logger,
-                        worker_id=getattr(ctx, 'worker_id', None),
-                    ),
-                    poll_interval=0.2,
-                    on_cancel=self._abort_inflight_request,
-                )
-                response = result.response
-
-                # 验证响应对象是否有效
-                validate_openai_response(response, self.logger)
-
-                # 检查成功条件：有内容就尝试处理，后续会有质量检查
-                finish_reason = response.choices[0].finish_reason if (hasattr(response, 'choices') and response.choices) else None
-                has_content = response.choices and response.choices[0].message.content
                 
+                # 构建API参数，只有当max_tokens有值时才传递（新模型如o1/gpt-4.1不支持null值）
+                api_params = {
+                    "model": self.model,
+                    "messages": messages,
+                    "temperature": current_temperature
+                }
+                if self.max_tokens is not None:
+                    api_params["max_tokens"] = self.max_tokens
+                
+                # 合并自定义API参数
+                if self._custom_api_params:
+                    api_params.update(self._custom_api_params)
+                    self.logger.debug(f"使用自定义API参数: {self._custom_api_params}")
+
+                def _extract_openai_stream_text(chunk):
+                    if not (hasattr(chunk, 'choices') and chunk.choices):
+                        return ""
+                    choice = chunk.choices[0]
+                    delta = getattr(choice, 'delta', None)
+                    return getattr(delta, 'content', '') if delta else ""
+
+                def _extract_openai_stream_finish_reason(chunk):
+                    if not (hasattr(chunk, 'choices') and chunk.choices):
+                        return None
+                    return getattr(chunk.choices[0], 'finish_reason', None)
+                
+                def _on_stream_chunk(delta_text, _full_text):
+                    self._emit_stream_json_preview("[OpenAI Stream]", _full_text, source_texts=texts)
+
+                streamed_text = None
+                response = None
+                try:
+                    self._reset_stream_json_preview()
+                    stream_params = dict(api_params)
+                    stream_params["stream"] = True
+                    streamed_text, streamed_finish_reason = await self._run_unified_stream_transport(
+                        create_stream=lambda: self.client.chat.completions.create(**stream_params),
+                        extract_text=_extract_openai_stream_text,
+                        extract_finish_reason=_extract_openai_stream_finish_reason,
+                        on_chunk=_on_stream_chunk,
+                        on_cancel=self._abort_inflight_request,
+                        poll_interval=0.2,
+                        sync_iter_in_thread=False,
+                    )
+                    self._finish_stream_inline()
+                except Exception as stream_error:
+                    self._finish_stream_inline()
+                    self.logger.warning(f"流式请求不可用，已回退普通请求: {stream_error}")
+                    response = await self._await_with_cancel_polling(
+                        self.client.chat.completions.create(**api_params),
+                        poll_interval=0.2,
+                        on_cancel=self._abort_inflight_request,
+                    )
+                 
+                # 在API调用成功后立即更新时间戳，确保所有请求（包括重试）都被计入速率限制
+                if self._MAX_REQUESTS_PER_MINUTE > 0:
+                    OpenAITranslator._GLOBAL_LAST_REQUEST_TS[self._last_request_ts_key] = time.time()
+
+                if streamed_text is not None:
+                    finish_reason = streamed_finish_reason
+                    has_content = bool(streamed_text)
+                else:
+                    # 验证响应对象是否有效
+                    validate_openai_response(response, self.logger)
+                    # 检查成功条件：有内容就尝试处理，后续会有质量检查
+                    finish_reason = response.choices[0].finish_reason if (hasattr(response, 'choices') and response.choices) else None
+                    has_content = response.choices and response.choices[0].message.content
+                 
                 if has_content:
-                    result_text = response.choices[0].message.content.strip()
+                    result_text = streamed_text.strip() if streamed_text is not None else response.choices[0].message.content.strip()
                     
                     # 统一的编码清理（处理UTF-16-LE等编码问题）
                     from .common import sanitize_text_encoding
@@ -346,24 +463,17 @@ class OpenAITranslator(CommonTranslator):
                     # 使用通用函数解析响应（支持JSON和纯文本）
                     translations, new_terms = parse_hq_response(result_text)
                     
-                    # 处理提取到的术语（使用缓存，支持并发）
-                    if extract_glossary:
-                        if new_terms:
-                            self.logger.info(f"[术语提取] 提取到 {len(new_terms)} 个新术语: {new_terms}")
-                            prompt_path = None
-                            if ctx and hasattr(ctx, 'config') and hasattr(ctx.config, 'translator'):
-                                prompt_path = getattr(ctx.config.translator, 'high_quality_prompt_path', None)
-                            
-                            if prompt_path:
-                                # ✅ 使用统一函数，自动根据并发数决定写入策略
-                                from .glossary_cache import add_glossary_terms
-                                added_count = add_glossary_terms(prompt_path, new_terms)
-                                if added_count > 0:
-                                    self.logger.info(f"[术语提取] 已处理 {added_count} 个术语")
-                            else:
-                                self.logger.warning("[术语提取] 提取到新术语但未找到提示词文件路径")
+                    # 处理提取到的术语
+                    if extract_glossary and new_terms:
+                        self._emit_terms_from_list(new_terms)
+                        prompt_path = None
+                        if ctx and hasattr(ctx, 'config') and hasattr(ctx.config, 'translator'):
+                            prompt_path = getattr(ctx.config.translator, 'high_quality_prompt_path', None)
+                        
+                        if prompt_path:
+                            merge_glossary_to_file(prompt_path, new_terms)
                         else:
-                            self.logger.debug("[术语提取] AI未返回新术语")
+                            self.logger.warning("Extracted new terms but prompt path not found in context.")
 
                     # Strict validation: must match input count
                     if len(translations) != len(texts):
@@ -380,6 +490,9 @@ class OpenAITranslator(CommonTranslator):
                         if not is_infinite and attempt >= max_retries:
                             raise Exception(f"Translation count mismatch after {max_retries} attempts: expected {len(texts)}, got {len(translations)}")
 
+                        # 重试前断开连接，重建客户端
+                        self.logger.info("重试前断开旧连接，重建客户端...")
+                        self._setup_client(force_recreate=True)
                         await self._sleep_with_cancel_polling(2)
                         continue
 
@@ -397,12 +510,16 @@ class OpenAITranslator(CommonTranslator):
                         if not is_infinite and attempt >= max_retries:
                             raise Exception(f"Quality check failed after {max_retries} attempts: {error_msg}")
 
+                        # 重试前断开连接，重建客户端
+                        self.logger.info("重试前断开旧连接，重建客户端...")
+                        self._setup_client(force_recreate=True)
                         await self._sleep_with_cancel_polling(2)
                         continue
 
-                    self.logger.info("--- Translation Results ---")
-                    for original, translated in zip(texts, translations):
-                        self.logger.info(f'{original} -> {translated}')
+                    if not self._has_stream_result_pairs():
+                        self.logger.info("--- Translation Results ---")
+                        for original, translated in zip(texts, translations):
+                            self.logger.info(f'{original} -> {translated}')
                     self.logger.info("---------------------------")
 
                     # BR检查：检查翻译结果是否包含必要的[BR]标记
@@ -425,6 +542,9 @@ class OpenAITranslator(CommonTranslator):
                                 tolerance=max(1, len(texts) // 10)
                             )
                         
+                        # 重试前断开连接，重建客户端
+                        self.logger.info("重试前断开旧连接，重建客户端...")
+                        self._setup_client(force_recreate=True)
                         await self._sleep_with_cancel_polling(2)
                         continue
 
@@ -460,6 +580,9 @@ class OpenAITranslator(CommonTranslator):
                     self.logger.error("OpenAI翻译在多次重试后仍然失败。即将终止程序。")
                     raise last_exception
                 
+                # 重试前断开连接，重建客户端
+                self.logger.info("重试前断开旧连接，重建客户端...")
+                self._setup_client(force_recreate=True)
                 await self._sleep_with_cancel_polling(1)
 
             except Exception as e:
@@ -472,6 +595,9 @@ class OpenAITranslator(CommonTranslator):
                     self.logger.error("OpenAI翻译在多次重试后仍然失败。即将终止程序。")
                     raise last_exception
                 
+                # 重试前断开连接，重建客户端
+                self.logger.info("重试前断开旧连接，重建客户端...")
+                self._setup_client(force_recreate=True)
                 await self._sleep_with_cancel_polling(1)
 
         # 只有在所有重试都失败后才会执行到这里

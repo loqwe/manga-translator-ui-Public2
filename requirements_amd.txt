@@ -85,6 +85,7 @@ networkx==3.5
 omegaconf==2.3.0
 onnxruntime>=1.23.0
 openai==2.14.0
+curl_cffi>=0.7.0
 opencv-contrib-python>=4.10.0
 packaging<25.0
 pandas==2.3.1

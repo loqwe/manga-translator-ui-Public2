@@ -2,9 +2,12 @@ import re
 import time
 import asyncio
 import contextlib
+import inspect
+import textwrap
 import json
 import os
 import sys
+import shutil
 import sqlite3
 import logging
 from typing import List, Tuple, Dict, Any, Optional, Callable, Awaitable
@@ -364,6 +367,302 @@ def draw_text_boxes_on_image(image, text_regions: List[Any], text_order: List[in
     return canvas
 
 
+# ============================================================================
+# AsyncOpenAI 客户端包装器 - 使用 curl_cffi 绕过 TLS 指纹检测
+# ============================================================================
+
+class AsyncOpenAICurlCffi:
+    """
+    异步 OpenAI 客户端包装器，使用 curl_cffi 绕过 TLS 指纹检测
+    完全兼容 AsyncOpenAI 的接口，可直接替换使用
+
+    用法:
+        client = AsyncOpenAICurlCffi(
+            api_key="your-api-key",
+            base_url="https://api.openai.com/v1",
+            default_headers={"User-Agent": "..."},
+            impersonate="chrome110"
+        )
+
+        response = await client.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": "Hello"}]
+        )
+    """
+
+    class ChatCompletions:
+        """聊天完成接口"""
+
+        def __init__(self, parent):
+            self.parent = parent
+
+        async def create(self, model, messages, temperature=None, max_tokens=None, **kwargs):
+            """创建聊天完成请求"""
+            url = f"{self.parent.base_url}/chat/completions"
+
+            headers = {
+                "Authorization": f"Bearer {self.parent.api_key}",
+                "Content-Type": "application/json"
+            }
+
+            # 合并默认请求头
+            if self.parent.default_headers:
+                headers.update(self.parent.default_headers)
+
+            # 构建请求数据
+            data = {
+                "model": model,
+                "messages": messages
+            }
+
+            if temperature is not None:
+                data["temperature"] = temperature
+            if max_tokens is not None:
+                data["max_tokens"] = max_tokens
+
+            # 添加其他参数
+            data.update(kwargs)
+
+            stream_mode = bool(data.get("stream"))
+            if stream_mode:
+                return self._create_stream(url, data, headers)
+
+            # 发送异步请求
+            response = await self.parent.session.post(
+                url,
+                json=data,
+                headers=headers,
+                timeout=self.parent.timeout
+            )
+
+            if response.status_code != 200:
+                print(f"[AsyncOpenAICurlCffi] Error - URL: {url}")
+                print(f"[AsyncOpenAICurlCffi] Error - Status: {response.status_code}")
+                print(f"[AsyncOpenAICurlCffi] Error - Response: {response.text[:500] if response.text else '(empty)'}")
+                error_msg = f"API request failed with status {response.status_code}"
+                try:
+                    error_data = response.json()
+                    if "error" in error_data:
+                        error_msg = f"{error_msg}: {error_data['error'].get('message', '')}"
+                except:
+                    error_msg = f"{error_msg}: {response.text[:500] if response.text else '(empty)'}"
+                raise Exception(error_msg)
+
+            result = response.json()
+
+            # 转换为类似 OpenAI SDK 的响应对象
+            return _OpenAIResponse(result)
+
+        def _create_stream(self, url, data, headers):
+            """SSE 流式请求，返回异步可迭代对象。"""
+
+            async def _gen():
+                async with self.parent.session.stream(
+                    "POST",
+                    url,
+                    json=data,
+                    headers=headers,
+                    timeout=self.parent.stream_timeout
+                ) as response:
+                    if response.status_code != 200:
+                        text = await response.atext()
+                        raise Exception(f"API request failed with status {response.status_code}: {text[:500] if text else '(empty)'}")
+
+                    async for raw_line in response.aiter_lines():
+                        if isinstance(raw_line, (bytes, bytearray)):
+                            raw_line = raw_line.decode("utf-8", errors="ignore")
+                        line = str(raw_line or "").strip()
+                        if not line or not line.startswith("data:"):
+                            continue
+                        payload = line[5:].strip()
+                        if payload == "[DONE]":
+                            break
+                        try:
+                            chunk_data = json.loads(payload)
+                        except Exception:
+                            continue
+                        yield _OpenAIStreamChunk(chunk_data)
+
+            return _gen()
+
+    class Chat:
+        """聊天接口"""
+
+        def __init__(self, parent):
+            self.completions = AsyncOpenAICurlCffi.ChatCompletions(parent)
+
+    class Models:
+        """模型列表接口"""
+
+        def __init__(self, parent):
+            self.parent = parent
+
+        async def list(self):
+            """获取可用模型列表"""
+            url = f"{self.parent.base_url}/models"
+
+            headers = {
+                "Authorization": f"Bearer {self.parent.api_key}",
+                "Content-Type": "application/json"
+            }
+
+            # 合并默认请求头
+            if self.parent.default_headers:
+                headers.update(self.parent.default_headers)
+
+            # 发送异步请求
+            response = await self.parent.session.get(
+                url,
+                headers=headers,
+                timeout=self.parent.timeout
+            )
+
+            if response.status_code != 200:
+                print(f"[AsyncOpenAICurlCffi] List Error - URL: {url}")
+                print(f"[AsyncOpenAICurlCffi] List Error - Status: {response.status_code}")
+                print(f"[AsyncOpenAICurlCffi] List Error - Response: {response.text[:500] if response.text else '(empty)'}")
+                error_msg = f"API request failed with status {response.status_code}"
+                try:
+                    error_data = response.json()
+                    if "error" in error_data:
+                        error_msg = f"{error_msg}: {error_data['error'].get('message', '')}"
+                except:
+                    error_msg = f"{error_msg}: {response.text[:200] if response.text else '(empty)'}"
+                raise Exception(error_msg)
+
+            # 检查响应内容类型
+            content_type = response.headers.get('content-type', '')
+            if 'application/json' not in content_type and 'text/json' not in content_type:
+                raise Exception("API 不支持获取模型列表（返回了非 JSON 响应）。请手动输入模型名称。")
+
+            try:
+                result = response.json()
+            except Exception as e:
+                raise Exception(f"无法解析 API 响应: {str(e)}。请手动输入模型名称。")
+
+            # 转换为类似 OpenAI SDK 的响应对象
+            return _ModelsResponse(result)
+
+    def __init__(self, api_key, base_url="https://api.openai.com/v1",
+                 default_headers=None, http_client=None, impersonate="chrome110",
+                 timeout=600, stream_timeout=300):
+        self.api_key = api_key
+        self.base_url = base_url.rstrip('/')
+        self.default_headers = default_headers or {}
+        self.timeout = timeout
+        self.stream_timeout = stream_timeout
+        self.impersonate = impersonate
+
+        # 检测是否是本地地址（本地地址不需要 impersonate，且可能导致超时）
+        local_indicators = ['localhost', '127.0.0.1', '0.0.0.0', '192.168.', '10.', '172.16.', '172.17.', '172.18.', '172.19.', '172.20.', '172.21.', '172.22.', '172.23.', '172.24.', '172.25.', '172.26.', '172.27.', '172.28.', '172.29.', '172.30.', '172.31.']
+        is_local = any(indicator in base_url.lower() for indicator in local_indicators)
+
+        # 延迟导入 curl_cffi，避免在不需要时导入
+        try:
+            from curl_cffi.requests import AsyncSession
+            if is_local:
+                self.session = AsyncSession()
+                print(f"[AsyncOpenAICurlCffi] Local address detected, disabled impersonate for: {base_url}")
+            else:
+                self.session = AsyncSession(impersonate=impersonate)
+        except ImportError:
+            raise ImportError(
+                "curl_cffi is required for TLS fingerprint bypass. "
+                "Install it with: pip install curl_cffi"
+            )
+
+        # 创建聊天接口
+        self.chat = self.Chat(self)
+        # 创建模型列表接口
+        self.models = self.Models(self)
+
+    async def close(self):
+        """关闭 session"""
+        if hasattr(self.session, 'close'):
+            await self.session.close()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+
+
+class _OpenAIResponse:
+    """模拟 OpenAI SDK 的响应对象"""
+
+    class Choice:
+        class Message:
+            def __init__(self, content):
+                self.content = content
+
+        def __init__(self, message_content, finish_reason):
+            self.message = self.Message(message_content)
+            self.finish_reason = finish_reason
+
+    class Usage:
+        def __init__(self, total_tokens, prompt_tokens=0, completion_tokens=0):
+            self.total_tokens = total_tokens
+            self.prompt_tokens = prompt_tokens
+            self.completion_tokens = completion_tokens
+
+    def __init__(self, data):
+        self.model = data.get('model', '')
+        self.choices = [
+            self.Choice(
+                choice['message']['content'],
+                choice.get('finish_reason', 'stop')
+            )
+            for choice in data.get('choices', [])
+        ]
+        usage_data = data.get('usage', {})
+        self.usage = self.Usage(
+            usage_data.get('total_tokens', 0),
+            usage_data.get('prompt_tokens', 0),
+            usage_data.get('completion_tokens', 0)
+        )
+
+
+class _OpenAIStreamChunk:
+    """模拟 OpenAI SDK stream chunk 对象（最小字段集）"""
+
+    class Choice:
+        class Delta:
+            def __init__(self, content):
+                self.content = content
+
+        def __init__(self, delta_content, finish_reason):
+            self.delta = self.Delta(delta_content)
+            self.finish_reason = finish_reason
+
+    def __init__(self, data):
+        choices = data.get("choices", []) if isinstance(data, dict) else []
+        self.choices = []
+        for c in choices:
+            delta = c.get("delta", {}) if isinstance(c, dict) else {}
+            delta_content = delta.get("content", "") if isinstance(delta, dict) else ""
+            finish_reason = c.get("finish_reason") if isinstance(c, dict) else None
+            self.choices.append(self.Choice(delta_content, finish_reason))
+
+
+class _ModelsResponse:
+    """模拟 OpenAI SDK 的模型列表响应对象"""
+
+    class Model:
+        def __init__(self, model_data):
+            self.id = model_data.get('id', '')
+            self.object = model_data.get('object', 'model')
+            self.created = model_data.get('created', 0)
+            self.owned_by = model_data.get('owned_by', '')
+
+    def __init__(self, data):
+        self.data = [
+            self.Model(model_data)
+            for model_data in data.get('data', [])
+        ]
+        self.object = data.get('object', 'list')
+
+
 class MTPEAdapter():
     async def dispatch(self, queries: List[str], translations: List[str]) -> List[str]:
         # TODO: Make it work in windows (e.g. through os.startfile)
@@ -410,7 +709,80 @@ class CommonTranslator(InfererModule):
         self._global_attempt_count = 0  # 全局尝试计数器
         self._max_total_attempts = -1  # 全局最大尝试次数
         self._cancel_check_callback = None  # 取消检查回调
+        self._custom_api_params = {}  # 存储自定义API参数
+        self._stream_inline_last_len = 0
+        self._stream_inline_buffer = ""
+        self._stream_json_seen: Dict[int, str] = {}
+        self._stream_term_seen: Dict[Tuple[str, str], str] = {}
+        self._stream_result_header_printed = False
+        self._stream_result_pairs_printed = False
     
+    def _normalize_retry_attempts(self, attempts: Any) -> int:
+        """
+        规范化重试次数配置：
+        -1: 无限重试
+         0: 不重试（仅首次请求）
+        >=1: 重试 N 次
+        其他负值会回退为 0。
+        """
+        try:
+            value = int(attempts)
+        except (TypeError, ValueError):
+            self.logger.warning(f"Invalid attempts value '{attempts}', fallback to -1 (infinite)")
+            return -1
+
+        if value == -1:
+            return -1
+        if value < -1:
+            self.logger.warning(f"Invalid attempts value '{value}', fallback to 0 (no retry)")
+            return 0
+        return value
+
+    def _resolve_max_total_attempts(self) -> int:
+        """
+        将"重试次数"转换为"总尝试次数"：
+        -1 -> -1（无限）
+         0 -> 1（仅首次请求）
+         N -> N+1（首次 + N 次重试）
+        """
+        if self.attempts == -1:
+            return -1
+        return self.attempts + 1
+    
+    def _load_custom_api_params(self):
+        """从固定目录加载自定义API参数配置文件"""
+        try:
+            from ..utils import BASE_PATH
+            import os
+            import json
+            
+            config_path = os.path.join(BASE_PATH, 'examples', 'custom_api_params.json')
+            if os.path.exists(config_path):
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    self._custom_api_params = json.load(f)
+                self.logger.info(f"已加载自定义API参数配置: {self._custom_api_params}")
+            else:
+                self.logger.warning(f"自定义API参数配置文件不存在: {config_path}")
+                self._custom_api_params = {}
+        except Exception as e:
+            self.logger.error(f"加载自定义API参数配置失败: {e}")
+            self._custom_api_params = {}
+
+    def _configure_custom_api_params(self, args) -> bool:
+        """
+        根据配置决定是否加载自定义 API 参数，并统一日志输出格式。
+        返回值表示是否启用。
+        """
+        use_custom_params = getattr(args, 'use_custom_api_params', False)
+        if not use_custom_params:
+            self._custom_api_params = {}
+            return False
+
+        self._load_custom_api_params()
+        if self._custom_api_params:
+            self.logger.info(f"已启用自定义API参数: {self._custom_api_params}")
+        return True
+
     def set_cancel_check_callback(self, callback):
         """设置取消检查回调"""
         self._cancel_check_callback = callback
@@ -464,6 +836,293 @@ class CommonTranslator(InfererModule):
             asyncio.sleep(seconds),
             poll_interval=min(poll_interval, max(seconds, 0.05)),
         )
+
+    async def _run_unified_stream_transport(
+        self,
+        *,
+        create_stream: Callable[[], Any],
+        extract_text: Callable[[Any], Any],
+        extract_finish_reason: Optional[Callable[[Any], Any]] = None,
+        on_chunk: Optional[Callable[[str, str], None]] = None,
+        on_cancel: Optional[Callable[[], Awaitable[None] | None]] = None,
+        poll_interval: float = 0.2,
+        sync_iter_in_thread: bool = False,
+        first_chunk_timeout: float = 300.0,
+        idle_timeout: float = 300.0,
+    ) -> Tuple[str, Any]:
+        """
+        通用流式传输层：
+        - OpenAI async stream（异步迭代）
+        - Gemini stream（同步迭代，放入 to_thread 消费）
+        返回：(聚合后的完整文本, 最后一次 finish_reason)
+        """
+        def _normalize_stream_piece(piece_text: str, current_text: str) -> str:
+            """
+            兼容“增量块/累计块/重复块”三种常见流格式，尽量只返回新增部分。
+            """
+            if not piece_text:
+                return ""
+            if not current_text:
+                return piece_text
+
+            # 标准累计块：piece = current + delta
+            if piece_text.startswith(current_text):
+                return piece_text[len(current_text):]
+
+            # 回退/截断块：piece 只是 current 的前缀（且不是极短 token），忽略
+            if len(piece_text) >= 16 and current_text.startswith(piece_text):
+                return ""
+
+            # 某些服务会把 current 放在 piece 中间，取最后一次出现后的尾部
+            pos = piece_text.rfind(current_text)
+            if pos != -1:
+                return piece_text[pos + len(current_text):]
+
+            # 明确重发：较长片段且 current 已以该片段结尾，忽略
+            if len(piece_text) >= 16 and current_text.endswith(piece_text):
+                return ""
+
+            # 处理部分重叠：current 尾部 + piece 头部
+            max_overlap = min(len(piece_text), len(current_text))
+            for overlap in range(max_overlap, 0, -1):
+                if current_text.endswith(piece_text[:overlap]):
+                    return piece_text[overlap:]
+
+            # 无法判断关系时按增量处理（保守）
+            return piece_text
+
+        text_parts: List[str] = []
+        last_finish_reason = None
+
+        if sync_iter_in_thread:
+            def _consume_sync_stream():
+                local_parts: List[str] = []
+                local_finish = None
+                stream_obj = create_stream()
+                for chunk in stream_obj:
+                    piece = extract_text(chunk)
+                    if piece:
+                        piece_text = str(piece)
+                        current_text = ''.join(local_parts)
+                        normalized_piece = _normalize_stream_piece(piece_text, current_text)
+                        if normalized_piece:
+                            local_parts.append(normalized_piece)
+                        if on_chunk:
+                            on_chunk(normalized_piece, ''.join(local_parts))
+                    if extract_finish_reason:
+                        finish = extract_finish_reason(chunk)
+                        if finish is not None:
+                            local_finish = finish
+                return ''.join(local_parts), local_finish
+
+            return await self._await_with_cancel_polling(
+                asyncio.to_thread(_consume_sync_stream),
+                poll_interval=poll_interval,
+                on_cancel=on_cancel,
+            )
+
+        stream_obj = create_stream()
+        while inspect.isawaitable(stream_obj):
+            stream_obj = await self._await_with_cancel_polling(
+                stream_obj,
+                poll_interval=poll_interval,
+                on_cancel=on_cancel,
+            )
+
+        try:
+            aiter = stream_obj.__aiter__()
+            got_first_chunk = False
+            while True:
+                chunk_timeout = first_chunk_timeout if not got_first_chunk else idle_timeout
+                try:
+                    chunk = await self._await_with_cancel_polling(
+                        asyncio.wait_for(aiter.__anext__(), timeout=chunk_timeout),
+                        poll_interval=poll_interval,
+                        on_cancel=on_cancel,
+                    )
+                except StopAsyncIteration:
+                    break
+                except asyncio.TimeoutError as timeout_error:
+                    timeout_type = "首包" if not got_first_chunk else "流空闲"
+                    raise TimeoutError(f"流式{timeout_type}超时（{chunk_timeout:.0f}s）") from timeout_error
+
+                got_first_chunk = True
+                self._check_cancelled()
+                piece = extract_text(chunk)
+                if piece:
+                    piece_text = str(piece)
+                    current_text = ''.join(text_parts)
+                    normalized_piece = _normalize_stream_piece(piece_text, current_text)
+                    if normalized_piece:
+                        text_parts.append(normalized_piece)
+                    if on_chunk:
+                        on_chunk(normalized_piece, ''.join(text_parts))
+                if extract_finish_reason:
+                    finish = extract_finish_reason(chunk)
+                    if finish is not None:
+                        last_finish_reason = finish
+        except asyncio.CancelledError:
+            if on_cancel:
+                cleanup_result = on_cancel()
+                if asyncio.iscoroutine(cleanup_result):
+                    with contextlib.suppress(Exception):
+                        await cleanup_result
+            raise
+        finally:
+            close_fn = getattr(stream_obj, "aclose", None)
+            if callable(close_fn):
+                with contextlib.suppress(Exception):
+                    close_ret = close_fn()
+                    if asyncio.iscoroutine(close_ret):
+                        await close_ret
+
+        return ''.join(text_parts), last_finish_reason
+
+    def _emit_stream_lines(self, prefix: str, text: str, width: int = 100) -> None:
+        """将流式增量按固定宽度换行输出，避免命令行单行过长被截断。"""
+        content = (text or "").strip()
+        if not content:
+            return
+        for line in textwrap.wrap(content, width=width, break_long_words=True, break_on_hyphens=False):
+            self.logger.info(f"{prefix} {line}")
+
+    def _reset_stream_json_preview(self) -> None:
+        self._stream_json_seen = {}
+        self._stream_term_seen = {}
+        self._stream_result_header_printed = False
+        self._stream_result_pairs_printed = False
+
+    def _has_stream_result_pairs(self) -> bool:
+        return bool(self._stream_result_pairs_printed)
+
+    def _emit_terms_from_list(self, new_terms: List[Dict[str, str]]) -> None:
+        """统一输出术语提取结果；按(原文,译文)去重并优先保留带分类版本。"""
+        if not new_terms:
+            return
+        for term in new_terms:
+            if not isinstance(term, dict):
+                continue
+            term_o = str(term.get("original") or term.get("src") or "").strip()
+            term_t = str(term.get("translation") or term.get("dst") or "").strip()
+            term_c = str(term.get("category") or "").strip()
+            if not term_o or not term_t:
+                continue
+
+            key = (term_o, term_t)
+            prev_category = self._stream_term_seen.get(key)
+            if prev_category is not None:
+                if prev_category == term_c:
+                    continue
+                if prev_category and not term_c:
+                    continue
+            if not term_c and prev_category is None:
+                self._stream_term_seen[key] = ""
+                continue
+            self._stream_term_seen[key] = term_c
+
+            if term_c:
+                self.logger.info(f"[TERM] {term_o} -> {term_t} ({term_c})")
+            else:
+                self.logger.info(f"[TERM] {term_o} -> {term_t}")
+
+    def _emit_stream_json_preview(self, prefix: str, full_text: str, source_texts: Optional[List[str]] = None) -> None:
+        """
+        从流式累计文本中提取已闭合的 {"id": n, "translation": "..."}，按 id 去重输出。
+        """
+        if not full_text:
+            return
+        pattern = r'"id"\s*:\s*(\d+)\s*,\s*"translation"\s*:\s*"((?:\\.|[^"\\])*)"'
+        for m in re.finditer(pattern, full_text, flags=re.DOTALL):
+            try:
+                tid = int(m.group(1))
+            except Exception:
+                continue
+            raw_text = m.group(2)
+            try:
+                decoded_text = json.loads(f'"{ raw_text}"')
+            except Exception:
+                decoded_text = raw_text.replace('\\"', '"').replace("\\n", "\n")
+            if self._stream_json_seen.get(tid) == decoded_text:
+                continue
+            self._stream_json_seen[tid] = decoded_text
+            if not self._stream_result_header_printed:
+                self.logger.info("--- Translation Results ---")
+                self._stream_result_header_printed = True
+            if source_texts and 1 <= tid <= len(source_texts):
+                self.logger.info(f"{source_texts[tid - 1]} -> {decoded_text}")
+            else:
+                self.logger.info(f"{prefix} #{tid}: {decoded_text}")
+            self._stream_result_pairs_printed = True
+
+        term_pattern = r'"original"\s*:\s*"((?:\\.|[^"\\])*)"\s*,\s*"translation"\s*:\s*"((?:\\.|[^"\\])*)"(?:\s*,\s*"category"\s*:\s*"((?:\\.|[^"\\])*)")?'
+        stream_terms: List[Dict[str, str]] = []
+        for tm in re.finditer(term_pattern, full_text, flags=re.DOTALL):
+            raw_o, raw_t, raw_c = tm.group(1), tm.group(2), tm.group(3) or ""
+            try:
+                term_o = json.loads(f'"{raw_o}"')
+            except Exception:
+                term_o = raw_o
+            try:
+                term_t = json.loads(f'"{raw_t}"')
+            except Exception:
+                term_t = raw_t
+            try:
+                term_c = json.loads(f'"{raw_c}"') if raw_c else ""
+            except Exception:
+                term_c = raw_c
+            stream_terms.append({"original": str(term_o), "translation": str(term_t), "category": str(term_c)})
+        if stream_terms:
+            if not self._stream_result_header_printed:
+                self.logger.info("--- Translation Results ---")
+                self._stream_result_header_printed = True
+            self._emit_terms_from_list(stream_terms)
+
+    def _update_stream_inline(self, prefix: str, delta_text: str) -> None:
+        """按增量流内容刷新；遇到换行符时真正换行输出。"""
+        if not delta_text:
+            return
+        self._stream_inline_buffer += str(delta_text)
+
+        while "\n" in self._stream_inline_buffer:
+            line_text, rest = self._stream_inline_buffer.split("\n", 1)
+            self._stream_inline_buffer = rest
+            line = f"{prefix} {line_text}"
+            pad = max(0, self._stream_inline_last_len - len(line))
+            try:
+                sys.stdout.write("\r" + line + (" " * pad) + "\n")
+                sys.stdout.flush()
+            except Exception:
+                self._emit_stream_lines(prefix, line_text)
+            self._stream_inline_last_len = 0
+
+        text = self._stream_inline_buffer
+        if not text:
+            return
+        try:
+            term_width = shutil.get_terminal_size(fallback=(120, 24)).columns
+        except Exception:
+            term_width = 120
+        available = max(20, term_width - len(prefix) - 2)
+        tail = text[-available:]
+        line = f"{prefix} {tail}"
+        pad = max(0, self._stream_inline_last_len - len(line))
+        try:
+            sys.stdout.write("\r" + line + (" " * pad))
+            sys.stdout.flush()
+            self._stream_inline_last_len = len(line)
+        except Exception:
+            self._emit_stream_lines(prefix, tail)
+
+    def _finish_stream_inline(self) -> None:
+        """结束同一行刷新，补一个换行。"""
+        if self._stream_inline_last_len > 0 or self._stream_inline_buffer:
+            try:
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+            except Exception:
+                pass
+            self._stream_inline_last_len = 0
+            self._stream_inline_buffer = ""
 
     def _now_iso(self) -> str:
         """返回当前时间的 ISO 格式字符串（带毫秒）"""

@@ -594,21 +594,31 @@ class MainAppLogic(QObject):
         """异步测试API连接（如果指定了模型，会测试该模型是否可用）"""
         try:
             if "openai" in translator_key.lower():
-                from openai import AsyncOpenAI
-                client = AsyncOpenAI(
-                    api_key=api_key,
-                    base_url=api_base or "https://api.openai.com/v1"
-                )
+                # 尝试使用 curl_cffi 客户端绕过 TLS 指纹检测
+                try:
+                    from manga_translator.translators.common import AsyncOpenAICurlCffi
+                    client = AsyncOpenAICurlCffi(
+                        api_key=api_key,
+                        base_url=api_base or "https://api.openai.com/v1",
+                        impersonate="chrome110",
+                        timeout=30.0
+                    )
+                except ImportError:
+                    # 如果 curl_cffi 不可用，回退到标准客户端
+                    from openai import AsyncOpenAI
+                    client = AsyncOpenAI(
+                        api_key=api_key,
+                        base_url=api_base or "https://api.openai.com/v1"
+                    )
                 
                 try:
                     # 如果指定了模型，测试该模型是否可用
                     if model and model.strip():
                         try:
-                            # 尝试用该模型发送一个简单的测试请求
+                            # 尝试用该模型发送一个简单的测试请求（不传递 max_tokens 以兼容所有模型）
                             await client.chat.completions.create(
                                 model=model,
-                                messages=[{"role": "user", "content": "test"}],
-                                max_tokens=5
+                                messages=[{"role": "user", "content": "test"}]
                             )
                             return True, f"连接成功，模型 {model} 可用"
                         except Exception as e:
@@ -622,56 +632,65 @@ class MainAppLogic(QObject):
                     await client.close()
             
             elif "gemini" in translator_key.lower():
-                import google.generativeai as genai
-                
-                # 如果指定了自定义API Base（非空且非官方地址），使用OpenAI兼容模式
-                is_custom_api = (
-                    api_base 
-                    and api_base.strip() 
-                    and api_base.strip() not in ["https://generativelanguage.googleapis.com", "https://generativelanguage.googleapis.com/"]
-                )
-                
-                if is_custom_api:
-                    from openai import AsyncOpenAI
-                    client = AsyncOpenAI(
+                # 统一使用 AsyncGeminiCurlCffi（Google 认证方式 + curl_cffi TLS 指纹伪装）
+                base_url = api_base.strip() if api_base and api_base.strip() else "https://generativelanguage.googleapis.com"
+
+                try:
+                    from manga_translator.translators.common import AsyncGeminiCurlCffi
+                    client = AsyncGeminiCurlCffi(
                         api_key=api_key,
-                        base_url=api_base.strip()
+                        base_url=base_url,
+                        impersonate="chrome110",
+                        timeout=30.0
                     )
-                    
+
                     try:
                         # 如果指定了模型，测试该模型
                         if model and model.strip():
                             try:
-                                await client.chat.completions.create(
+                                await client.models.generate_content(
                                     model=model,
-                                    messages=[{"role": "user", "content": "test"}],
-                                    max_tokens=5
+                                    contents="test"
                                 )
                                 return True, f"连接成功，模型 {model} 可用"
                             except Exception as e:
                                 return False, f"连接成功但模型 {model} 不可用: {str(e)}"
                         else:
+                            # 尝试列出模型
                             await client.models.list()
                             return True, "连接成功"
                     finally:
                         await client.close()
-                else:
-                    # 使用官方Gemini API - 在线程池中执行同步调用
+
+                except ImportError:
+                    # 如果 curl_cffi 不可用，回退到标准 SDK
+                    from google import genai
                     import asyncio
                     loop = asyncio.get_event_loop()
-                    
+
                     def sync_test():
-                        genai.configure(api_key=api_key)
-                        
+                        # 新版 SDK 使用 genai.Client
+                        if base_url != "https://generativelanguage.googleapis.com":
+                            from google.genai import types
+                            client = genai.Client(
+                                api_key=api_key,
+                                http_options=types.HttpOptions(base_url=base_url)
+                            )
+                        else:
+                            client = genai.Client(api_key=api_key)
+
                         # 如果指定了模型，测试该模型
                         if model and model.strip():
-                            test_model = genai.GenerativeModel(model)
-                            test_model.generate_content("test")
+                            client.models.generate_content(
+                                model=model,
+                                contents="test"
+                            )
                             return True, f"连接成功，模型 {model} 可用"
                         else:
-                            list(genai.list_models())
+                            # 列出模型
+                            list(client.models.list())
                             return True, "连接成功"
-                    
+
                     try:
                         return await loop.run_in_executor(None, sync_test)
                     except Exception as e:
@@ -691,10 +710,10 @@ class MainAppLogic(QObject):
                     # 如果指定了模型，测试该模型
                     if model and model.strip():
                         try:
+                            # 不传递 max_tokens 以兼容所有模型
                             await client.chat.completions.create(
                                 model=model,
-                                messages=[{"role": "user", "content": "test"}],
-                                max_tokens=5
+                                messages=[{"role": "user", "content": "test"}]
                             )
                             return True, f"连接成功，模型 {model} 可用"
                         except Exception as e:
@@ -715,11 +734,22 @@ class MainAppLogic(QObject):
         """异步获取可用模型列表"""
         try:
             if "openai" in translator_key.lower():
-                from openai import AsyncOpenAI
-                client = AsyncOpenAI(
-                    api_key=api_key,
-                    base_url=api_base or "https://api.openai.com/v1"
-                )
+                # 尝试使用 curl_cffi 客户端绕过 TLS 指纹检测
+                try:
+                    from manga_translator.translators.common import AsyncOpenAICurlCffi
+                    client = AsyncOpenAICurlCffi(
+                        api_key=api_key,
+                        base_url=api_base or "https://api.openai.com/v1",
+                        impersonate="chrome110",
+                        timeout=60.0
+                    )
+                except ImportError:
+                    from openai import AsyncOpenAI
+                    client = AsyncOpenAI(
+                        api_key=api_key,
+                        base_url=api_base or "https://api.openai.com/v1",
+                        timeout=60.0,
+                    )
                 
                 try:
                     models_response = await client.models.list()
@@ -733,39 +763,56 @@ class MainAppLogic(QObject):
                     await client.close()
             
             elif "gemini" in translator_key.lower():
-                import google.generativeai as genai
-                
-                # 如果指定了自定义API Base（非空且非官方地址），使用OpenAI兼容模式
-                is_custom_api = (
-                    api_base 
-                    and api_base.strip() 
-                    and api_base.strip() not in ["https://generativelanguage.googleapis.com", "https://generativelanguage.googleapis.com/"]
-                )
-                
-                if is_custom_api:
-                    from openai import AsyncOpenAI
-                    client = AsyncOpenAI(
+                # Gemini API - 使用 curl_cffi 绕过 TLS 指纹检测，使用 Google Gemini 认证格式
+                try:
+                    from manga_translator.translators.common import AsyncGeminiCurlCffi
+
+                    # 确定 base_url
+                    base_url = api_base.strip() if api_base and api_base.strip() else "https://generativelanguage.googleapis.com"
+
+                    client = AsyncGeminiCurlCffi(
                         api_key=api_key,
-                        base_url=api_base.strip()
+                        base_url=base_url,
+                        impersonate="chrome110",
+                        timeout=60.0
                     )
                     try:
                         models_response = await client.models.list()
-                        model_ids = [m.id for m in models_response.data]
+                        model_ids = [m.id for m in models_response]
                         return True, model_ids, "获取成功"
                     finally:
                         await client.close()
-                else:
-                    # 使用官方Gemini API - 在线程池中执行同步调用
+                except ImportError:
+                    # 如果 curl_cffi 不可用，回退到标准客户端
+                    from google import genai
+                    from google.genai import types
                     import asyncio
                     loop = asyncio.get_event_loop()
-                    
-                    def sync_get_models():
-                        genai.configure(api_key=api_key)
-                        models = list(genai.list_models())
-                        # 获取所有模型名称
-                        model_names = [m.name.replace("models/", "") for m in models]
-                        return True, model_names, "获取成功"
-                    
+
+                    # 检查是否是自定义API
+                    is_custom_api = (
+                        api_base
+                        and api_base.strip()
+                        and api_base.strip() not in ["https://generativelanguage.googleapis.com", "https://generativelanguage.googleapis.com/"]
+                    )
+
+                    if is_custom_api:
+                        # 自定义 API 使用 http_options
+                        def sync_get_models():
+                            client = genai.Client(
+                                api_key=api_key,
+                                http_options=types.HttpOptions(base_url=api_base.strip())
+                            )
+                            models = list(client.models.list())
+                            model_names = [m.name.replace("models/", "") for m in models]
+                            return True, model_names, "获取成功"
+                    else:
+                        def sync_get_models():
+                            client = genai.Client(api_key=api_key)
+                            models = list(client.models.list())
+                            model_names = [m.name.replace("models/", "") for m in models]
+                            return True, model_names, "获取成功"
+
                     return await loop.run_in_executor(None, sync_get_models)
             
             elif "sakura" in translator_key.lower():
@@ -924,6 +971,28 @@ class MainAppLogic(QObject):
                     "original": self._t("translator_original"),
                 },
                 "target_lang": self.translation_service.get_target_languages(),
+                "ocr_vl_language_hint": {
+                    "auto": self._t("ocr_lang_auto"),
+                    "multilingual": self._t("ocr_lang_multilingual"),
+                    "Arabic": self._t("ocr_lang_arabic"),
+                    "Simplified Chinese": self._t("ocr_lang_simplified_chinese"),
+                    "Traditional Chinese": self._t("ocr_lang_traditional_chinese"),
+                    "English": self._t("ocr_lang_english"),
+                    "Japanese": self._t("ocr_lang_japanese"),
+                    "Korean": self._t("ocr_lang_korean"),
+                    "Spanish": self._t("ocr_lang_spanish"),
+                    "French": self._t("ocr_lang_french"),
+                    "German": self._t("ocr_lang_german"),
+                    "Russian": self._t("ocr_lang_russian"),
+                    "Portuguese": self._t("ocr_lang_portuguese"),
+                    "Italian": self._t("ocr_lang_italian"),
+                    "Thai": self._t("ocr_lang_thai"),
+                    "Vietnamese": self._t("ocr_lang_vietnamese"),
+                    "Indonesian": self._t("ocr_lang_indonesian"),
+                    "Turkish": self._t("ocr_lang_turkish"),
+                    "Polish": self._t("ocr_lang_polish"),
+                    "Ukrainian": self._t("ocr_lang_ukrainian"),
+                },
                 "labels": {
                     "enable_watermark_filter": self._t("label_filter_text_enabled"),
                     "kernel_size": self._t("label_kernel_size"),
@@ -934,6 +1003,7 @@ class MainAppLogic(QObject):
                     "gpt_config": self._t("label_gpt_config"),
                     "high_quality_prompt_path": self._t("label_high_quality_prompt_path"),
                     "extract_glossary": self._t("label_extract_glossary"),
+                    "use_custom_api_params": self._t("label_use_custom_api_params"),
                     "use_stream": self._t("label_use_stream"),
                     "use_mocr_merge": self._t("label_use_mocr_merge"),
                     "ocr": self._t("label_ocr"),
@@ -944,11 +1014,15 @@ class MainAppLogic(QObject):
                     "use_model_bubble_filter": self._t("label_use_model_bubble_filter"),
                     "model_bubble_overlap_threshold": self._t("label_model_bubble_overlap_threshold"),
                     "use_model_bubble_repair_intersection": self._t("label_use_model_bubble_repair_intersection"),
+                    "limit_mask_dilation_to_bubble_mask": self._t("label_limit_mask_dilation_to_bubble_mask"),
                     "prob": self._t("label_prob"),
                     "merge_gamma": self._t("label_merge_gamma"),
                     "merge_sigma": self._t("label_merge_sigma"),
                     "merge_edge_ratio_threshold": self._t("label_merge_edge_ratio_threshold"),
+                    "merge_special_require_full_wrap": self._t("label_merge_special_require_full_wrap"),
                     "yolo_restrict_merge": self._t("label_yolo_restrict_merge"),
+                    "ocr_vl_language_hint": self._t("label_ocr_vl_language_hint"),
+                    "ocr_vl_custom_prompt": self._t("label_ocr_vl_custom_prompt"),
                     "detector": self._t("label_detector"),
                     "detection_size": self._t("label_detection_size"),
                     "text_threshold": self._t("label_text_threshold"),

@@ -12,6 +12,7 @@ class TranslatorSettings(BaseModel):
     gpt_config: Optional[str] = "examples/gpt_config-example.yaml"
     high_quality_prompt_path: Optional[str] = "dict/prompt_example.json"
     extract_glossary: bool = False
+    use_custom_api_params: bool = False  # 是否使用自定义API参数配置文件
     use_stream: bool = False  # 流式输出开关，默认关闭
     # max_requests_per_minute 已移至预设配置 (MAX_REQUESTS_PER_MINUTE 环境变量)
     attempts: int = -1  # 翻译重试次数，-1 表示无限重试
@@ -44,11 +45,15 @@ class OcrSettings(BaseModel):
     use_model_bubble_filter: bool = False
     model_bubble_overlap_threshold: float = 0.1
     use_model_bubble_repair_intersection: bool = False
+    limit_mask_dilation_to_bubble_mask: bool = False
     prob: float = 0.1
     merge_gamma: float = 0.8
     merge_sigma: float = 2.5
     merge_edge_ratio_threshold: float = 0.0
+    merge_special_require_full_wrap: bool = True
     yolo_restrict_merge: bool = True  # YOLO限制跨气泡合并（需要启用YOLO辅助检测）
+    ocr_vl_language_hint: str = "auto"
+    ocr_vl_custom_prompt: Optional[str] = None
 
 class DetectorSettings(BaseModel):
     detector: str = "default"

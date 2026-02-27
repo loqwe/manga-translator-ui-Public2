@@ -630,9 +630,29 @@ class MainView(QWidget):
                 widget = container
 
             elif isinstance(value, bool):
-                widget = QCheckBox()
-                widget.setChecked(value)
-                widget.stateChanged.connect(lambda state, k=full_key: self._on_setting_changed(bool(state), k, None))
+                # 特殊处理：use_custom_api_params 需要添加"打开文件"按钮
+                if full_key == "translator.use_custom_api_params":
+                    container = QWidget()
+                    container_layout = QHBoxLayout(container)
+                    container_layout.setContentsMargins(0, 0, 0, 0)
+                    
+                    checkbox = QCheckBox()
+                    checkbox.setChecked(value)
+                    checkbox.stateChanged.connect(lambda state, k=full_key: self._on_setting_changed(bool(state), k, None))
+                    
+                    open_file_button = QPushButton(self._t("Open File"))
+                    open_file_button.setFixedWidth(100)
+                    open_file_button.clicked.connect(self._on_open_custom_api_params_file)
+                    
+                    container_layout.addWidget(checkbox)
+                    container_layout.addWidget(open_file_button)
+                    container_layout.addStretch()
+                    
+                    widget = container
+                else:
+                    widget = QCheckBox()
+                    widget.setChecked(value)
+                    widget.stateChanged.connect(lambda state, k=full_key: self._on_setting_changed(bool(state), k, None))
 
             # 特殊处理：upscale_ratio 动态下拉框（必须在 int/float 判断之前）
             elif full_key == "upscale.upscale_ratio":
@@ -702,8 +722,8 @@ class MainView(QWidget):
                 widget = QLineEdit(str(value))
                 widget.editingFinished.connect(lambda k=full_key, w=widget: self._on_numeric_input_changed(w.text(), k, float if isinstance(value, float) else int))
 
-            elif value is None and key in ['tile_size', 'line_spacing', 'font_size']:
-                # 处理值为 None 的数值类型参数（Optional[int] 或 Optional[float]）
+            elif value is None and key in ['tile_size', 'line_spacing', 'font_size', 'ocr_vl_custom_prompt']:
+                # 处理值为 None 的可选参数（数值/字符串）
                 widget = QLineEdit("")
                 # 根据参数名设置提示文本
                 if key == 'tile_size':
@@ -715,12 +735,18 @@ class MainView(QWidget):
                 elif key == 'font_size':
                     widget.setPlaceholderText(self._t("Auto"))
                     widget.editingFinished.connect(lambda k=full_key, w=widget: self._on_numeric_input_changed(w.text(), k, int))
+                elif key == 'ocr_vl_custom_prompt':
+                    widget.setMinimumWidth(320)
+                    widget.setPlaceholderText("OCR: Extract all Arabic text.")
+                    widget.editingFinished.connect(lambda k=full_key, w=widget: self._on_setting_changed(w.text(), k, None))
 
             elif (isinstance(value, str) or value is None) and (options or display_map):
                 widget = QComboBox()
                 if key == "translator":
                     widget.setObjectName("translator.translator")
                     widget.setMinimumWidth(180)  # 设置翻译器下拉框最小宽度
+                elif full_key == "ocr.ocr_vl_language_hint":
+                    widget.setMinimumWidth(260)  # OCR语言全称较长，避免被截断
                 
                 if display_map:
                     widget.addItems(list(display_map.values()))
@@ -740,6 +766,9 @@ class MainView(QWidget):
 
             elif isinstance(value, str):
                 widget = QLineEdit(value)
+                if full_key == "ocr.ocr_vl_custom_prompt":
+                    widget.setMinimumWidth(320)
+                    widget.setPlaceholderText("OCR: Extract all Arabic text.")
                 widget.editingFinished.connect(lambda k=full_key, w=widget: self._on_setting_changed(w.text(), k, None))
             
             if widget:
@@ -1345,6 +1374,55 @@ class MainView(QWidget):
             pass  # No connection to disconnect, which is fine.
         self._env_debounce_timer.timeout.connect(lambda: self.env_var_changed.emit(key, text))
         self._env_debounce_timer.start()
+
+    def _on_open_custom_api_params_file(self):
+        """打开自定义API参数配置文件"""
+        import subprocess
+        import sys
+        
+        # 获取配置文件路径
+        if getattr(sys, 'frozen', False):
+            # 打包环境
+            if hasattr(sys, '_MEIPASS'):
+                config_path = os.path.join(sys._MEIPASS, 'examples', 'custom_api_params.json')
+            else:
+                config_path = os.path.join(os.path.dirname(sys.executable), 'examples', 'custom_api_params.json')
+        else:
+            # 开发环境：从当前文件向上找到项目根目录
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            config_path = os.path.join(project_root, 'examples', 'custom_api_params.json')
+        
+        # 如果文件不存在，创建默认文件
+        if not os.path.exists(config_path):
+            try:
+                os.makedirs(os.path.dirname(config_path), exist_ok=True)
+                with open(config_path, 'w', encoding='utf-8') as f:
+                    import json
+                    json.dump({}, f, indent=2, ensure_ascii=False)
+            except Exception as e:
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.warning(
+                    self,
+                    self._t("Error"),
+                    f"创建配置文件失败: {e}"
+                )
+                return
+        
+        # 使用系统默认程序打开文件
+        try:
+            if sys.platform == 'win32':
+                os.startfile(config_path)
+            elif sys.platform == 'darwin':
+                subprocess.run(['open', config_path])
+            else:
+                subprocess.run(['xdg-open', config_path])
+        except Exception as e:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self,
+                self._t("Error"),
+                f"打开文件失败: {e}"
+            )
 
     def _on_test_api_clicked(self, key: str):
         """测试API连接"""
