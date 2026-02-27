@@ -2062,16 +2062,37 @@ class AdvancedFolderDialog(QDialog):
         
         for i in range(self.title_tree.topLevelItemCount()):
             item = self.title_tree.topLevelItem(i)
-            title = item.text(0).lower()
-            sources = item.text(1).lower()
+            title_key = item.data(0, Qt.ItemDataRole.UserRole)  # folder_data 的 key
+            title_display = item.text(0).lower()
+            sources_display = item.text(1).lower()
             
             # Check keyword filter
-            keyword_match = not keyword or keyword in title or keyword in sources
+            keyword_match = not keyword or keyword in title_display or keyword in sources_display
             
-            # Check source filter
-            source_match = selected_source is None or selected_source.lower() in sources
+            # Check source filter——精确匹配 folder_data 的来源集合
+            if selected_source is None:
+                source_match = True
+            elif title_key and title_key in self.folder_data:
+                source_match = selected_source in self.folder_data[title_key].get('sources', set())
+            else:
+                source_match = False
             
             item.setHidden(not (keyword_match and source_match))
+            
+            # 来源筛选时，同时隐藏不匹配的来源子节点
+            if selected_source and not item.isHidden():
+                for j in range(item.childCount()):
+                    child = item.child(j)
+                    # 来源节点（第二列显示"来源"）—— 按名称筛选
+                    if child.text(1) == "来源":
+                        child.setHidden(child.text(0) != selected_source)
+                    # 直接章节节点（单来源作品）—— 来源在第二列
+                    elif child.data(0, Qt.ItemDataRole.UserRole):
+                        child.setHidden(child.text(1) != selected_source)
+            elif not selected_source and not item.isHidden():
+                # “全部”时恢复所有子节点可见
+                for j in range(item.childCount()):
+                    item.child(j).setHidden(False)
     
     def _on_source_filter_changed(self):
         """来源筛选改变时触发"""
@@ -2112,6 +2133,9 @@ class AdvancedFolderDialog(QDialog):
                 self.source_filter_combo.setCurrentIndex(index)
         
         self.source_filter_combo.blockSignals(False)
+        
+        # 恢复选择后重新应用筛选（blockSignals 期间信号不触发，需手动调用）
+        self.apply_filter()
     
     def _populate_search_combo(self):
         """填充搜索框（使用当前扫描到的作品名称）"""
@@ -2343,10 +2367,12 @@ class AdvancedFolderDialog(QDialog):
         return selected
     
     def _check_all_chapters_recursive(self, item: QTreeWidgetItem, checked: bool) -> int:
-        """递归勾选/取消勾选所有章节"""
+        """递归勾选/取消勾选所有章节（跳过被来源筛选隐藏的节点）"""
         count = 0
         for i in range(item.childCount()):
             child = item.child(i)
+            if child.isHidden():
+                continue
             path = child.data(0, Qt.ItemDataRole.UserRole)
             
             if path and isinstance(path, str) and os.path.isdir(path):  # 是章节项

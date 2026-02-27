@@ -1755,13 +1755,8 @@ class MangaTranslator:
     async def _run_textline_merge(self, config: Config, ctx: Context):
         current_time = time.time()
         self._model_usage_timestamps[("textline_merge", "textline_merge")] = current_time
-        text_regions = await dispatch_textline_merge(ctx.textlines, ctx.img_rgb.shape[1], ctx.img_rgb.shape[0],
-                                                     config, verbose=self.verbose)
-        for region in text_regions:
-            if not hasattr(region, "text_raw"):
-                region.text_raw = region.text      # <- Save the initial OCR results to expand the render detection box. Also, prevent affecting the forbidden translation function.       
         # Filter out languages to skip  
-        if config.translator.skip_lang is not None:  
+        if config.translator.skip_lang is not None:
             skip_langs = [lang.strip().upper() for lang in config.translator.skip_lang.split(',')]
             filtered_textlines = []  
             for txtln in ctx.textlines:  
@@ -1783,10 +1778,33 @@ class MangaTranslator:
                 filtered_textlines.append(txtln)  
             ctx.textlines = filtered_textlines  
     
-        text_regions = await dispatch_textline_merge(ctx.textlines, ctx.img_rgb.shape[1], ctx.img_rgb.shape[0],  
-                                                     config, verbose=self.verbose)  
+        merge_input_textlines = list(ctx.textlines)
+        enable_model_assisted_merge = bool(getattr(config.ocr, 'merge_special_require_full_wrap', True))
+        model_assisted_other_textlines = []
+        if enable_model_assisted_merge:
+            model_assisted_other_textlines = getattr(ctx, 'model_assisted_other_textlines', None) or []
+            if model_assisted_other_textlines:
+                logger.info(
+                    f"Model-assisted merge uses auxiliary 'other' boxes only: "
+                    f"ocr_textlines={len(merge_input_textlines)}, "
+                    f"other_aux={len(model_assisted_other_textlines)}"
+                )
 
-        # 应用合并后的面积过滤（基于合并后的大框）
+        text_regions = await dispatch_textline_merge(
+            merge_input_textlines,
+            ctx.img_rgb.shape[1],
+            ctx.img_rgb.shape[0],
+            config,
+            verbose=self.verbose,
+            model_assisted_other_textlines=(
+                model_assisted_other_textlines if enable_model_assisted_merge else None
+            )
+        )
+        for region in text_regions:
+            if not hasattr(region, "text_raw"):
+                region.text_raw = region.text
+
+        # 应用合并后的面积过滤
         # 只过滤单个检测框的小区域，保留包含多个检测框的合并区域
         if config.detector.min_box_area_ratio > 0:
             img_h, img_w = ctx.img_rgb.shape[:2]
@@ -3292,6 +3310,38 @@ class MangaTranslator:
                                         region.lines = region.lines * upscale_ratio
                                         if hasattr(region, 'font_size') and region.font_size:
                                             region.font_size = int(region.font_size * upscale_ratio)
+
+                            # load_text 模式下：无论是否超分，都强制对齐 mask 到当前图像尺寸，
+                            # 避免 ONNX inpainting 因 image/mask 维度不一致而报错。
+                            target_h, target_w = ctx.img_rgb.shape[:2]
+                            for mask_attr in ('mask_raw', 'mask'):
+                                mask_val = getattr(ctx, mask_attr, None)
+                                if mask_val is None:
+                                    continue
+
+                                mask_arr = np.asarray(mask_val)
+                                if mask_arr.ndim == 3:
+                                    mask_arr = mask_arr[:, :, 0]
+                                elif mask_arr.ndim != 2:
+                                    squeezed = np.squeeze(mask_arr)
+                                    if squeezed.ndim == 2:
+                                        mask_arr = squeezed
+                                    else:
+                                        logger.warning(
+                                            f"[load_text] {mask_attr} shape invalid ({mask_arr.shape}), fallback to zero mask {target_h}x{target_w}"
+                                        )
+                                        mask_arr = np.zeros((target_h, target_w), dtype=np.uint8)
+
+                                if mask_arr.shape[0] != target_h or mask_arr.shape[1] != target_w:
+                                    logger.warning(
+                                        f"[load_text] Resizing {mask_attr} from {mask_arr.shape[:2]} to {(target_h, target_w)}"
+                                    )
+                                    mask_arr = cv2.resize(mask_arr, (target_w, target_h), interpolation=cv2.INTER_NEAREST)
+
+                                if mask_arr.dtype != np.uint8:
+                                    mask_arr = mask_arr.astype(np.uint8, copy=False)
+
+                                setattr(ctx, mask_attr, mask_arr)
                             
                             # 如果没有文本区域，跳过mask refinement、inpainting和rendering，直接返回原图
                             if not ctx.text_regions:
@@ -3726,11 +3776,16 @@ class MangaTranslator:
             # Step 3: Textline Merge - 将textlines合并成text_regions（大框）
             try:
                 ctx.text_regions = await dispatch_textline_merge(
-                    ctx.textlines, 
-                    ctx.img_rgb.shape[1], 
+                    ctx.textlines,
+                    ctx.img_rgb.shape[1],
                     ctx.img_rgb.shape[0],
-                    config, 
-                    verbose=self.verbose
+                    config,
+                    verbose=self.verbose,
+                    model_assisted_other_textlines=(
+                        getattr(ctx, 'model_assisted_other_textlines', None)
+                        if bool(getattr(config.ocr, 'merge_special_require_full_wrap', True))
+                        else None
+                    )
                 )
                 logger.info(f"✓ Step 3 - Textline Merge: Merged {len(ctx.textlines)} textlines into {len(ctx.text_regions)} text_regions")
             except Exception as _e:
@@ -4331,8 +4386,6 @@ class MangaTranslator:
             batch = None
             import gc
             gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
 
         return results
 

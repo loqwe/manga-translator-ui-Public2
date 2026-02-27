@@ -102,6 +102,8 @@ class MainAppLogic(QObject):
             root_logger = logging.getLogger()
             if level == "ERROR":
                 root_logger.error(message)
+            elif level == "DEBUG":
+                root_logger.debug(message)
             elif level == "WARNING":
                 root_logger.warning(message)
             else:
@@ -2217,6 +2219,15 @@ class MainAppLogic(QObject):
                     self._ui_log("已清理压缩包临时文件")
                 except Exception as cleanup_error:
                     self._ui_log(f"清理临时文件时出错: {cleanup_error}", "WARNING")
+
+            # 翻译任务完成后释放 CUDA 缓存
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    self._ui_log("翻译完成后已调用 torch.cuda.empty_cache()", "DEBUG")
+            except Exception as memory_cleanup_error:
+                self._ui_log(f"调用 torch.cuda.empty_cache() 失败: {memory_cleanup_error}", "WARNING")
         except Exception as e:
             # 忽略 C++ 对象已删除的错误
             if "has been deleted" not in str(e):

@@ -2089,6 +2089,154 @@ def sanitize_text_encoding(text: str) -> str:
             return text.replace('\ufffd', '').replace('\x00', '')
         return str(text)
 
+def strip_known_llm_injected_noise(text: str) -> Tuple[str, int]:
+    """
+    清理代理/网关注入的广告或脏尾巴行，返回(清理后文本, 移除行数)。
+    """
+    if not text:
+        return text, 0
+
+    noise_substrings = (
+        'upgrade your plan',
+        'proxies cheaper than the market',
+        'proxy cheaper than the market',
+        'remove this mesage',
+        'remove this message',
+        'api.airforce',
+        'discord.g/airforce',
+        'discord.gg/airforce',
+        'op.wtf',
+        'htps:/',
+        'https:/',
+    )
+
+    filtered_lines = []
+    removed = 0
+    for line in str(text).splitlines():
+        lowered = line.strip().lower()
+        if lowered and any(token in lowered for token in noise_substrings):
+            removed += 1
+            continue
+        filtered_lines.append(line)
+
+    return '\n'.join(filtered_lines).strip(), removed
+
+def extract_json_payload_from_mixed_text(text: str) -> Tuple[str, bool]:
+    """
+    通用 JSON 提取器：从混杂文本中优先提取最可能的 JSON 负载。
+    返回 (payload, extracted)，extracted=True 表示确实抽取到了 JSON 片段。
+    """
+    import re
+    import json
+
+    if text is None:
+        return "", False
+
+    raw = str(text).strip()
+    if not raw:
+        return raw, False
+
+    def _extract_balanced_json_candidates(src: str) -> List[str]:
+        candidates = []
+        stack = []
+        start = -1
+        in_str = False
+        escape = False
+        for i, ch in enumerate(src):
+            if in_str:
+                if escape:
+                    escape = False
+                elif ch == '\\':
+                    escape = True
+                elif ch == '"':
+                    in_str = False
+                continue
+            if ch == '"':
+                in_str = True
+                continue
+            if ch in '{[':
+                if not stack:
+                    start = i
+                stack.append(ch)
+            elif ch in '}]' and stack:
+                top = stack[-1]
+                if (top == '{' and ch == '}') or (top == '[' and ch == ']'):
+                    stack.pop()
+                    if not stack and start >= 0:
+                        candidates.append(src[start:i + 1].strip())
+                        start = -1
+                else:
+                    stack = []
+                    start = -1
+        return candidates
+
+    def _is_json_parseable(candidate: str) -> bool:
+        try:
+            json.loads(candidate)
+            return True
+        except Exception:
+            try:
+                import json5
+                json5.loads(candidate)
+                return True
+            except Exception:
+                return False
+
+    candidates: List[str] = []
+
+    # 1) fenced code block candidates
+    fenced = re.findall(r'`{3,}\s*(?:json)?\s*([\s\S]*?)`{3,}', raw, flags=re.IGNORECASE)
+    for c in fenced:
+        c = c.strip()
+        if c:
+            candidates.append(c)
+
+    # 2) balanced-json candidates from full text
+    candidates.extend(_extract_balanced_json_candidates(raw))
+
+    # 3) fallback: from first bracket onward
+    first_bracket = raw.find('[')
+    first_brace = raw.find('{')
+    json_start = -1
+    if first_bracket != -1 and first_brace != -1:
+        json_start = min(first_bracket, first_brace)
+    elif first_bracket != -1:
+        json_start = first_bracket
+    elif first_brace != -1:
+        json_start = first_brace
+    if json_start >= 0:
+        candidates.append(raw[json_start:].strip())
+
+    # dedup keep-order
+    dedup: List[str] = []
+    seen = set()
+    for c in candidates:
+        key = c.strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        dedup.append(key)
+
+    if not dedup:
+        return raw, False
+
+    preferred_markers = ('"translations"', "'translations'", '"translation"', '"id"', '"new_terms"', '"glossary"')
+
+    best_candidate = None
+    best_score = (-1, -1)
+    for c in dedup:
+        low = c.lower()
+        marker_score = sum(1 for m in preferred_markers if m in low)
+        parseable_score = 1 if _is_json_parseable(c) else 0
+        score = (parseable_score * 10 + marker_score, len(c))
+        if score > best_score:
+            best_score = score
+            best_candidate = c
+
+    if best_candidate is None:
+        return raw, False
+    return best_candidate, True
+
 def parse_hq_response(result_text: str) -> Tuple[List[str], List[Dict[str, str]]]:
     """
     专门解析HQ翻译器的响应，支持提取翻译和新术语
@@ -2105,6 +2253,10 @@ def parse_hq_response(result_text: str) -> Tuple[List[str], List[Dict[str, str]]
     
     # 统一的编码清理
     result_text = sanitize_text_encoding(result_text)
+    extracted_payload, extracted = extract_json_payload_from_mixed_text(result_text)
+    if extracted:
+        result_text = extracted_payload
+        logger.info("Extracted JSON payload from mixed response text")
     
     _original_text = result_text # Keep for logging
     result_text = result_text.strip()
@@ -2162,9 +2314,6 @@ def parse_hq_response(result_text: str) -> Tuple[List[str], List[Dict[str, str]]
 
                 if isinstance(trans_list, list):
                     if trans_list and isinstance(trans_list[0], dict):
-                         # Sort by ID if possible
-                        try: trans_list.sort(key=lambda x: int(x.get('id', 0)))
-                        except: pass
                         for item in trans_list:
                             text = item.get('translation') or item.get('text') or list(item.values())[0]
                             translations.append(str(text) if text is not None else "")
@@ -2180,8 +2329,6 @@ def parse_hq_response(result_text: str) -> Tuple[List[str], List[Dict[str, str]]
             elif isinstance(parsed_json, list):
                 if parsed_json:
                     if isinstance(parsed_json[0], dict):
-                        try: parsed_json.sort(key=lambda x: int(x.get('id', 0)))
-                        except: pass
                         for item in parsed_json:
                             text = item.get('translation') or item.get('text') or list(item.values())[0]
                             translations.append(str(text) if text is not None else "")
@@ -2202,8 +2349,7 @@ def parse_hq_response(result_text: str) -> Tuple[List[str], List[Dict[str, str]]
     
     if matches:
         logger.info(f"Regex extracted {len(matches)} translations with IDs")
-        sorted_matches = sorted(matches, key=lambda x: int(x[0]))
-        translations = [match[1].replace('\\"', '"').replace('\\n', '\n') for match in sorted_matches]
+        translations = [match[1].replace('\\"', '"').replace('\\n', '\n') for match in matches]
         
         # 尝试提取术语 (简单正则)
         # 假设 new_terms 在后面，格式类似 {"original": "...", ...}

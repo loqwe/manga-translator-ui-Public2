@@ -98,9 +98,6 @@ class ConcurrentPipeline:
         self._active_worker_limit = 1
         self._worker_scale_lock = asyncio.Lock()
 
-        # Serialize GPU-heavy ops across stages to reduce HIP OOM spikes on AMD/ROCm.
-        self._gpu_op_lock = asyncio.Lock()
-        
         # 结果存储 {image_name: ctx}
         # ✅ 存储完整的ctx对象，而不是True/False标记
         self.translation_done = {}  # 翻译完成的ctx（包含翻译后的text_regions）
@@ -141,18 +138,6 @@ class ConcurrentPipeline:
         self._main_workers_finished = 0
         self._main_workers_lock = asyncio.Lock()
 
-    def _should_serialize_gpu_ops(self, config) -> bool:
-        """Return True if GPU-heavy ops should be serialized."""
-        try:
-            if config is None:
-                return True
-            cli = getattr(config, 'cli', None)
-            if cli is None:
-                return True
-            return bool(getattr(cli, 'use_gpu', False))
-        except Exception:
-            return True
-    
     async def _detection_ocr_worker(self, file_paths: List[str], configs: List):
         """
         检测+OCR工作线程（顺序处理，分批加载图片）
@@ -211,18 +196,12 @@ class ConcurrentPipeline:
                 ctx.rate_limiter = self.rate_limiter  # 传递限速器引用，便于翻译器通知 429 错误
                 
                 logger.info(f"[检测+OCR] 处理 {idx+1}/{self.total_images}: {ctx.image_name}")
-
-                serialize_gpu = self._should_serialize_gpu_ops(config)
                 
                 # 预处理：加载图片、上色、超分
                 ctx.img_rgb, ctx.img_alpha = load_image(image)
                 
                 if config.colorizer.colorizer.value != 'none':
-                    if serialize_gpu:
-                        async with self._gpu_op_lock:
-                            colorized_result = await self.translator._run_colorizer(config, ctx)
-                    else:
-                        colorized_result = await self.translator._run_colorizer(config, ctx)
+                    colorized_result = await self.translator._run_colorizer(config, ctx)
                     # colorizer 返回 PIL Image，需要转换为 numpy
                     if hasattr(colorized_result, 'mode'):  # PIL Image
                         ctx.img_colorized, _ = load_image(colorized_result)
@@ -232,11 +211,7 @@ class ConcurrentPipeline:
                     ctx.img_colorized = ctx.img_rgb
                 
                 if config.upscale.upscale_ratio:
-                    if serialize_gpu:
-                        async with self._gpu_op_lock:
-                            upscaled_result = await self.translator._run_upscaling(config, ctx)
-                    else:
-                        upscaled_result = await self.translator._run_upscaling(config, ctx)
+                    upscaled_result = await self.translator._run_upscaling(config, ctx)
                     # upscaler 返回 PIL Image，需要转换为 numpy
                     if hasattr(upscaled_result, 'mode'):  # PIL Image
                         ctx.upscaled, _ = load_image(upscaled_result)
@@ -254,15 +229,9 @@ class ConcurrentPipeline:
                     asyncio.run,
                     self.translator._run_detection(config, ctx)
                 )
-                if serialize_gpu:
-                    async with self._gpu_op_lock:
-                        detection_result = await loop.run_in_executor(
-                            self.executor, detection_func
-                        )
-                else:
-                    detection_result = await loop.run_in_executor(
-                        self.executor, detection_func
-                    )
+                detection_result = await loop.run_in_executor(
+                    self.executor, detection_func
+                )
                 # 检测结果现在返回4个值：(textlines, mask_raw, mask/debug_img, yolo_boxes)
                 if len(detection_result) >= 4:
                     ctx.textlines, ctx.mask_raw, ctx.mask = detection_result[0], detection_result[1], detection_result[2]
@@ -275,15 +244,9 @@ class ConcurrentPipeline:
                     asyncio.run,
                     self.translator._run_ocr(config, ctx)
                 )
-                if serialize_gpu:
-                    async with self._gpu_op_lock:
-                        ctx.textlines = await loop.run_in_executor(
-                            self.executor, ocr_func
-                        )
-                else:
-                    ctx.textlines = await loop.run_in_executor(
-                        self.executor, ocr_func
-                    )
+                ctx.textlines = await loop.run_in_executor(
+                    self.executor, ocr_func
+                )
                 
                 # 文本行合并
                 if ctx.textlines:
@@ -1654,8 +1617,6 @@ class ConcurrentPipeline:
                     continue
                 
                 logger.info(f"[修复] 处理: {ctx.image_name}")
-
-                serialize_gpu = self._should_serialize_gpu_ops(config)
                 
                 # Mask refinement（在线程池中执行）
                 if ctx.mask is None and ctx.text_regions:
@@ -1664,11 +1625,7 @@ class ConcurrentPipeline:
                         asyncio.run,
                         self.translator._run_mask_refinement(config, ctx)
                     )
-                    if serialize_gpu:
-                        async with self._gpu_op_lock:
-                            ctx.mask = await loop.run_in_executor(self.executor, mask_func)
-                    else:
-                        ctx.mask = await loop.run_in_executor(self.executor, mask_func)
+                    ctx.mask = await loop.run_in_executor(self.executor, mask_func)
                 
                 # Inpainting（在线程池中执行）
                 if ctx.text_regions:
@@ -1677,11 +1634,7 @@ class ConcurrentPipeline:
                         asyncio.run,
                         self.translator._run_inpainting(config, ctx)
                     )
-                    if serialize_gpu:
-                        async with self._gpu_op_lock:
-                            ctx.img_inpainted = await loop.run_in_executor(self.executor, inpaint_func)
-                    else:
-                        ctx.img_inpainted = await loop.run_in_executor(self.executor, inpaint_func)
+                    ctx.img_inpainted = await loop.run_in_executor(self.executor, inpaint_func)
                 
                 self.stats['inpaint'] += 1
                 logger.info(f"[修复] 完成: {ctx.image_name} ({self.stats['inpaint']}/{self.total_images})")

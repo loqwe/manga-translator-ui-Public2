@@ -1,5 +1,9 @@
 [
   {
+    "hash": "97af68f",
+    "msg": "fix: stabilize HQ parsing/merge flow and release v2.1.3"
+  },
+  {
     "hash": "b71827b",
     "msg": "feat: update v2.1.3 mask, auto line-break, and logging behavior"
   },

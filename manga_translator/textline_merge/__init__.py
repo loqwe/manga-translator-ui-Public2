@@ -332,23 +332,32 @@ def merge_bboxes_text_region(bboxes: List[Quadrilateral], width, height, debug=F
         # yield overall bbox and sorted indices
         yield txtlns, (fg_r, fg_g, fg_b), (bg_r, bg_g, bg_b)
 
-async def dispatch(textlines: List[Quadrilateral], width: int, height: int, config, verbose: bool = False) -> List[TextBlock]:
+async def dispatch(
+    textlines: List[Quadrilateral],
+    width: int,
+    height: int,
+    config,
+    verbose: bool = False,
+    model_assisted_other_textlines: Optional[List[Quadrilateral]] = None
+) -> List[TextBlock]:
     # 启用调试模式 (临时)
     debug = verbose
     # 获取边缘距离比例阈值
     edge_ratio_threshold = getattr(config.ocr, 'merge_edge_ratio_threshold', 0.0)
     enable_model_assisted_merge = bool(getattr(config.ocr, 'merge_special_require_full_wrap', True))
     text_regions: List[TextBlock] = []
+    main_textlines = list(textlines)
+    auxiliary_other_textlines = list(model_assisted_other_textlines or [])
 
     # 先做标签预合并（已合并的框不再参与后续原始合并）
-    id_to_idx = {id(txtln): i for i, txtln in enumerate(textlines)}
+    id_to_idx = {id(txtln): i for i, txtln in enumerate(main_textlines)}
     consumed_indices = set()
 
     def _run_special_stage(target_labels: Set[str]) -> None:
         candidate_indices = []
         has_target_label = False
 
-        for i, txtln in enumerate(textlines):
+        for i, txtln in enumerate(main_textlines):
             if i in consumed_indices:
                 continue
             det_label = _get_det_label(txtln)
@@ -365,7 +374,10 @@ async def dispatch(textlines: List[Quadrilateral], width: int, height: int, conf
         if not has_target_label or not candidate_indices:
             return
 
-        candidates = [textlines[i] for i in candidate_indices]
+        candidates = [main_textlines[i] for i in candidate_indices]
+        # other 仅作为辅助包裹关系输入，不进入主输入序列
+        if auxiliary_other_textlines:
+            candidates.extend(auxiliary_other_textlines)
         candidate_groups = _group_by_full_wrap(candidates, wrap_eps=1.0)
         for node_set in candidate_groups:
             # 特殊预合并严格要求完全包裹关系，单框不算“合并”
@@ -428,7 +440,7 @@ async def dispatch(textlines: List[Quadrilateral], width: int, height: int, conf
 
     # 剩余框（或禁用模型辅助时的全部框）走原始合并算法
     remaining_textlines = []
-    for i, txtln in enumerate(textlines):
+    for i, txtln in enumerate(main_textlines):
         if i in consumed_indices:
             continue
         lbl = _get_det_label(txtln)

@@ -264,9 +264,6 @@ class LamaMPEInpainter(OfflineInpainter):
 
                 with torch.autocast(device_type="cuda", dtype=precision):
                     img_inpainted_torch = self.model(img_torch, mask_torch)
-                
-                # ✅ autocast后立即清理缓存（防止bf16中间激活累积）
-                torch.cuda.empty_cache()
 
         if isinstance(self.model, LamaFourier):
             img_inpainted_torch = img_inpainted_torch.to(torch.float32)
