@@ -2096,12 +2096,13 @@ class AdvancedFolderDialog(QDialog):
         self.source_filter_combo.blockSignals(True)
         self.source_filter_combo.clear()
         self.source_filter_combo.addItem("全部", None)
-        # Pin "网站漫画下载文件夹" to the top
-        pinned = "网站漫画下载文件夹"
-        if pinned in all_sources:
-            self.source_filter_combo.addItem(pinned, pinned)
+        # Pin sources to the top (in order)
+        pinned_list = ["漫画下载文件夹", "网站漫画下载文件夹"]
+        for pinned in pinned_list:
+            if pinned in all_sources:
+                self.source_filter_combo.addItem(pinned, pinned)
         for source in sorted(all_sources):
-            if source != pinned:
+            if source not in pinned_list:
                 self.source_filter_combo.addItem(source, source)
         
         # Restore selection if still valid
