@@ -2372,6 +2372,11 @@ class MangaTranslator:
         if config.translator.translator == Translator.none:
             for region in ctx.text_regions:  
                 region.translation = ""  # 空翻译将创建空白区域 / Empty translation will create blank areas
+        elif config.translator.translator == Translator.original:
+            # 原文模式：直接将原文作为翻译结果，跳过所有翻译器和上下文构建
+            logger.info(f'[原文模式] 跳过翻译，直接使用 {len(ctx.text_regions)} 条原文')
+            for region in ctx.text_regions:
+                region.translation = region.text
         else: # Actual network translation
             # --- BEGIN PRE-TRANSLATION DE-DUPLICATION ---
             # Per user request, clean up duplicate lines within regions before sending to translator.
@@ -4623,6 +4628,11 @@ class MangaTranslator:
         """
         if config.translator.translator == Translator.none:
             return ["" for _ in texts]
+
+        # 原文模式：直接返回原文，不走任何翻译器/上下文构建/文本清理
+        if config.translator.translator == Translator.original:
+            logger.info(f'[原文模式] 跳过翻译，直接返回 {len(texts)} 条原文')
+            return list(texts)
 
 
 
