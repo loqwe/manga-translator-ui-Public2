@@ -3473,6 +3473,19 @@ class TranslationWorker(QObject):
             self.log_received.emit(friendly_error)
             self.error.emit(friendly_error)
         finally:
+            # ⏱️ 无论成功、失败还是取消，都显示总耗时
+            try:
+                _elapsed = time.time() - _start_time
+                if _elapsed < 60:
+                    _elapsed_str = f"{_elapsed:.1f}秒"
+                elif _elapsed < 3600:
+                    _elapsed_str = f"{int(_elapsed//60)}分{int(_elapsed%60)}秒"
+                else:
+                    _elapsed_str = f"{int(_elapsed//3600)}时{int((_elapsed%3600)//60)}分{int(_elapsed%60)}秒"
+                self.log_received.emit(f"⏱️ 总耗时: {_elapsed_str}")
+            except Exception:
+                pass
+
             manga_logger.removeHandler(log_handler)
 
             # 翻译结束后进行完整的内存清理（特别是CPU模式）
