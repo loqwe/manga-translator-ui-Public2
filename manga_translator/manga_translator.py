@@ -783,6 +783,7 @@ class MangaTranslator:
         # Get the first value from the dictionary, regardless of the key.
         image_data = next(iter(data.values()))
         mask_is_refined = False
+        skip_font_scaling = True
 
         # Handle both old and new JSON formats
         if isinstance(image_data, list):
@@ -794,9 +795,18 @@ class MangaTranslator:
             regions_data = image_data.get('regions', [])
             mask_raw_data = image_data.get('mask_raw', None)
             mask_is_refined = image_data.get('mask_is_refined', False)
+            skip_font_scaling_raw = image_data.get('skip_font_scaling', True)
+            if isinstance(skip_font_scaling_raw, bool):
+                skip_font_scaling = skip_font_scaling_raw
+            elif isinstance(skip_font_scaling_raw, str):
+                skip_font_scaling = skip_font_scaling_raw.strip().lower() in ('1', 'true', 'yes', 'on')
+            elif skip_font_scaling_raw is None:
+                skip_font_scaling = True
+            else:
+                skip_font_scaling = bool(skip_font_scaling_raw)
         else:
             logger.warning(f"Invalid data format in JSON file {text_file_path}.")
-            return None, None, False
+            return None, None, False, True
 
         regions = []
         for region_data in regions_data:
@@ -905,9 +915,9 @@ class MangaTranslator:
         if mask_raw is not None:
             logger.info(f"Loaded mask_raw from {text_file_path}")
 
-        return regions, mask_raw, mask_is_refined
+        return regions, mask_raw, mask_is_refined, skip_font_scaling
 
-    def _load_text_and_regions_from_txt_file(self, image_path: str) -> Optional[List[TextBlock]]:
+    def _load_text_and_regions_from_txt_file(self, *args, **kwargs):
         """
         旧的TXT格式加载方法（已废弃）
         现在只支持JSON格式，此方法保留用于向后兼容但不再实现
@@ -2692,15 +2702,7 @@ class MangaTranslator:
         # 更新context中的文本区域列表（使用过滤后的）
         ctx.text_regions = new_text_regions
 
-        # --- Save JSON after all post-processing (including punctuation replacement and filtering) ---
-        if self.save_text or self.text_output_file:
-            if hasattr(ctx, 'image_name') and ctx.image_name:
-                # 使用ctx中保存的config，如果没有则使用当前config参数
-                config_to_use = getattr(ctx, 'config', config) if hasattr(ctx, 'config') else config
-                self._save_text_to_file(ctx.image_name, ctx, config_to_use)
-                logger.info(f"Translations saved to JSON for {ctx.image_name} (after post-processing).")
-            else:
-                logger.warning("Could not save translation file, image_name not in context.")
+        # JSON保存已移到渲染后（resize_regions_to_font_size会插入BR），这里不再保存
 
         return new_text_regions
 
@@ -2731,29 +2733,33 @@ class MangaTranslator:
         return await dispatch_inpainting(config.inpainter.inpainter, ctx.img_rgb, ctx.mask, config.inpainter, config.inpainter.inpainting_size, self.device,
                                          self.verbose)
 
-    async def _run_text_rendering(self, config: Config, ctx: Context):
+    async def _run_text_rendering(self, config: Config, ctx: Context, skip_font_scaling: bool = False):
         # ✅ 检查停止标志
         await asyncio.sleep(0)
         self._check_cancelled()
-        
+
         current_time = time.time()
         self._model_usage_timestamps[("rendering", config.render.renderer)] = current_time
-        
-        # 优先使用配置文件中的 font_path，如果没有则使用命令行参数
-        font_path = config.render.font_path or self.font_path
-        
+
+        # 全局字体只作为“补全区域字体”的来源，后端渲染实际只读 region.font_path
+        fallback_font_path = config.render.font_path or self.font_path or ''
+        if ctx.text_regions:
+            for region in ctx.text_regions:
+                if not getattr(region, 'font_path', ''):
+                    region.font_path = fallback_font_path
+
         if config.render.renderer == Renderer.none:
             output = ctx.img_inpainted
         # manga2eng currently only supports horizontal left to right rendering
         elif (config.render.renderer == Renderer.manga2Eng or config.render.renderer == Renderer.manga2EngPillow) and ctx.text_regions and LANGUAGE_ORIENTATION_PRESETS.get(ctx.text_regions[0].target_lang) == 'h':
             if config.render.renderer == Renderer.manga2EngPillow:
-                output = await dispatch_eng_render_pillow(ctx.img_inpainted, ctx.img_rgb, ctx.text_regions, font_path, config.render.line_spacing)
+                output = await dispatch_eng_render_pillow(ctx.img_inpainted, ctx.img_rgb, ctx.text_regions, fallback_font_path, config.render.line_spacing)
             else:
-                output = await dispatch_eng_render(ctx.img_inpainted, ctx.img_rgb, ctx.text_regions, font_path, config.render.line_spacing)
+                output = await dispatch_eng_render(ctx.img_inpainted, ctx.img_rgb, ctx.text_regions, fallback_font_path, config.render.line_spacing)
         else:
             # Request debug image for balloon_fill mode when verbose
             need_debug_img = self.verbose and config.render.layout_mode == 'balloon_fill'
-            result = await dispatch_rendering(ctx.img_inpainted, ctx.text_regions, font_path, config, ctx.img_rgb, return_debug_img=need_debug_img)
+            result = await dispatch_rendering(ctx.img_inpainted, ctx.text_regions, fallback_font_path, config, ctx.img_rgb, return_debug_img=need_debug_img, skip_font_scaling=skip_font_scaling)
             
             # Handle debug image if returned
             if need_debug_img and isinstance(result, tuple):
@@ -3229,7 +3235,7 @@ class MangaTranslator:
                             ctx.config = config
                             
                             # 加载翻译数据
-                            loaded_regions, loaded_mask, mask_is_refined = self._load_text_and_regions_from_file(image_name, config)
+                            loaded_regions, loaded_mask, mask_is_refined, skip_font_scaling = self._load_text_and_regions_from_file(image_name, config)
                             if loaded_regions is None:
                                 json_path = os.path.splitext(image_name)[0] + '_translations.json' if image_name else 'unknown'
                                 raise FileNotFoundError(f"Translation file not found or invalid: {json_path}")
@@ -3359,14 +3365,21 @@ class MangaTranslator:
                                 await self._report_progress('inpainting')
                                 ctx.img_inpainted = await self._run_inpainting(config, ctx)
                                 
-                                # Rendering
+                                # Rendering - load_text按JSON中的skip_font_scaling控制：True=跳过字体缩放，False=执行字体缩放
                                 await self._report_progress('rendering')
-                                ctx.img_rendered = await self._run_text_rendering(config, ctx)
+                                ctx.img_rendered = await self._run_text_rendering(config, ctx, skip_font_scaling=skip_font_scaling)
                                 
                                 await self._report_progress('finished', True)
                                 ctx.result = dump_image(ctx.input, ctx.img_rendered, ctx.img_alpha)
                                 ctx = await self._revert_upscale(config, ctx)
                             
+                            # load_text模式：渲染后回写JSON（同步最新regions，包含translation/font_size等字段）
+                            if hasattr(ctx, 'text_regions') and ctx.text_regions is not None and hasattr(ctx, 'image_name') and ctx.image_name:
+                                try:
+                                    self._save_text_to_file(ctx.image_name, ctx, config)
+                                except Exception as save_json_err:
+                                    logger.error(f"Error updating JSON in load_text mode for {os.path.basename(ctx.image_name)}: {save_json_err}")
+
                             preprocessed_contexts.append((ctx, config))
                             
                             # ✅ 每处理完一张图片后立即清理内存（保留result）
@@ -3554,7 +3567,6 @@ class MangaTranslator:
 
                         # 只在save_text或text_output_file启用时保存JSON（包括空的text_regions）
                         if (self.save_text or self.text_output_file) and hasattr(ctx, 'text_regions') and ctx.text_regions is not None and hasattr(ctx, 'image_name') and ctx.image_name:
-                            # 使用循环变量中的config，而不是从ctx中获取
                             self._save_text_to_file(ctx.image_name, ctx, config)
 
                         results.append(ctx)
