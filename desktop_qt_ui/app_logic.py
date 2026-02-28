@@ -2881,6 +2881,9 @@ class TranslationWorker(QObject):
         return friendly_msg
 
     async def _do_processing(self):
+        import time
+        _start_time = time.time()  # 记录开始时间
+        
         log_handler = QtLogHandler(self.log_received)
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         log_handler.setFormatter(formatter)
@@ -3331,8 +3334,12 @@ class TranslationWorker(QObject):
                     'skipped_backend': skipped_backend_count,
                 }
 
+                # 计算耗时
+                _elapsed = time.time() - _start_time
+                _elapsed_str = f"{_elapsed:.1f}秒" if _elapsed < 60 else f"{int(_elapsed//60)}分{int(_elapsed%60)}秒"
+                
                 if processed_failed_count > 0:
-                    self.log_received.emit(self._t("\n⚠️ Batch translation completed: {success}/{total} succeeded, {failed}/{total} failed", success=processed_success_count, total=total_images, failed=processed_failed_count))
+                    self.log_received.emit(self._t("\n⚠️ Batch translation completed: {success}/{total} succeeded, {failed}/{total} failed", success=processed_success_count, total=total_images, failed=processed_failed_count) + f"，耗时 {_elapsed_str}")
                     # 🔍 调试：检查results中的失败项
                     self.log_received.emit(f"📋 [调试] 即将调用_emit_failed_files_record，results数量: {len(results)}")
                     failed_results = [r for r in results if not r.get('success', True)]
@@ -3342,7 +3349,7 @@ class TranslationWorker(QObject):
                     # 收集失败文件信息并发射信号
                     self._emit_failed_files_record(results)
                 else:
-                    self.log_received.emit(self._t("✅ Batch translation completed: {success}/{total} succeeded", success=processed_success_count, total=total_images))
+                    self.log_received.emit(self._t("✅ Batch translation completed: {success}/{total} succeeded", success=processed_success_count, total=total_images) + f"，耗时 {_elapsed_str}")
                 self.log_received.emit(self._t("💾 Files saved to: {dir}", dir=self.output_folder))
 
             else:
@@ -3415,7 +3422,10 @@ class TranslationWorker(QObject):
                         self._emit_failed_files_record(sequential_failed_results)
                         failed_record_emitted = True
 
-                self.log_received.emit(f"✅ 顺序翻译完成：成功 {success_count}/{total_files} 张")
+                # 计算耗时
+                _elapsed = time.time() - _start_time
+                _elapsed_str = f"{_elapsed:.1f}秒" if _elapsed < 60 else f"{int(_elapsed//60)}分{int(_elapsed%60)}秒"
+                self.log_received.emit(f"✅ 顺序翻译完成：成功 {success_count}/{total_files} 张，耗时 {_elapsed_str}")
                 self.log_received.emit(f"💾 文件已保存到：{self.output_folder}")
             
             if self.results_summary is not None:
