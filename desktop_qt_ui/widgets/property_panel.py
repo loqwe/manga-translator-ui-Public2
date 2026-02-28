@@ -1113,13 +1113,18 @@ class PropertyPanel(QWidget):
         self.translated_text_box.insertPlainText("↵")
 
     def _mark_horizontal(self):
-        """用 ⇄ 符号包裹选中的文本,标记为横排"""
+        """标记横排：有选中则两侧包裹，无选中则在光标处插入一个 ⇄。"""
+        # 确保文本框有焦点,避免光标位置丢失
+        self.translated_text_box.setFocus()
         cursor = self.translated_text_box.textCursor()
         if cursor.hasSelection():
             selected_text = cursor.selectedText()
             # Qt 的 selectedText() 会将段落分隔符转换为 \u2029,需要替换回 ↵
             selected_text = selected_text.replace('\u2029', '↵')
             cursor.insertText(f"⇄{selected_text}⇄")
+        else:
+            cursor.insertText("⇄")
+        self.translated_text_box.setTextCursor(cursor)
 
     def _on_ocr_model_change(self, text):
         """OCR模型变化时保存配置"""

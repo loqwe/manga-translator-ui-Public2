@@ -10,26 +10,20 @@ import asyncio
 from typing import List, Dict, Callable, Tuple
 
 from .common import CommonTranslator, validate_openai_response
-from .keys import SAKURA_API_BASE, SAKURA_VERSION, SAKURA_DICT_PATH
+from .keys import SAKURA_API_BASE, SAKURA_DICT_PATH
 
 import logging
 
 
 class SakuraDict():
-    def __init__(self, path: str, logger: logging.Logger, version: str = "0.9") -> None:
+    def __init__(self, path: str, logger: logging.Logger) -> None:
         self.logger = logger
         self.dict_str = ""
-        self.version = version
+        self.path = path
         if not os.path.exists(path):
-            if self.version == '0.10':
-                self.logger.warning(f"字典文件不存在: {path}")
+            self.logger.warning(f"字典文件不存在: {path}")
             return
-        else:
-            self.path = path
-        if self.version == '0.10':
-            self.dict_str = self.get_dict_from_file(path)
-        if self.version == '0.9':
-            self.logger.info("您当前选择了Sakura 0.9版本，暂不支持术语表")
+        self.dict_str = self.get_dict_from_file(path)
 
     def load_galtransl_dic(self, dic_path: str):
         """
@@ -173,16 +167,14 @@ class SakuraDict():
         """
         获取字典内容。
         """
-        if self.version == '0.9':
-            self.logger.info("您当前选择了Sakura 0.9版本，暂不支持术语表")
-            return ""
         if self.dict_str == "":
+            if not os.path.exists(self.path):
+                return ""
             try:
                 self.dict_str = self.get_dict_from_file(self.path)
                 return self.dict_str
             except Exception as e:
-                if self.version == '0.10':
-                    self.logger.warning(f"载入字典失败: {e}")
+                self.logger.warning(f"载入字典失败: {e}")
                 return ""
         return self.dict_str
 
@@ -197,7 +189,7 @@ class SakuraDict():
             self.load_sakura_dict(dic_path)
         else:
             self.logger.warning(f"未知的字典类型: {dic_path}")
-        return self.get_dict_str()
+        return self.dict_str
 
 
 class SakuraTranslator(CommonTranslator):
@@ -208,10 +200,7 @@ class SakuraTranslator(CommonTranslator):
     _RATELIMIT_RETRY_ATTEMPTS = 3  # 请求被限速时的重试次数
     _REPEAT_DETECT_THRESHOLD = 20  # 重复检测的阈值
 
-    _CHAT_SYSTEM_TEMPLATE_009 = (
-        '你是一个轻小说翻译模型，可以流畅通顺地以日本轻小说的风格将日文翻译成简体中文，并联系上下文正确使用人称代词，不擅自添加原文中没有的代词。'
-    )
-    _CHAT_SYSTEM_TEMPLATE_010 = (
+    _CHAT_SYSTEM_TEMPLATE = (
         '你是一个轻小说翻译模型，可以流畅通顺地以日本轻小说的风格将日文翻译成简体中文，并联系上下文正确使用人称代词，注意不要擅自添加原文中没有的代词，也不要擅自增加或减少换行。'
     )
 
@@ -234,10 +223,7 @@ class SakuraTranslator(CommonTranslator):
         self._current_style = "precise"
         self._emoji_pattern = re.compile(r'[\U00010000-\U0010ffff]')
         self._heart_pattern = re.compile(r'❤')
-        self.sakura_dict = SakuraDict(self.get_dict_path(), self.logger, SAKURA_VERSION)
-
-    def get_sakura_version(self):
-        return SAKURA_VERSION
+        self.sakura_dict = SakuraDict(self.get_dict_path(), self.logger)
 
     def get_dict_path(self):
         return SAKURA_DICT_PATH
@@ -331,23 +317,23 @@ class SakuraTranslator(CommonTranslator):
         格式化日志输出的提示文本。
         """
         gpt_dict_raw_text = self.sakura_dict.get_dict_str()
-        prompt_009 = '\n'.join([
+        if gpt_dict_raw_text:
+            return '\n'.join([
+                'System:',
+                self._CHAT_SYSTEM_TEMPLATE,
+                'User:',
+                "根据以下术语表：",
+                gpt_dict_raw_text,
+                "将下面的日文文本根据上述术语表的对应关系和注释翻译成中文：",
+                prompt,
+            ])
+        return '\n'.join([
             'System:',
-            self._CHAT_SYSTEM_TEMPLATE_009,
+            self._CHAT_SYSTEM_TEMPLATE,
             'User:',
             '将下面的日文文本翻译成中文：',
             prompt,
         ])
-        prompt_010 = '\n'.join([
-            'System:',
-            self._CHAT_SYSTEM_TEMPLATE_010,
-            'User:',
-            "根据以下术语表：",
-            gpt_dict_raw_text,
-            "将下面的日文文本根据上述术语表的对应关系和注释翻译成中文：",
-            prompt,
-        ])
-        return prompt_009 if SAKURA_VERSION == '0.9' else prompt_010
 
     def _split_text(self, text: str) -> List[str]:
         """
@@ -356,6 +342,26 @@ class SakuraTranslator(CommonTranslator):
         if isinstance(text, list):
             return text
         return text.split('\n')
+
+    def _normalize_response_text(self, response) -> str:
+        """
+        将模型响应统一转换为字符串，避免日志和后续处理发生类型错误。
+        """
+        if response is None:
+            return ""
+        if isinstance(response, str):
+            return response
+        if isinstance(response, list):
+            normalized = []
+            for item in response:
+                if isinstance(item, str):
+                    normalized.append(item)
+                elif isinstance(item, dict) and "text" in item:
+                    normalized.append(str(item["text"]))
+                else:
+                    normalized.append(str(item))
+            return "\n".join(normalized)
+        return str(response)
 
     def _preprocess_queries(self, queries: List[str]) -> List[str]:
         """
@@ -462,14 +468,15 @@ class SakuraTranslator(CommonTranslator):
 
         # 发送翻译请求
         response = await self._handle_translation_request(queries)
-        self.logger.debug('-- Sakura Response --\n' + response + '\n\n')
+        response = self._normalize_response_text(response)
+        self.logger.debug(f'-- Sakura Response --\n{response}\n\n')
 
         # 检查翻译结果是否存在重复或行数不匹配的问题
         translations = await self._check_translation_quality(queries, response)
 
         return self._delete_quotation_mark(translations)
 
-    async def _handle_translation_request(self, prompt: str) -> str:
+    async def _handle_translation_request(self, prompt) -> str:
         """
         处理翻译请求,包括错误处理和重试逻辑。
         """
@@ -496,7 +503,9 @@ class SakuraTranslator(CommonTranslator):
                 server_error_attempt += 1
                 if server_error_attempt >= self._RETRY_ATTEMPTS:
                     self.logger.error(f'Sakura API请求失败。错误信息： {e}')
-                    return prompt
+                    if isinstance(prompt, list):
+                        return "\n".join(prompt)
+                    return str(prompt)
                 self.logger.warning(f'Sakura因服务器错误而进行重试。尝试次数： {server_error_attempt}，错误信息： {e}')
 
         return response
@@ -517,30 +526,22 @@ class SakuraTranslator(CommonTranslator):
             'num_beams': 1,
             'repetition_penalty': 1.0,
         }
-        if SAKURA_VERSION == "0.9":
-            messages = [
-                {
-                    "role": "system",
-                    "content": f"{self._CHAT_SYSTEM_TEMPLATE_009}"
-                },
-                {
-                    "role": "user",
-                    "content": f"将下面的日文文本翻译成中文：{raw_text}"
-                }
-            ]
+        gpt_dict_raw_text = self.sakura_dict.get_dict_str()
+        self.logger.debug(f"Sakura Dict: {gpt_dict_raw_text}")
+        if gpt_dict_raw_text:
+            user_prompt = f"根据以下术语表：\n{gpt_dict_raw_text}\n将下面的日文文本根据上述术语表的对应关系和注释翻译成中文：{raw_text}"
         else:
-            gpt_dict_raw_text = self.sakura_dict.get_dict_str()
-            self.logger.debug(f"Sakura Dict: {gpt_dict_raw_text}")
-            messages = [
-                {
-                    "role": "system",
-                    "content": f"{self._CHAT_SYSTEM_TEMPLATE_010}"
-                },
-                {
-                    "role": "user",
-                    "content": f"根据以下术语表：\n{gpt_dict_raw_text}\n将下面的日文文本根据上述术语表的对应关系和注释翻译成中文：{raw_text}"
-                }
-            ]
+            user_prompt = f"将下面的日文文本翻译成中文：{raw_text}"
+        messages = [
+            {
+                "role": "system",
+                "content": f"{self._CHAT_SYSTEM_TEMPLATE}"
+            },
+            {
+                "role": "user",
+                "content": user_prompt
+            }
+        ]
         response = await self.client.chat.completions.create(
             model="sukinishiro",
             messages=messages,

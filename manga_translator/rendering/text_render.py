@@ -232,7 +232,17 @@ def auto_add_horizontal_tags(text: str) -> str:
     if '<H>' in text or '<h>' in text.lower():
         return text
 
-    seg = text
+    # 先保护 BR 标记与换行，避免被步骤1/2直接匹配吞掉。
+    br_pattern = re.compile(r'(\[BR\]|<br\s*/?>|【BR】|\r\n|\r|\n)', flags=re.IGNORECASE)
+    br_tokens = []
+
+    def _mask_br(match):
+        idx = len(br_tokens)
+        br_tokens.append(match.group(0))
+        # 使用不会被英文/数字正则命中的私有区字符占位
+        return chr(0xE000 + idx)
+
+    seg = br_pattern.sub(_mask_br, text)
 
     # 步骤1：为多词英文词组添加<H>标签（至少2个单词，用空格分隔）
     multi_word_pattern = r'[a-zA-Z0-9\uff21-\uff3a\uff41-\uff5a\uff10-\uff19_-]+(?:\s+[a-zA-Z0-9\uff21-\uff3a\uff41-\uff5a\uff10-\uff19_-]+)+'
@@ -259,13 +269,121 @@ def auto_add_horizontal_tags(text: str) -> str:
     symbol_pattern = r'[!?！？]{2,4}'
     seg = re.sub(symbol_pattern, r'<H>\g<0></H>', seg)
 
+    # 还原 BR/换行 标记
+    for idx, original in enumerate(br_tokens):
+        seg = seg.replace(chr(0xE000 + idx), original)
+
+    # 跨 BR/换行的纯符号块一律不打标（两边都去掉 <H>）
+    # 例：
+    # - <H>!?</H>[BR]<H>!?</H> -> !?[BR]!?
+    # - <H>!!!</H>[BR]<H>!!</H> -> !!![BR]!!
+    symbol_pair_on_br_pattern = re.compile(
+        r'<H>([!?！？]{2,4})</H>\s*(\r\n|\r|\n|\[BR\]|<br\s*/?>|【BR】)\s*<H>([!?！？]{2,4})</H>',
+        flags=re.IGNORECASE
+    )
+
+    def _unwrap_symbol_pair(match):
+        left, sep, right = match.group(1), match.group(2), match.group(3)
+        return f"{left}{sep}{right}"
+
+    while True:
+        updated = symbol_pair_on_br_pattern.sub(_unwrap_symbol_pair, seg)
+        if updated == seg:
+            break
+        seg = updated
+
+    # 将被 BR/换行分隔的纯字母数字横排块合并为一个块：
+    # <H>abc</H>[BR]<H>def</H> -> <H>abc[BR]def</H>
+    merge_pattern = re.compile(
+        r'<H>([a-zA-Z0-9\uff21-\uff3a\uff41-\uff5a\uff10-\uff19]+)</H>\s*(?:\r\n|\r|\n|\[BR\]|<br\s*/?>|【BR】)\s*<H>([a-zA-Z0-9\uff21-\uff3a\uff41-\uff5a\uff10-\uff19]+)</H>',
+        flags=re.IGNORECASE
+    )
+    while True:
+        merged = merge_pattern.sub(r'<H>\1[BR]\2</H>', seg)
+        if merged == seg:
+            break
+        seg = merged
+
+    # 跨 BR/换行的单字母/数字对也打成一个横排块：
+    # a[BR]c -> <H>a[BR]c</H>
+    single_pair_pattern = re.compile(
+        r'(?<![a-zA-Z0-9\uff21-\uff3a\uff41-\uff5a\uff10-\uff19])'
+        r'([a-zA-Z0-9\uff21-\uff3a\uff41-\uff5a\uff10-\uff19])'
+        r'\s*(?:\r\n|\r|\n|\[BR\]|<br\s*/?>|【BR】)\s*'
+        r'([a-zA-Z0-9\uff21-\uff3a\uff41-\uff5a\uff10-\uff19])'
+        r'(?![a-zA-Z0-9\uff21-\uff3a\uff41-\uff5a\uff10-\uff19])',
+        flags=re.IGNORECASE
+    )
+    seg = single_pair_pattern.sub(r'<H>\1[BR]\2</H>', seg)
+
+    # 横排块内部若有换行，统一规范为 [BR]
+    seg = re.sub(
+        r'<H>(.*?)</H>',
+        lambda m: (
+            "<H>"
+            + m.group(1).replace('\r\n', '[BR]').replace('\r', '[BR]').replace('\n', '[BR]')
+            + "</H>"
+        ),
+        seg,
+        flags=re.IGNORECASE | re.DOTALL
+    )
+
     return seg
 
+
+def _normalize_horizontal_block_content(content: str) -> str:
+    """Normalize content inside <H>...</H> for rotation/measurement/rendering."""
+    if not content:
+        return ""
+    content = content.replace('__ROT90__', '')
+    content = re.sub(r'\s*(\[BR\]|<br\s*/?>|【BR】)\s*', '', content, flags=re.IGNORECASE)
+    content = content.replace('\r', '').replace('\n', '')
+    return content
+
+def _convert_br_outside_h_tags(text: str) -> str:
+    """Convert BR markers to '\\n' outside <H>, and split BR inside <H> into per-line <H> blocks."""
+    parts = re.split(r'(<H>.*?</H>)', text, flags=re.IGNORECASE | re.DOTALL)
+    converted = []
+    for part in parts:
+        if not part:
+            continue
+        is_horizontal_block = part.lower().startswith('<h>') and part.lower().endswith('</h>')
+        if is_horizontal_block:
+            content = part[3:-4]
+            # BR inside one <H> block: split into multiple lines
+            chunks = re.split(r'\s*(?:\[BR\]|<br\s*/?>|【BR】|\r\n|\r|\n)\s*', content, flags=re.IGNORECASE)
+            chunks = [c for c in chunks if c]
+            if len(chunks) <= 1:
+                converted.append(part)
+                continue
+
+            full_content = _normalize_horizontal_block_content(content)
+            # If combined alnum length across BR reaches 2, force each split line to rotate.
+            force_rotate = bool(re.fullmatch(r'[a-zA-Z0-9\uff21-\uff3a\uff41-\uff5a\uff10-\uff19]+', full_content)) and len(full_content) >= 2
+
+            split_blocks = []
+            for chunk in chunks:
+                chunk_clean = _normalize_horizontal_block_content(chunk)
+                if not chunk_clean:
+                    continue
+                if force_rotate:
+                    chunk_clean = '__ROT90__' + chunk_clean
+                split_blocks.append(f'<H>{chunk_clean}</H>')
+            converted.append('\n'.join(split_blocks))
+        else:
+            converted.append(re.sub(r'\s*(\[BR\]|<br>|【BR】)\s*', '\n', part, flags=re.IGNORECASE))
+    return ''.join(converted)
 
 def should_rotate_horizontal_block_90(content: str) -> bool:
     """Only rotate 90 degrees for alphanumeric blocks in vertical layout."""
     if not content:
         return False
+    force_rotate = '__ROT90__' in content
+    content = _normalize_horizontal_block_content(content)
+    if not content:
+        return False
+    if force_rotate:
+        return True
     alnum_only = re.fullmatch(r'[a-zA-Z0-9\uff21-\uff3a\uff41-\uff5a\uff10-\uff19]+', content)
     return bool(alnum_only) and len(content) >= 3
     
@@ -588,6 +706,10 @@ def _get_vertical_column_char_width(font_size: int, cdpt: str) -> int:
 
 def _measure_horizontal_block_render_height(font_size: int, content: str, border_size: int, config=None, stroke_ratio: float = 0.07, rotate_90: bool = False) -> int:
     """Measure the actual rendered pixel height of a horizontal block used in vertical text."""
+    # preserve force-rotate marker by deciding rotation before normalization
+    if not rotate_90:
+        rotate_90 = should_rotate_horizontal_block_90(content)
+    content = _normalize_horizontal_block_content(content)
     if not content:
         return 0
 
@@ -721,11 +843,13 @@ def calc_horizontal_block_height(font_size: int, content: str) -> int:
     - 字母/数字块且长度>=3：旋转90度，返回旋转后的实际高度
     - 其他情况（含符号）：横排显示，返回横排块的实际高度
     """
+    rotate_90 = should_rotate_horizontal_block_90(content)
+    content = _normalize_horizontal_block_content(content)
     if not content:
         return font_size
 
     # 仅对字母/数字块启用90度旋转
-    if should_rotate_horizontal_block_90(content):
+    if rotate_90:
         # --- 计算竖排旋转块的高度 ---
         # 使用与渲染相同的方式：横排渲染后旋转90度
         # 旋转后，原来的宽度变成高度
@@ -788,8 +912,8 @@ def calc_vertical(font_size: int, text: str, max_height: int, config=None):
     Line breaking logic for vertical text.
     Handles forced newlines (\\n) and is aware of <H> horizontal blocks.
     """
-    # 统一处理所有类型的AI换行符，确保后续逻辑的正确性
-    text = re.sub(r'\s*(\[BR\]|<br>|【BR】)\s*', '\n', text, flags=re.IGNORECASE)
+    # 统一处理所有类型的AI换行符（仅转换 <H> 外部）
+    text = _convert_br_outside_h_tags(text)
     # 与 put_text_vertical 保持一致：竖排计算前先将省略号转换为竖排符号
     text = text.replace('…', '︙')
 
@@ -1101,12 +1225,16 @@ def put_text_vertical(font_size: int, text: str, h: int, alignment: str, fg: Tup
             is_horizontal_block = part.lower().startswith('<h>') and part.lower().endswith('</h>')
 
             if is_horizontal_block:
-                content = part[3:-4]
+                raw_content = part[3:-4]
+                if not raw_content:
+                    continue
+                rotate_90 = should_rotate_horizontal_block_90(raw_content)
+                content = _normalize_horizontal_block_content(raw_content)
                 if not content:
                     continue
 
                 # 仅字母/数字块（长度>=3）旋转90度；符号块保持横排
-                if should_rotate_horizontal_block_90(content):
+                if rotate_90:
                     # --- RENDER ROTATED BLOCK (字母/数字块旋转90度) ---
                     # 使用与2个字符横排相同的渲染方式，确保字符间距一致
                     r_font_size = font_size

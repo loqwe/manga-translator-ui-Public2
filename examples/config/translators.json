@@ -97,7 +97,7 @@
     "name": "sakura",
     "display_name": "Sakura",
     "required_env_vars": [],
-    "optional_env_vars": ["SAKURA_API_BASE", "SAKURA_DICT_PATH", "SAKURA_VERSION"]
+    "optional_env_vars": ["SAKURA_API_BASE", "SAKURA_DICT_PATH"]
   },
   "deepl": {
     "name": "deepl",

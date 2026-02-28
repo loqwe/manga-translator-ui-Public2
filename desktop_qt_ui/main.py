@@ -60,7 +60,7 @@ def global_exception_handler(exc_type, exc_value, exc_traceback):
     # 格式化异常信息
     error_msg = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
     
-    # 记录到日志（会写入 logs/app.log 和 logs/error.log）
+    # 记录到日志（会写入 result/log_*.txt）
     logging.critical(f"未捕获的异常导致程序崩溃:\n{error_msg}")
     
     # 同时输出到控制台（确保能看到）

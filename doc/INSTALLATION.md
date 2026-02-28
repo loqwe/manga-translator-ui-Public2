@@ -360,7 +360,6 @@ docker run -d --name manga-translator -p 8000:8000 hgmzhn/manga-translator:lates
 | 变量名 | 说明 |
 |--------|------|
 | `SAKURA_API_BASE` | Sakura API 地址（默认 http://127.0.0.1:8080/v1） |
-| `SAKURA_VERSION` | Sakura API 版本（可选，0.9 或 0.10） |
 | `SAKURA_DICT_PATH` | Sakura 术语表路径（可选，默认 ./dict/sakura_dict.txt） |
 | `CUSTOM_OPENAI_API_KEY` | 自定义 OpenAI 兼容 API Key（如 Ollama，默认 ollama） |
 | `CUSTOM_OPENAI_API_BASE` | 自定义 OpenAI 兼容 API 地址（默认 http://localhost:11434/v1） |
