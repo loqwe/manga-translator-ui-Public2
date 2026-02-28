@@ -1,5 +1,29 @@
 [
   {
+    "hash": "69383bb",
+    "msg": "chore: add issue templates and update log path note"
+  },
+  {
+    "hash": "1019f3a",
+    "msg": "chore: point issue contact link to project docs"
+  },
+  {
+    "hash": "a7b0292",
+    "msg": "chore: refine issue templates and duplicate-check guidance"
+  },
+  {
+    "hash": "13136e2",
+    "msg": "release: update v2.1.3 fixes and behavior adjustments"
+  },
+  {
+    "hash": "30fd039",
+    "msg": "chore: remove verbose HQ diagnostic logs (skipped - local OPENAI_HQ_DIAG toggle)"
+  },
+  {
+    "hash": "f4f97d0",
+    "msg": "Merge pull request #79 from Huli-fox/main"
+  },
+  {
     "hash": "97af68f",
     "msg": "fix: stabilize HQ parsing/merge flow and release v2.1.3"
   },
