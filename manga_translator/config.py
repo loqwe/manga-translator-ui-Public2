@@ -117,6 +117,7 @@ class Translator(str, Enum):
     sakura = "sakura"
     none = "none"
     original = "original"
+    t2s = "t2s"
 
     def __str__(self):
         return self.name

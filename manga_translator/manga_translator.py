@@ -2377,6 +2377,30 @@ class MangaTranslator:
             logger.info(f'[原文模式] 跳过翻译，直接使用 {len(ctx.text_regions)} 条原文')
             for region in ctx.text_regions:
                 region.translation = region.text
+        elif config.translator.translator == Translator.t2s:
+            # T2S fast path: direct char-level conversion, skip all pre/post processing
+            from .translators.t2s import smart_convert
+            logger.info(f'[繁简转换] 直接转换 {len(ctx.text_regions)} 条文本')
+            for region in ctx.text_regions:
+                # Per-line conversion to preserve original line structure
+                if region.texts and len(region.texts) > 1:
+                    converted_lines = [smart_convert(t) for t in region.texts]
+                    original_len = sum(len(t) for t in region.texts)
+                    converted_len = sum(len(t) for t in converted_lines)
+                    if original_len == converted_len:
+                        # Char count unchanged: join with \n to lock line structure
+                        region.translation = '\n'.join(converted_lines)
+                        region._t2s_preserve_lines = True
+                        logger.info(f'[T2S] 保留行结构: texts={region.texts} -> lines={converted_lines}, 行数={len(converted_lines)}')
+                    else:
+                        # Char count changed: fall back to standard pipeline
+                        region.translation = smart_convert(region.text)
+                        logger.info(f'[T2S] 字数变化({original_len}->{converted_len}), 走标准管线: {region.text[:20]}')
+                else:
+                    region.translation = smart_convert(region.text)
+                    # Single line: always preserve
+                    region._t2s_preserve_lines = True
+                    logger.info(f'[T2S] 单行保留: "{region.translation}"')
         else: # Actual network translation
             # --- BEGIN PRE-TRANSLATION DE-DUPLICATION ---
             # Per user request, clean up duplicate lines within regions before sending to translator.
@@ -2691,7 +2715,7 @@ class MangaTranslator:
                 if region.translation.isnumeric():
                     should_filter = True
                     filter_reason = "Numeric translation"
-                elif not config.translator.translator == Translator.original:
+                elif config.translator.translator not in (Translator.original, Translator.t2s):
                     text_equal = region.text.lower().strip() == region.translation.lower().strip()
                     if text_equal:
                         should_filter = True
@@ -4227,7 +4251,29 @@ class MangaTranslator:
                             region._alignment = config.render.alignment
                             region._direction = config.render.direction
                             text_idx += 1
-                        
+
+                # T2S per-line fixup: _batch_translate_texts returns concatenated text,
+                # reconstruct \n-separated translation to preserve original line structure
+                if sample_config and sample_config.translator.translator == Translator.t2s:
+                    from .translators.t2s import smart_convert
+                    for ctx, config in batch:
+                        if not ctx.text_regions:
+                            continue
+                        for region in ctx.text_regions:
+                            if region.texts and len(region.texts) > 1:
+                                converted_lines = [smart_convert(t) for t in region.texts]
+                                original_len = sum(len(t) for t in region.texts)
+                                converted_len = sum(len(t) for t in converted_lines)
+                                if original_len == converted_len:
+                                    region.translation = '\n'.join(converted_lines)
+                                    region._t2s_preserve_lines = True
+                                    logger.info(f'[T2S] 保留行结构: texts={region.texts} -> lines={converted_lines}, 行数={len(converted_lines)}')
+                                else:
+                                    logger.info(f'[T2S] 字数变化({original_len}->{converted_len}), 走标准管线')
+                            else:
+                                region._t2s_preserve_lines = True
+                                logger.info(f'[T2S] 单行保留: "{region.translation}"')
+
                 # 应用后处理逻辑（括号修正、过滤等）
                 for ctx, config in batch:
                     if ctx.text_regions:
@@ -4357,7 +4403,7 @@ class MangaTranslator:
                                 if region.translation.isnumeric():
                                     should_filter = True
                                     filter_reason = "Numeric translation"
-                                elif not config.translator.translator == Translator.original:
+                                elif config.translator.translator not in (Translator.original, Translator.t2s):
                                     text_equal = region.text.lower().strip() == region.translation.lower().strip()
                                     if text_equal:
                                         should_filter = True
@@ -4460,7 +4506,22 @@ class MangaTranslator:
                         region.target_lang = config.translator.target_lang
                         region._alignment = config.render.alignment
                         region._direction = config.render.direction
-                
+
+                # T2S per-line fixup: _batch_translate_texts returns concatenated text,
+                # reconstruct \n-separated translation to preserve original line structure
+                if config.translator.translator == Translator.t2s:
+                    from .translators.t2s import smart_convert
+                    for region in ctx.text_regions:
+                        if region.texts and len(region.texts) > 1:
+                            converted_lines = [smart_convert(t) for t in region.texts]
+                            original_len = sum(len(t) for t in region.texts)
+                            converted_len = sum(len(t) for t in converted_lines)
+                            if original_len == converted_len:
+                                region.translation = '\n'.join(converted_lines)
+                                region._t2s_preserve_lines = True
+                        else:
+                            region._t2s_preserve_lines = True
+
                 # 应用后处理逻辑（括号修正、过滤等）
                 if ctx.text_regions:
                     ctx.text_regions = await self._apply_post_translation_processing(ctx, config)
@@ -4533,7 +4594,7 @@ class MangaTranslator:
                             if region.translation.isnumeric():
                                 should_filter = True
                                 filter_reason = "Numeric translation"
-                            elif not config.translator.translator == Translator.original:
+                            elif config.translator.translator not in (Translator.original, Translator.t2s):
                                 text_equal = region.text.lower().strip() == region.translation.lower().strip()
                                 if text_equal:
                                     should_filter = True
@@ -4634,9 +4695,13 @@ class MangaTranslator:
             logger.info(f'[原文模式] 跳过翻译，直接返回 {len(texts)} 条原文')
             return list(texts)
 
+        # T2S fast path: direct char-level conversion, no dispatch overhead
+        if config.translator.translator == Translator.t2s:
+            from .translators.t2s import smart_convert
+            logger.info(f'[繁简转换] 直接转换 {len(texts)} 条文本')
+            return [smart_convert(t) for t in texts]
 
-
-        # If this is an OpenAI/Gemini translator, we need to inject context.
+        # If this is an OpenAI/Gemini translator
         if config.translator.translator in [Translator.openai, Translator.gemini, Translator.openai_hq, Translator.gemini_hq]:
             translator_key = config.translator.translator
 

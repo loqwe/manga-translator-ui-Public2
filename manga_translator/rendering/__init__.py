@@ -978,6 +978,47 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
             # 保存应用偏移量后的字体大小，用于JSON导出
             region.offset_applied_font_size = int(target_font_size)
 
+        # --- T2S preserve-lines shortcut: skip layout recalculation ---
+        if getattr(region, '_t2s_preserve_lines', False):
+            render_horizontally = _resolve_region_render_horizontal(region)
+            line_spacing_multiplier = config.render.line_spacing or 1.0
+
+            # Apply font_scale_ratio and max_font_size limits
+            t2s_font_size = int(max(target_font_size, min_font_size) * config.render.font_scale_ratio)
+            if config.render.max_font_size > 0:
+                t2s_font_size = min(t2s_font_size, config.render.max_font_size)
+            t2s_font_size = max(t2s_font_size, 1)
+
+            # Check if text fits in original bubble; shrink font if overflow
+            bubble_w, bubble_h = region.unrotated_size
+            req_w, req_h, _ = calc_box_from_font(
+                t2s_font_size, region.translation, render_horizontally,
+                line_spacing_multiplier, config, region.target_lang
+            )
+            if req_w > bubble_w or req_h > bubble_h:
+                t2s_font_size = calc_font_from_box(
+                    bubble_w, bubble_h, region.translation, render_horizontally,
+                    line_spacing_multiplier, config, region.target_lang
+                )
+
+            dst_points = calc_box_from_font(
+                t2s_font_size, region.translation, render_horizontally,
+                line_spacing_multiplier, config, region.target_lang,
+                center=tuple(region.center), angle=region.angle
+            )
+            if dst_points is None:
+                dst_points = region.min_rect
+
+            region.font_size = t2s_font_size
+            dst_points_list.append(dst_points)
+            logger.info(
+                f"[RESIZE] T2S 保行模式: region {region_idx}, "
+                f"font={t2s_font_size}, lines={len(region.texts)}, "
+                f"bubble={bubble_w:.0f}x{bubble_h:.0f}, req={req_w:.0f}x{req_h:.0f}, "
+                f"translation='{region.translation[:30]}'"
+            )
+            continue
+
         # --- Mode 5: balloon_fill (MUST BE FIRST to override other modes) ---
         if mode == 'balloon_fill':
             logger.debug(f"=== balloon_fill mode activated for region {region_idx} ===")

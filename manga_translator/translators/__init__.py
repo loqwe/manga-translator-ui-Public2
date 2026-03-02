@@ -10,6 +10,7 @@ from .gemini_hq import GeminiHighQualityTranslator
 from .sakura import SakuraTranslator
 from .none import NoneTranslator
 from .original import OriginalTranslator
+from .t2s import T2STranslator
 from ..config import Config, Translator, TranslatorConfig, TranslatorChain
 from ..utils import Context
 
@@ -23,6 +24,7 @@ GPT_TRANSLATORS = {
 TRANSLATORS = {
     Translator.none: NoneTranslator,
     Translator.original: OriginalTranslator,
+    Translator.t2s: T2STranslator,
     Translator.sakura: SakuraTranslator,
     **GPT_TRANSLATORS,
 }

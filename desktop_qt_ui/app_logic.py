@@ -968,6 +968,7 @@ class MainAppLogic(QObject):
                     "sakura": "Sakura",
                     "none": self._t("translator_none"),
                     "original": self._t("translator_original"),
+                    "t2s": self._t("translator_t2s"),
                 },
                 "target_lang": self.translation_service.get_target_languages(),
                 "ocr_vl_language_hint": {

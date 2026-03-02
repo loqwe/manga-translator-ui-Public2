@@ -106,3 +106,6 @@ bcrypt==4.2.1
 cryptography==44.0.0
 APScheduler==3.10.4
 pytest-anyio==0.0.0
+
+# T2S (Traditional to Simplified Chinese) translator
+opencc-python-reimplemented
