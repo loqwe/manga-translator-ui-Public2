@@ -88,7 +88,7 @@ def extract_images_from_epub(epub_path: str, output_dir: str) -> List[str]:
 
 
 def extract_images_from_cbz(cbz_path: str, output_dir: str) -> List[str]:
-    """从 CBZ (Comic Book ZIP) 文件中提取图片"""
+    """从 CBZ (Comic Book ZIP) 文件中提取图片，保留内部文件夹结构"""
     os.makedirs(output_dir, exist_ok=True)
     extracted_images = []
     
@@ -105,11 +105,11 @@ def extract_images_from_cbz(cbz_path: str, output_dir: str) -> List[str]:
         # 按文件名自然排序
         image_files.sort(key=lambda x: natural_sort_key(x.filename))
         
-        for idx, file_info in enumerate(image_files):
-            base_name = os.path.basename(file_info.filename)
-            # 添加序号前缀以保持顺序
-            new_name = f"{idx:04d}_{base_name}"
-            output_path = os.path.join(output_dir, new_name)
+        for file_info in image_files:
+            # Preserve internal folder structure (e.g. Chapter 03/15.jpg)
+            internal_path = os.path.normpath(file_info.filename)
+            output_path = os.path.join(output_dir, internal_path)
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
             
             with zf.open(file_info) as src, open(output_path, 'wb') as dst:
                 dst.write(src.read())
@@ -119,7 +119,7 @@ def extract_images_from_cbz(cbz_path: str, output_dir: str) -> List[str]:
 
 
 def extract_images_from_cbr(cbr_path: str, output_dir: str) -> List[str]:
-    """从 CBR (Comic Book RAR) 文件中提取图片"""
+    """从 CBR (Comic Book RAR) 文件中提取图片，保留内部文件夹结构"""
     try:
         import rarfile
     except ImportError:
@@ -139,10 +139,11 @@ def extract_images_from_cbr(cbr_path: str, output_dir: str) -> List[str]:
         
         image_files.sort(key=lambda x: natural_sort_key(x.filename))
         
-        for idx, file_info in enumerate(image_files):
-            base_name = os.path.basename(file_info.filename)
-            new_name = f"{idx:04d}_{base_name}"
-            output_path = os.path.join(output_dir, new_name)
+        for file_info in image_files:
+            # Preserve internal folder structure
+            internal_path = os.path.normpath(file_info.filename)
+            output_path = os.path.join(output_dir, internal_path)
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
             
             with rf.open(file_info) as src, open(output_path, 'wb') as dst:
                 dst.write(src.read())
@@ -172,13 +173,14 @@ def extract_images_from_archive(archive_path: str, output_dir: Optional[str] = N
     if output_dir is None:
         output_dir = get_temp_extract_dir(archive_path)
     
-    # 如果目录已存在且有文件，直接返回缓存的结果
+    # 如果目录已存在且有文件，直接返回缓存的结果（递归扫描子目录）
     if os.path.exists(output_dir):
         existing_images = []
-        for f in os.listdir(output_dir):
-            ext = os.path.splitext(f)[1].lower()
-            if ext in IMAGE_EXTENSIONS:
-                existing_images.append(os.path.join(output_dir, f))
+        for root, _dirs, files in os.walk(output_dir):
+            for f in files:
+                ext = os.path.splitext(f)[1].lower()
+                if ext in IMAGE_EXTENSIONS:
+                    existing_images.append(os.path.join(root, f))
         if existing_images:
             return sorted(existing_images), output_dir
     

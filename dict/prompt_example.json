@@ -277,6 +277,14 @@
             "original": "뉴시오",
             "translation": "纽西奥",
             "lang": "ko"
+          },
+          {
+            "original": "아름",
+            "translation": "雅凛"
+          },
+          {
+            "original": "뱁새",
+            "translation": "山雀"
           }
         ],
         "Location": [
@@ -410,6 +418,14 @@
           {
             "original": "성준",
             "translation": "成俊"
+          },
+          {
+            "original": "김지현",
+            "translation": "金智贤"
+          },
+          {
+            "original": "최국봉",
+            "translation": "崔国峰"
           }
         ],
         "Location": [],
@@ -548,6 +564,14 @@
           {
             "original": "하지",
             "translation": "夏至"
+          },
+          {
+            "original": "주다우",
+            "translation": "朱多雨"
+          },
+          {
+            "original": "단장님",
+            "translation": "团长"
           }
         ],
         "Location": [],
@@ -583,6 +607,10 @@
           {
             "original": "V-LEAGUE",
             "translation": "V联赛"
+          },
+          {
+            "original": "가우스자이언츠",
+            "translation": "高斯巨人队"
           }
         ],
         "Item": [],
@@ -602,6 +630,10 @@
           {
             "original": "돌발퀘스트",
             "translation": "突发任务"
+          },
+          {
+            "original": "데이터라인브레이커",
+            "translation": "数据线破坏者"
           }
         ],
         "Creature": []
@@ -631,6 +663,10 @@
           {
             "original": "고은",
             "translation": "高恩"
+          },
+          {
+            "original": "나희",
+            "translation": "娜熙"
           }
         ],
         "Location": [],
@@ -689,6 +725,10 @@
           {
             "original": "유리",
             "translation": "宥利"
+          },
+          {
+            "original": "이현우",
+            "translation": "李贤宇"
           }
         ],
         "Location": [
@@ -699,6 +739,14 @@
           {
             "original": "301호",
             "translation": "301室"
+          },
+          {
+            "original": "601호",
+            "translation": "601室"
+          },
+          {
+            "original": "1102호",
+            "translation": "1102室"
           }
         ],
         "Org": [
@@ -709,6 +757,10 @@
           {
             "original": "부녀회장",
             "translation": "妇女会会长"
+          },
+          {
+            "original": "applemall",
+            "translation": "苹果商城"
           }
         ],
         "Item": [],
@@ -925,84 +977,152 @@
         "Person": [
           {
             "original": "금태양",
-            "translation": "金太阳"
+            "translation": "金太阳",
+            "lang": "ko"
           },
           {
             "original": "세실",
-            "translation": "塞西尔"
+            "translation": "塞西尔",
+            "lang": "ko"
           },
           {
             "original": "양지혁",
-            "translation": "梁智赫"
+            "translation": "梁智赫",
+            "lang": "ko"
           },
           {
             "original": "참치",
-            "translation": "金枪鱼"
+            "translation": "金枪鱼",
+            "lang": "ko"
           },
           {
             "original": "그렐린",
-            "translation": "格蕾琳"
+            "translation": "格蕾琳",
+            "lang": "ko"
           },
           {
             "original": "키르네",
-            "translation": "基尔内"
+            "translation": "基尔内",
+            "lang": "ko"
           },
           {
             "original": "아리엘라",
-            "translation": "阿丽埃拉"
+            "translation": "阿丽埃拉",
+            "lang": "ko"
           },
           {
             "original": "송하린",
-            "translation": "宋荷琳"
+            "translation": "宋荷琳",
+            "lang": "ko"
           },
           {
             "original": "Rirke",
-            "translation": "莉露克"
+            "translation": "莉露克",
+            "lang": "en"
           },
           {
             "original": "RAVEN",
-            "translation": "雷文"
+            "translation": "雷文",
+            "lang": "en"
           },
           {
             "original": "Emperatriz de la Espada",
-            "translation": "剑之女皇"
+            "translation": "剑之女皇",
+            "lang": "en"
+          },
+          {
+            "original": "검후",
+            "translation": "剑之女皇",
+            "lang": "ko"
+          },
+          {
+            "original": "황제폐하",
+            "translation": "皇帝陛下",
+            "lang": "ko"
+          },
+          {
+            "original": "가연",
+            "translation": "佳妍",
+            "lang": "ko"
+          },
+          {
+            "original": "세이나",
+            "translation": "世娜",
+            "lang": "ko"
+          },
+          {
+            "original": "강설",
+            "translation": "姜雪",
+            "lang": "ko"
+          },
+          {
+            "original": "주성현",
+            "translation": "朱成贤",
+            "lang": "ko"
+          },
+          {
+            "original": "래빗",
+            "translation": "小兔",
+            "lang": "ko"
           }
         ],
         "Location": [
           {
             "original": "TRAVELER'S REST",
-            "translation": "旅人休憩所"
+            "translation": "旅人休憩所",
+            "lang": "en"
           },
           {
             "original": "Calle del Agua",
-            "translation": "水街"
+            "translation": "水街",
+            "lang": "en"
           },
           {
             "original": "악마의 거리",
-            "translation": "恶魔之街"
+            "translation": "恶魔之街",
+            "lang": "ko"
+          },
+          {
+            "original": "까마귀성",
+            "translation": "乌鸦城",
+            "lang": "ko"
+          },
+          {
+            "original": "성현호신술",
+            "translation": "成贤护身术",
+            "lang": "ko"
           }
         ],
         "Org": [
           {
             "original": "COLAPSADORES",
-            "translation": "崩坏者"
+            "translation": "崩坏者",
+            "lang": "en"
           }
         ],
         "Item": [],
         "Skill": [
           {
             "original": "각인소거술",
-            "translation": "烙印消除术"
+            "translation": "烙印消除术",
+            "lang": "ko"
+          },
+          {
+            "original": "노예각인",
+            "translation": "奴隶烙印",
+            "lang": "ko"
           }
         ],
         "Creature": [
           {
             "original": "서큐버스",
-            "translation": "魅魔"
+            "translation": "魅魔",
+            "lang": "ko"
           },
           {
             "original": "CUERVO",
-            "translation": "乌鸦"
+            "translation": "乌鸦",
+            "lang": "en"
           }
         ]
       },
@@ -1051,6 +1171,14 @@
           {
             "original": "회원님",
             "translation": "会员"
+          },
+          {
+            "original": "반포왕자",
+            "translation": "半坡王子"
+          },
+          {
+            "original": "퀸래빗",
+            "translation": "兔后"
           }
         ],
         "Location": [
@@ -1069,10 +1197,24 @@
           {
             "original": "탑공원",
             "translation": "塔公园"
+          },
+          {
+            "original": "행복도장",
+            "translation": "幸福道馆"
           }
         ],
-        "Org": [],
-        "Item": [],
+        "Org": [
+          {
+            "original": "래빗티비",
+            "translation": "兔子TV"
+          }
+        ],
+        "Item": [
+          {
+            "original": "툰풍선",
+            "translation": "漫气球"
+          }
+        ],
         "Skill": [],
         "Creature": []
       },
@@ -1136,6 +1278,10 @@
             "original": "Go Hoon Sang",
             "translation": "高勋尚",
             "lang": "auto"
+          },
+          {
+            "original": "성유나",
+            "translation": "成宥娜"
           }
         ],
         "Org": [
@@ -1320,133 +1466,70 @@
             "translation": "幸福游泳馆"
           }
         ]
+      },
+      "恋爱任务": {
+        "Person": [
+          {
+            "original": "수현",
+            "translation": "秀贤",
+            "lang": "auto"
+          },
+          {
+            "original": "김기훈",
+            "translation": "金基勋",
+            "lang": "auto"
+          },
+          {
+            "original": "추민환",
+            "translation": "秋敏焕",
+            "lang": "auto"
+          },
+          {
+            "original": "은혜",
+            "translation": "恩惠",
+            "lang": "auto"
+          },
+          {
+            "original": "배수진",
+            "translation": "裴素珍",
+            "lang": "auto"
+          },
+          {
+            "original": "채수현",
+            "translation": "蔡秀贤",
+            "lang": "auto"
+          },
+          {
+            "original": "인하",
+            "translation": "仁荷",
+            "lang": "auto"
+          }
+        ],
+        "Location": [
+          {
+            "original": "부산",
+            "translation": "釜山",
+            "lang": "auto"
+          }
+        ],
+        "Org": [],
+        "Item": [],
+        "Skill": [],
+        "Creature": [
+          {
+            "original": "마무맘",
+            "translation": "马姆姆",
+            "lang": "auto"
+          }
+        ]
       }
     },
     "unassigned": {
-      "Person": [
-        {
-          "original": "아리엘라",
-          "translation": "爱丽艾拉"
-        },
-        {
-          "original": "송하린",
-          "translation": "宋夏凛"
-        },
-        {
-          "original": "모모",
-          "translation": "桃桃"
-        },
-        {
-          "original": "정다은",
-          "translation": "郑多恩"
-        },
-        {
-          "original": "유미",
-          "translation": "由美",
-          "raw_work_name": "无生肉名"
-        },
-        {
-          "original": "Aria",
-          "translation": "艾莉亚"
-        },
-        {
-          "original": "류시은",
-          "translation": "柳诗恩",
-          "raw_work_name": "无生肉名"
-        },
-        {
-          "original": "훈상",
-          "translation": "勋尚",
-          "raw_work_name": "Chapter_81"
-        },
-        {
-          "original": "전유나",
-          "translation": "全宥娜",
-          "raw_work_name": "Chapter_81"
-        },
-        {
-          "original": "박은남",
-          "translation": "朴恩南",
-          "raw_work_name": "Chapter_61"
-        },
-        {
-          "original": "엄자영",
-          "translation": "严紫英",
-          "raw_work_name": "Chapter_61"
-        },
-        {
-          "original": "나희",
-          "translation": "罗熙",
-          "raw_work_name": "Chapter_61"
-        },
-        {
-          "original": "오나희",
-          "translation": "吴罗熙",
-          "raw_work_name": "Chapter_61"
-        },
-        {
-          "original": "유리",
-          "translation": "侑莉",
-          "raw_work_name": "Chapter_38"
-        },
-        {
-          "original": "수헌",
-          "translation": "秀宪",
-          "raw_work_name": "Chapter_38"
-        },
-        {
-          "original": "방초아",
-          "translation": "方楚雅",
-          "raw_work_name": "Chapter_61"
-        },
-        {
-          "original": "야경",
-          "translation": "夜景",
-          "raw_work_name": "Chapter_61"
-        },
-        {
-          "original": "쇼타네암컷",
-          "translation": "正太的母狗",
-          "raw_work_name": "无生肉名"
-        }
-      ],
-      "Location": [
-        {
-          "original": "한국대학교",
-          "translation": "韩国大学"
-        }
-      ],
-      "Org": [
-        {
-          "original": "교주",
-          "translation": "教主",
-          "raw_work_name": "无生肉名"
-        }
-      ],
-      "Item": [
-        {
-          "original": "무선연결 오나홀",
-          "translation": "无线连接名器",
-          "lang": "ko"
-        },
-        {
-          "original": "토큰",
-          "translation": "代币",
-          "raw_work_name": "无生肉名"
-        }
-      ],
-      "Skill": [
-        {
-          "original": "귀르가즘",
-          "translation": "耳骚",
-          "raw_work_name": "无生肉名"
-        },
-        {
-          "original": "매도",
-          "translation": "辱骂",
-          "raw_work_name": "无生肉名"
-        }
-      ],
+      "Person": [],
+      "Location": [],
+      "Org": [],
+      "Item": [],
+      "Skill": [],
       "Creature": []
     },
     "Person": [
@@ -1592,6 +1675,14 @@
         "lang": "ko"
       },
       {
+        "original": "아름",
+        "translation": "雅凛"
+      },
+      {
+        "original": "뱁새",
+        "translation": "山雀"
+      },
+      {
         "original": "선호",
         "translation": "善浩",
         "lang": "auto"
@@ -1701,6 +1792,14 @@
         "translation": "成俊"
       },
       {
+        "original": "김지현",
+        "translation": "金智贤"
+      },
+      {
+        "original": "최국봉",
+        "translation": "崔国峰"
+      },
+      {
         "original": "메시아",
         "translation": "弥赛亚"
       },
@@ -1805,6 +1904,14 @@
         "translation": "夏至"
       },
       {
+        "original": "주다우",
+        "translation": "朱多雨"
+      },
+      {
+        "original": "단장님",
+        "translation": "团长"
+      },
+      {
         "original": "은남",
         "translation": "恩男"
       },
@@ -1827,6 +1934,10 @@
       {
         "original": "고은",
         "translation": "高恩"
+      },
+      {
+        "original": "나희",
+        "translation": "娜熙"
       },
       {
         "original": "이한",
@@ -1871,6 +1982,10 @@
       {
         "original": "유리",
         "translation": "宥利"
+      },
+      {
+        "original": "이현우",
+        "translation": "李贤宇"
       },
       {
         "original": "서진",
@@ -1974,47 +2089,93 @@
       },
       {
         "original": "금태양",
-        "translation": "金太阳"
+        "translation": "金太阳",
+        "lang": "ko"
       },
       {
         "original": "세실",
-        "translation": "塞西尔"
+        "translation": "塞西尔",
+        "lang": "ko"
       },
       {
         "original": "양지혁",
-        "translation": "梁智赫"
+        "translation": "梁智赫",
+        "lang": "ko"
       },
       {
         "original": "참치",
-        "translation": "金枪鱼"
+        "translation": "金枪鱼",
+        "lang": "ko"
       },
       {
         "original": "그렐린",
-        "translation": "格蕾琳"
+        "translation": "格蕾琳",
+        "lang": "ko"
       },
       {
         "original": "키르네",
-        "translation": "基尔内"
+        "translation": "基尔内",
+        "lang": "ko"
       },
       {
         "original": "아리엘라",
-        "translation": "阿丽埃拉"
+        "translation": "阿丽埃拉",
+        "lang": "ko"
       },
       {
         "original": "송하린",
-        "translation": "宋荷琳"
+        "translation": "宋荷琳",
+        "lang": "ko"
       },
       {
         "original": "Rirke",
-        "translation": "莉露克"
+        "translation": "莉露克",
+        "lang": "en"
       },
       {
         "original": "RAVEN",
-        "translation": "雷文"
+        "translation": "雷文",
+        "lang": "en"
       },
       {
         "original": "Emperatriz de la Espada",
-        "translation": "剑之女皇"
+        "translation": "剑之女皇",
+        "lang": "en"
+      },
+      {
+        "original": "검후",
+        "translation": "剑之女皇",
+        "lang": "ko"
+      },
+      {
+        "original": "황제폐하",
+        "translation": "皇帝陛下",
+        "lang": "ko"
+      },
+      {
+        "original": "가연",
+        "translation": "佳妍",
+        "lang": "ko"
+      },
+      {
+        "original": "세이나",
+        "translation": "世娜",
+        "lang": "ko"
+      },
+      {
+        "original": "강설",
+        "translation": "姜雪",
+        "lang": "ko"
+      },
+      {
+        "original": "주성현",
+        "translation": "朱成贤",
+        "lang": "ko"
+      },
+      {
+        "original": "래빗",
+        "translation": "小兔",
+        "lang": "ko"
       },
       {
         "original": "예솔",
@@ -2059,6 +2220,14 @@
       {
         "original": "회원님",
         "translation": "会员"
+      },
+      {
+        "original": "반포왕자",
+        "translation": "半坡王子"
+      },
+      {
+        "original": "퀸래빗",
+        "translation": "兔后"
       },
       {
         "original": "유나",
@@ -2110,6 +2279,10 @@
         "original": "Go Hoon Sang",
         "translation": "高勋尚",
         "lang": "auto"
+      },
+      {
+        "original": "성유나",
+        "translation": "成宥娜"
       },
       {
         "original": "OH DAL-YEONG",
@@ -2211,6 +2384,41 @@
       {
         "original": "민시윤",
         "translation": "闵诗允"
+      },
+      {
+        "original": "수현",
+        "translation": "秀贤",
+        "lang": "auto"
+      },
+      {
+        "original": "김기훈",
+        "translation": "金基勋",
+        "lang": "auto"
+      },
+      {
+        "original": "추민환",
+        "translation": "秋敏焕",
+        "lang": "auto"
+      },
+      {
+        "original": "은혜",
+        "translation": "恩惠",
+        "lang": "auto"
+      },
+      {
+        "original": "배수진",
+        "translation": "裴素珍",
+        "lang": "auto"
+      },
+      {
+        "original": "채수현",
+        "translation": "蔡秀贤",
+        "lang": "auto"
+      },
+      {
+        "original": "인하",
+        "translation": "仁荷",
+        "lang": "auto"
       }
     ],
     "Location": [
@@ -2260,6 +2468,14 @@
         "translation": "301室"
       },
       {
+        "original": "601호",
+        "translation": "601室"
+      },
+      {
+        "original": "1102호",
+        "translation": "1102室"
+      },
+      {
         "original": "반남",
         "translation": "半南",
         "lang": "ko"
@@ -2271,15 +2487,28 @@
       },
       {
         "original": "TRAVELER'S REST",
-        "translation": "旅人休憩所"
+        "translation": "旅人休憩所",
+        "lang": "en"
       },
       {
         "original": "Calle del Agua",
-        "translation": "水街"
+        "translation": "水街",
+        "lang": "en"
       },
       {
         "original": "악마의 거리",
-        "translation": "恶魔之街"
+        "translation": "恶魔之街",
+        "lang": "ko"
+      },
+      {
+        "original": "까마귀성",
+        "translation": "乌鸦城",
+        "lang": "ko"
+      },
+      {
+        "original": "성현호신술",
+        "translation": "成贤护身术",
+        "lang": "ko"
       },
       {
         "original": "合氣",
@@ -2296,6 +2525,10 @@
       {
         "original": "탑공원",
         "translation": "塔公园"
+      },
+      {
+        "original": "행복도장",
+        "translation": "幸福道馆"
       },
       {
         "original": "SA-SEONG RAEXAN",
@@ -2317,6 +2550,11 @@
       {
         "original": "행복한 수영장",
         "translation": "幸福游泳馆"
+      },
+      {
+        "original": "부산",
+        "translation": "釜山",
+        "lang": "auto"
       }
     ],
     "Org": [
@@ -2358,6 +2596,10 @@
         "translation": "V联赛"
       },
       {
+        "original": "가우스자이언츠",
+        "translation": "高斯巨人队"
+      },
+      {
         "original": "자영식품",
         "translation": "自营食品"
       },
@@ -2370,13 +2612,22 @@
         "translation": "妇女会会长"
       },
       {
+        "original": "applemall",
+        "translation": "苹果商城"
+      },
+      {
         "original": "아스모데",
         "translation": "阿斯莫德",
         "lang": "ko"
       },
       {
         "original": "COLAPSADORES",
-        "translation": "崩坏者"
+        "translation": "崩坏者",
+        "lang": "en"
+      },
+      {
+        "original": "래빗티비",
+        "translation": "兔子TV"
       },
       {
         "original": "웹툰왕국",
@@ -2440,6 +2691,10 @@
         "lang": "ko"
       },
       {
+        "original": "툰풍선",
+        "translation": "漫气球"
+      },
+      {
         "original": "모비",
         "translation": "白鲸"
       },
@@ -2495,6 +2750,10 @@
         "translation": "突发任务"
       },
       {
+        "original": "데이터라인브레이커",
+        "translation": "数据线破坏者"
+      },
+      {
         "original": "강제수행",
         "translation": "强制执行",
         "lang": "ko"
@@ -2545,7 +2804,13 @@
       },
       {
         "original": "각인소거술",
-        "translation": "烙印消除术"
+        "translation": "烙印消除术",
+        "lang": "ko"
+      },
+      {
+        "original": "노예각인",
+        "translation": "奴隶烙印",
+        "lang": "ko"
       }
     ],
     "Creature": [
@@ -2556,15 +2821,22 @@
       },
       {
         "original": "서큐버스",
-        "translation": "魅魔"
+        "translation": "魅魔",
+        "lang": "ko"
       },
       {
         "original": "CUERVO",
-        "translation": "乌鸦"
+        "translation": "乌鸦",
+        "lang": "en"
       },
       {
         "original": "Vampyr",
         "translation": "吸血鬼"
+      },
+      {
+        "original": "마무맘",
+        "translation": "马姆姆",
+        "lang": "auto"
       }
     ]
   }

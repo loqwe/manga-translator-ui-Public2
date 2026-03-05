@@ -340,6 +340,9 @@ class MangaTranslator:
         # Return the single result
         return results[0] if results else Context()
 
+    # Archive extensions for detecting archive source files
+    _ARCHIVE_EXTENSIONS = {'.pdf', '.epub', '.cbz', '.cbr', '.cb7', '.zip'}
+
     def _calculate_output_path(self, image_path: str, save_info: dict) -> str:
         """
         计算输出文件的完整路径
@@ -353,6 +356,8 @@ class MangaTranslator:
                 - save_to_source_dir: 是否输出到原图目录的 manga_translator_work/result 子目录
                 - all_parent_dirs: 所有图片的父目录集合（用于生成唯一别名）
                 - parent_dir_aliases: 已计算的父目录别名映射（缓存）
+                - file_to_folder_map: 文件到源文件夹/压缩包的映射
+                - archive_to_temp_map: 压缩包路径到临时解压目录的映射
                 
         Returns:
             str: 计算后的输出文件完整路径
@@ -361,6 +366,8 @@ class MangaTranslator:
         input_folders = save_info.get('input_folders', set())
         output_format = save_info.get('format')
         save_to_source_dir = save_info.get('save_to_source_dir', False)
+        file_to_folder_map = save_info.get('file_to_folder_map', {})
+        archive_to_temp_map = save_info.get('archive_to_temp_map', {})
         
         file_path = image_path
         parent_dir = os.path.normpath(os.path.dirname(file_path))
@@ -372,29 +379,61 @@ class MangaTranslator:
         else:
             # 默认输出到输出目录根
             final_output_dir = output_folder
-            output_folder_norm = os.path.normpath(output_folder)
             
-            # 获取图片的直接父目录名（如 "Chapter 74"）
-            parent_name = os.path.basename(parent_dir)
+            # Check if file comes from an archive (CBZ, CBR, etc.)
+            source_folder = file_to_folder_map.get(file_path)
+            is_archive = False
+            if source_folder:
+                ext = os.path.splitext(source_folder)[1].lower()
+                is_archive = ext in self._ARCHIVE_EXTENSIONS
             
-            # 检查是否需要保留目录结构
-            # 只有当父目录名包含 "chapter" 时才创建子目录
-            if parent_name and 'chapter' in parent_name.lower():
-                # 生成所有图片父目录的唯一别名，避免同名目录冲突
-                parent_dir_aliases = save_info.get('parent_dir_aliases')
-                if parent_dir_aliases is None:
-                    # 收集所有图片的父目录
-                    all_parent_dirs = save_info.get('all_parent_dirs', set())
-                    if not all_parent_dirs:
-                        # 如果没有预先收集，使用 input_folders 作为备用
-                        all_parent_dirs = input_folders
-                    parent_dir_aliases = build_unique_folder_aliases(all_parent_dirs)
-                    save_info['parent_dir_aliases'] = parent_dir_aliases
+            if is_archive:
+                # Preserve archive internal folder structure
+                archive_name = os.path.splitext(os.path.basename(source_folder))[0]
+                temp_dir = archive_to_temp_map.get(source_folder)
+                if temp_dir:
+                    temp_dir_norm = os.path.normpath(temp_dir)
+                    try:
+                        rel_path = os.path.relpath(parent_dir, temp_dir_norm)
+                    except ValueError:
+                        rel_path = '.'
+                    if rel_path != '.':
+                        final_output_dir = os.path.normpath(
+                            os.path.join(output_folder, archive_name, rel_path)
+                        )
+                    else:
+                        final_output_dir = os.path.normpath(
+                            os.path.join(output_folder, archive_name)
+                        )
+                else:
+                    final_output_dir = os.path.normpath(
+                        os.path.join(output_folder, archive_name)
+                    )
+            else:
+                # Non-archive: existing chapter-based logic
+                output_folder_norm = os.path.normpath(output_folder)
                 
-                # 获取当前父目录的别名
-                folder_alias = parent_dir_aliases.get(parent_dir) or parent_name
-                final_output_dir = os.path.join(output_folder, folder_alias)
-            # 如果父目录不是 Chapter，直接放到输出根目录（final_output_dir 保持为 output_folder）
+                # 获取图片的直接父目录名（如 "Chapter 74"）
+                parent_name = os.path.basename(parent_dir)
+                
+                # 检查是否需要保留目录结构
+                # 只有当父目录名包含 "chapter" 时才创建子目录
+                if parent_name and 'chapter' in parent_name.lower():
+                    # 生成所有图片父目录的唯一别名，避免同名目录冲突
+                    parent_dir_aliases = save_info.get('parent_dir_aliases')
+                    if parent_dir_aliases is None:
+                        # 收集所有图片的父目录
+                        all_parent_dirs = save_info.get('all_parent_dirs', set())
+                        if not all_parent_dirs:
+                            # 如果没有预先收集，使用 input_folders 作为备用
+                            all_parent_dirs = input_folders
+                        parent_dir_aliases = build_unique_folder_aliases(all_parent_dirs)
+                        save_info['parent_dir_aliases'] = parent_dir_aliases
+                    
+                    # 获取当前父目录的别名
+                    folder_alias = parent_dir_aliases.get(parent_dir) or parent_name
+                    final_output_dir = os.path.join(output_folder, folder_alias)
+                # 如果父目录不是 Chapter，直接放到输出根目录
             
             final_output_dir = os.path.normpath(final_output_dir)
         

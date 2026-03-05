@@ -26,6 +26,10 @@ def main():
     
     # 解析参数
     args = parse_args()
+
+    # 统一导出 ONNX GPU 开关到环境变量，确保各运行模式都能生效
+    if getattr(args, 'disable_onnx_gpu', False):
+        os.environ['MT_DISABLE_ONNX_GPU'] = '1'
     
     # 延迟导入日志工具，避免加载大型库
     from manga_translator.utils.log import init_logging, set_log_level, get_logger

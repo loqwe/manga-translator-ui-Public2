@@ -37,6 +37,31 @@ from services import (
 from services.state_manager import AppStateKey
 
 
+def _compute_archive_output_folder(
+    source_folder: str,
+    original_path: str,
+    output_folder: str,
+    archive_to_temp_map: dict
+) -> str:
+    """Compute output folder for a file extracted from an archive.
+    
+    Preserves internal folder structure from the archive.
+    e.g. CBZ with Chapter 03/15.jpg -> {output}/{archive_name}/Chapter 03/
+    """
+    archive_name = os.path.splitext(os.path.basename(source_folder))[0]
+    temp_dir = archive_to_temp_map.get(source_folder) if archive_to_temp_map else None
+    if temp_dir:
+        parent_dir = os.path.normpath(os.path.dirname(original_path))
+        temp_dir_norm = os.path.normpath(temp_dir)
+        try:
+            rel_path = os.path.relpath(parent_dir, temp_dir_norm)
+        except ValueError:
+            rel_path = '.'
+        if rel_path != '.':
+            return os.path.normpath(os.path.join(output_folder, archive_name, rel_path))
+    return os.path.normpath(os.path.join(output_folder, archive_name))
+
+
 @dataclass
 class AppConfig:
     """应用配置信息"""
@@ -154,9 +179,10 @@ class MainAppLogic(QObject):
                 if source_folder:
                     # 检查是否来自压缩包
                     if self.file_service.is_archive_file(source_folder):
-                        # 文件来自压缩包，使用压缩包名称（不含扩展名）作为输出子目录
-                        archive_name = os.path.splitext(os.path.basename(source_folder))[0]
-                        final_output_folder = os.path.join(output_folder, archive_name)
+                        archive_to_temp = getattr(self, 'archive_to_temp_map', {})
+                        final_output_folder = _compute_archive_output_folder(
+                            source_folder, original_path, output_folder, archive_to_temp
+                        )
                     else:
                         # 文件来自文件夹，保持相对路径结构
                         parent_dir = os.path.normpath(os.path.dirname(original_path))
@@ -271,9 +297,10 @@ class MainAppLogic(QObject):
             if source_folder:
                 # 检查是否来自压缩包
                 if self.file_service.is_archive_file(source_folder):
-                    # 文件来自压缩包，使用压缩包名称（不含扩展名）作为输出子目录
-                    archive_name = os.path.splitext(os.path.basename(source_folder))[0]
-                    final_output_dir = os.path.join(output_folder, archive_name)
+                    archive_to_temp = getattr(self, 'archive_to_temp_map', {})
+                    final_output_dir = _compute_archive_output_folder(
+                        source_folder, image_path, output_folder, archive_to_temp
+                    )
                 else:
                     # 文件来自文件夹，保持相对路径结构
                     relative_path = os.path.relpath(parent_dir, source_folder)
@@ -1810,7 +1837,8 @@ class MainAppLogic(QObject):
             config_dict=self.config_service.get_config().dict(),
             output_folder=self.config_service.get_config().app.last_output_path,
             root_dir=self.config_service.root_dir,
-            file_to_folder_map=self.file_to_folder_map.copy()  # 传递文件到文件夹的映射
+            file_to_folder_map=self.file_to_folder_map.copy(),
+            archive_to_temp_map=getattr(self, 'archive_to_temp_map', {}).copy()
         )
         
         self.worker.moveToThread(self.thread)
@@ -1946,7 +1974,8 @@ class MainAppLogic(QObject):
             output_folder=output_path,
             root_dir=self.config_service.root_dir,
             file_to_folder_map=self.file_to_folder_map.copy(),
-            historical_context=historical_context  # 传递历史上下文
+            historical_context=historical_context,
+            archive_to_temp_map=getattr(self, 'archive_to_temp_map', {}).copy()
         )
         
         self.worker.moveToThread(self.thread)
@@ -2026,8 +2055,14 @@ class MainAppLogic(QObject):
                                 # 构造翻译后的图片路径
                                 source_folder = self.file_to_folder_map.get(original_path)
                                 if source_folder:
-                                    folder_name = os.path.basename(source_folder)
-                                    final_output_folder = os.path.join(output_folder, folder_name)
+                                    if self.file_service.is_archive_file(source_folder):
+                                        archive_to_temp = getattr(self, 'archive_to_temp_map', {})
+                                        final_output_folder = _compute_archive_output_folder(
+                                            source_folder, original_path, output_folder, archive_to_temp
+                                        )
+                                    else:
+                                        folder_name = os.path.basename(source_folder)
+                                        final_output_folder = os.path.join(output_folder, folder_name)
                                     translated_file = os.path.join(final_output_folder, os.path.basename(original_path))
                                 else:
                                     translated_file = os.path.join(output_folder, os.path.basename(original_path))
@@ -2097,8 +2132,14 @@ class MainAppLogic(QObject):
                             continue
                         source_folder = self.file_to_folder_map.get(original_path)
                         if source_folder:
-                            folder_name = os.path.basename(source_folder)
-                            final_output_folder = os.path.join(output_folder, folder_name)
+                            if self.file_service.is_archive_file(source_folder):
+                                archive_to_temp = getattr(self, 'archive_to_temp_map', {})
+                                final_output_folder = _compute_archive_output_folder(
+                                    source_folder, original_path, output_folder, archive_to_temp
+                                )
+                            else:
+                                folder_name = os.path.basename(source_folder)
+                                final_output_folder = os.path.join(output_folder, folder_name)
                             translated_file = os.path.join(final_output_folder, os.path.basename(original_path))
                         else:
                             translated_file = os.path.join(output_folder, os.path.basename(original_path))
@@ -2406,7 +2447,7 @@ class TranslationWorker(QObject):
     file_processed = pyqtSignal(dict)
     failed_files_recorded = pyqtSignal(dict)  # 失败文件记录信号: {folder_path: [filename, ...]}
 
-    def __init__(self, files, config_dict, output_folder, root_dir, file_to_folder_map=None, historical_context=None):
+    def __init__(self, files, config_dict, output_folder, root_dir, file_to_folder_map=None, historical_context=None, archive_to_temp_map=None):
         super().__init__()
         self.files = files
         self.config_dict = config_dict
@@ -2414,6 +2455,7 @@ class TranslationWorker(QObject):
         self.root_dir = root_dir
         self.file_to_folder_map = file_to_folder_map or {}  # 文件到文件夹的映射
         self.historical_context = historical_context  # 重试时恢复的历史上下文
+        self.archive_to_temp_map = archive_to_temp_map or {}  # 压缩包路径 -> 临时解压目录
         self._is_running = True
         self._current_task = None  # 保存当前运行的异步任务
         self._finished_emitted = False
@@ -2481,9 +2523,9 @@ class TranslationWorker(QObject):
             # 特殊处理：压缩包文件
             source_folder = self.file_to_folder_map.get(image_path)
             if source_folder and self.file_service.is_archive_file(source_folder):
-                # 文件来自压缩包，使用压缩包名称（不含扩展名）作为输出子目录
-                archive_name = os.path.splitext(os.path.basename(source_folder))[0]
-                final_output_dir = os.path.join(output_folder, archive_name)
+                final_output_dir = _compute_archive_output_folder(
+                    source_folder, image_path, output_folder, self.archive_to_temp_map
+                )
             
             final_output_dir = os.path.normpath(final_output_dir)
         
@@ -3077,7 +3119,9 @@ class TranslationWorker(QObject):
                 'overwrite': self.config_dict.get('cli', {}).get('overwrite', True),
                 'input_folders': input_folders,
                 'all_parent_dirs': all_parent_dirs,
-                'save_to_source_dir': self.config_dict.get('cli', {}).get('save_to_source_dir', False)
+                'save_to_source_dir': self.config_dict.get('cli', {}).get('save_to_source_dir', False),
+                'file_to_folder_map': self.file_to_folder_map.copy(),
+                'archive_to_temp_map': getattr(self, 'archive_to_temp_map', {}).copy()
             }
 
             # Filter out existing files if overwrite is False

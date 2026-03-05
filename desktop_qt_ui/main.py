@@ -12,7 +12,7 @@ warnings.filterwarnings('ignore', module='xformers')
 
 # 在 PyTorch 初始化前设置显存优化，允许使用共享显存
 # expandable_segments 可以减少显存碎片，避免 OOM 错误
-os.environ.setdefault('PYTORCH_CUDA_ALLOC_CONF', 'expandable_segments:True')
+os.environ.setdefault('PYTORCH_ALLOC_CONF', 'expandable_segments:True')
 
 # 设置 Hugging Face 镜像站（国内用户加速下载）
 os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'

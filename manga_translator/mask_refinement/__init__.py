@@ -1,4 +1,4 @@
-from typing import Any, List, Sequence, Tuple
+from typing import Any, Callable, List, Optional, Sequence, Tuple
 import cv2
 import numpy as np
 
@@ -8,6 +8,7 @@ from ..utils import (
     Quadrilateral,
     detect_bubbles_with_mangalens,
     build_bubble_mask_from_mangalens_result,
+    imwrite_unicode,
 )
 from ..utils.log import get_logger
 
@@ -15,6 +16,8 @@ logger = get_logger('mask_refinement')
 
 # 气泡 mask 向内收缩像素，避免气泡边框被修复模型擦除
 BUBBLE_MASK_ERODE_PX = 3
+# line 最小外接矩形外扩像素（保护区）
+LINE_MIN_RECT_PROTECT_EXPAND_PX = 20
 
 
 def _erode_bubble_mask(bubble_mask: np.ndarray) -> np.ndarray:
@@ -44,6 +47,85 @@ def _build_model_bubble_mask(image_shape: Tuple[int, int], result: Any) -> Tuple
     raw_masks = getattr(raw_result, 'masks', None) if raw_result is not None else None
     source = 'mask' if raw_masks is not None else 'box'
     return _erode_bubble_mask(bubble_mask), source
+
+
+def _build_line_protect_mask(
+    text_regions: List[TextBlock],
+    image_shape: Tuple[int, int],
+    expand_px: int = LINE_MIN_RECT_PROTECT_EXPAND_PX,
+) -> np.ndarray:
+    h, w = int(image_shape[0]), int(image_shape[1])
+    protect_mask = np.zeros((h, w), dtype=np.uint8)
+    if h <= 0 or w <= 0 or expand_px < 0:
+        return protect_mask
+
+    for region in text_regions:
+        lines = getattr(region, 'lines', None)
+        if lines is None:
+            continue
+        try:
+            lines_arr = np.asarray(lines, dtype=np.float32)
+        except Exception:
+            continue
+
+        if lines_arr.ndim == 2:
+            iter_lines = [lines_arr]
+        elif lines_arr.ndim == 3:
+            iter_lines = lines_arr
+        else:
+            continue
+
+        for line in iter_lines:
+            pts = np.asarray(line, dtype=np.float32).reshape(-1, 2)
+            if pts.shape[0] < 3:
+                continue
+            (cx, cy), (rw, rh), angle = cv2.minAreaRect(pts)
+            rw = max(float(rw) + float(expand_px) * 2.0, 1.0)
+            rh = max(float(rh) + float(expand_px) * 2.0, 1.0)
+            expanded_rect = ((float(cx), float(cy)), (rw, rh), float(angle))
+            box = cv2.boxPoints(expanded_rect)
+            box[:, 0] = np.clip(box[:, 0], 0, max(w - 1, 0))
+            box[:, 1] = np.clip(box[:, 1], 0, max(h - 1, 0))
+            cv2.fillPoly(protect_mask, [box.astype(np.int32)], 255)
+
+    return protect_mask
+
+
+def _build_bubble_clip_debug_image(
+    raw_image: np.ndarray,
+    bubble_mask: np.ndarray,
+    mask_before_clip: np.ndarray,
+    mask_after_clip: np.ndarray,
+    protected_mask: np.ndarray,
+) -> np.ndarray:
+    img = raw_image.copy()
+    if img.ndim == 2:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    if img.shape[-1] == 4:
+        img = img[..., :3]
+
+    overlay = img.astype(np.uint8).copy()
+    bubble_bin = (bubble_mask > 0).astype(np.uint8) * 255
+    before_bin = (mask_before_clip > 0).astype(np.uint8) * 255
+    after_bin = (mask_after_clip > 0).astype(np.uint8) * 255
+    protected_bin = (protected_mask > 0).astype(np.uint8) * 255
+    removed_bin = (before_bin > 0) & (after_bin == 0)
+
+    # Blue: bubble
+    overlay[bubble_bin > 0] = np.array([255, 0, 0], dtype=np.uint8)
+    # Green: final
+    overlay[after_bin > 0] = np.array([0, 255, 0], dtype=np.uint8)
+    # Yellow: protected restore
+    overlay[protected_bin > 0] = np.array([0, 255, 255], dtype=np.uint8)
+    # Red: removed by clipping (highest priority)
+    overlay[removed_bin > 0] = np.array([0, 0, 255], dtype=np.uint8)
+
+    legend = "Blue=bubble, Green=final, Yellow=protected, Red=removed"
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    cv2.putText(overlay, legend, (8, 22), font, 0.58, (255, 255, 255), 2, cv2.LINE_AA)
+    cv2.putText(overlay, legend, (8, 22), font, 0.58, (0, 0, 0), 1, cv2.LINE_AA)
+
+    return overlay
 
 
 def _keep_bubble_components_intersecting_refined_mask(
@@ -125,6 +207,7 @@ async def dispatch(
     kernel_size: int = 3,
     use_model_bubble_repair_intersection: bool = False,
     limit_mask_dilation_to_bubble_mask: bool = False,
+    debug_path_fn: Optional[Callable[[str], str]] = None,
 ) -> np.ndarray:
     # Larger sized mask images will probably have crisper and thinner mask segments due to being able to fit the text pixels better
     # so we dont want to size them down as much to not lose information
@@ -174,18 +257,43 @@ async def dispatch(
                 final_mask = merged_mask
 
             if np.count_nonzero(bubble_mask) > 0 and limit_mask_dilation_to_bubble_mask:
+                mask_before_clip = final_mask.copy()
                 clipped_mask, total_components, intersected_components, preserved_components = _clip_refined_components_by_bubble_mask(
                     refined_mask=final_mask,
                     bubble_mask=bubble_mask,
                 )
+                line_protect_mask = _build_line_protect_mask(
+                    text_regions=text_regions,
+                    image_shape=final_mask.shape[:2],
+                    expand_px=LINE_MIN_RECT_PROTECT_EXPAND_PX,
+                )
+                protected_restore_mask = (mask_before_clip > 0) & (line_protect_mask > 0) & (clipped_mask == 0)
+                protected_pixels = int(np.count_nonzero(protected_restore_mask))
+                if protected_pixels > 0:
+                    clipped_mask[protected_restore_mask] = 255
                 removed_pixels = int(np.count_nonzero((final_mask > 0) & (clipped_mask == 0)))
                 logger.info(
                     f"Bubble constrained dilation: detections={len(detections)}, source={bubble_source}, "
                     f"refined_components={total_components}, intersected_components={intersected_components}, "
                     f"preserved_components={preserved_components}, removed_pixels={removed_pixels}, "
+                    f"protected_pixels={protected_pixels}, "
                     f"output_pixels={int(np.count_nonzero(clipped_mask))}"
                 )
                 final_mask = clipped_mask
+                if verbose and debug_path_fn is not None:
+                    try:
+                        debug_img = _build_bubble_clip_debug_image(
+                            raw_image=raw_image,
+                            bubble_mask=bubble_mask,
+                            mask_before_clip=mask_before_clip,
+                            mask_after_clip=clipped_mask,
+                            protected_mask=protected_restore_mask.astype(np.uint8) * 255,
+                        )
+                        debug_path = debug_path_fn('mask_bubble_clip_debug.png')
+                        imwrite_unicode(debug_path, debug_img, logger)
+                        logger.info(f"Bubble constrained dilation debug image saved: {debug_path}")
+                    except Exception as debug_exc:
+                        logger.warning(f"Failed to save bubble constrained dilation debug image: {debug_exc}")
         except Exception as exc:
             logger.warning(f"Model bubble mask post-process failed, keep refined mask unchanged: {exc}")
 

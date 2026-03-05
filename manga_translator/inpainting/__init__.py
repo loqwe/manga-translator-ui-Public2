@@ -8,12 +8,6 @@ from .inpainting_lama_mpe import LamaMPEInpainter, LamaLargeInpainter
 from .none import NoneInpainter
 from .original import OriginalInpainter
 from ..config import Inpainter, InpainterConfig
-from ..utils import (
-    build_det_rearrange_plan,
-    det_collect_plan_patches,
-    det_rearrange_patch_array,
-    det_unrearrange_patch_maps,
-)
 
 _SD_IMPORT_ERROR = None
 try:
@@ -65,69 +59,142 @@ async def dispatch(inpainter_key: Inpainter, image: np.ndarray, mask: np.ndarray
         force_torch = getattr(config, 'force_use_torch_inpainting', False)
         await inpainter.load(device, force_torch=force_torch)
 
-    rearrange_plan = build_det_rearrange_plan(image, tgt_size=inpainting_size)
-    if rearrange_plan is None:
-        return await inpainter.inpaint(image, mask, config, inpainting_size, verbose)
-    return await _dispatch_with_det_rearrange(
-        inpainter,
-        image,
-        mask,
-        config,
-        inpainting_size,
-        verbose,
-        rearrange_plan,
-    )
+    # Priority 1: tile split based on inpainting_split_ratio
+    h, w = image.shape[:2]
+    aspect_ratio = max(w / h, h / w)
+    split_ratio = config.inpainting_split_ratio
+
+    if split_ratio > 0 and aspect_ratio > split_ratio:
+        return await _dispatch_with_split(inpainter, image, mask, config, inpainting_size, verbose)
+
+    return await inpainter.inpaint(image, mask, config, inpainting_size, verbose)
 
 async def unload(inpainter_key: Inpainter):
     inpainter_cache.pop(inpainter_key, None)
 
-async def _dispatch_with_det_rearrange(
+async def _dispatch_with_split(
     inpainter: CommonInpainter,
     image: np.ndarray,
     mask: np.ndarray,
     config: InpainterConfig,
     inpainting_size: int,
     verbose: bool,
-    rearrange_plan: dict,
 ) -> np.ndarray:
     """
-    使用与检测器统一的切割/回拼逻辑进行修复。
+    Split extreme-aspect-ratio images into tiles along the long edge,
+    inpaint each tile independently, then reassemble with linear alpha
+    feathering in the overlap zones to avoid visible seams.
     """
+    h, w = image.shape[:2]
+    is_vertical = h > w
+
+    if is_vertical:
+        long_side, short_side = h, w
+    else:
+        long_side, short_side = w, h
+
+    # Number of tiles: keep each tile's aspect ratio <= target_ratio
+    target_ratio = config.inpainting_split_ratio
+    num_splits = int(np.ceil(long_side / (short_side * target_ratio)))
+
+    # 10% overlap relative to the short side
+    overlap = int(short_side * 0.1)
+    tile_size = (long_side + overlap * (num_splits - 1)) // num_splits
+
     if verbose:
-        h, w = image.shape[:2]
-        print(
-            f"[Inpainting Rearrange] image={w}x{h}, "
-            f"patch_size={rearrange_plan['patch_size']}, "
-            f"ph_num={rearrange_plan['ph_num']}, pw_num={rearrange_plan['pw_num']}, "
-            f"pad_num={rearrange_plan['pad_num']}, transpose={rearrange_plan['transpose']}"
-        )
+        print(f"[Inpainting Split] Image size: {w}x{h}, Aspect ratio: {max(w/h, h/w):.2f}")
+        print(f"[Inpainting Split] Splitting into {num_splits} tiles along {'height' if is_vertical else 'width'}")
+        print(f"[Inpainting Split] Tile size: {tile_size}, Overlap: {overlap}")
 
-    image_patch_array = det_rearrange_patch_array(rearrange_plan)
-    mask_plan = dict(rearrange_plan)
-    mask_plan['patch_list'] = det_collect_plan_patches(mask, rearrange_plan)
-    mask_patch_array = det_rearrange_patch_array(mask_plan)
+    # --- Cut & inpaint each tile ---
+    tiles = []
+    for i in range(num_splits):
+        start = max(0, i * tile_size - i * overlap)
+        if is_vertical:
+            end = min(h, start + tile_size)
+            tile_img = image[start:end, :, :].copy()
+            tile_mask = mask[start:end, :].copy()
+        else:
+            end = min(w, start + tile_size)
+            tile_img = image[:, start:end, :].copy()
+            tile_mask = mask[:, start:end].copy()
 
-    inpainted_patch_list = []
-    for ii, (image_patch, mask_patch) in enumerate(zip(image_patch_array, mask_patch_array)):
-        if image_patch.size == 0:
-            inpainted_patch_list.append(image_patch.astype(np.float32))
-            continue
-        if np.max(mask_patch) == 0:
-            inpainted_patch_list.append(image_patch.astype(np.float32))
-            continue
         if verbose:
-            print(f"[Inpainting Rearrange] processing patch {ii + 1}/{len(image_patch_array)}")
-        inpainted_patch = await inpainter.inpaint(
-            image_patch,
-            mask_patch.astype(np.uint8),
-            config,
-            inpainting_size,
-            verbose,
-        )
-        inpainted_patch_list.append(inpainted_patch.astype(np.float32))
+            axis = 'rows' if is_vertical else 'cols'
+            print(f"[Inpainting Split] Processing tile {i+1}/{num_splits}: {axis} {start}-{end}")
 
-    merged = det_unrearrange_patch_maps(inpainted_patch_list, rearrange_plan, data_format='hwc')
-    merged = np.clip(np.rint(merged), 0, 255).astype(np.uint8)
+        tile_inpainted = await inpainter.inpaint(tile_img, tile_mask, config, inpainting_size, verbose)
+        tiles.append({'image': tile_inpainted, 'start': start, 'end': end})
+
+    # --- Reassemble with linear alpha feathering ---
+    result = image.astype(np.float32)
+    blend_size = overlap // 2 if overlap > 0 else 0
+
+    for i, td in enumerate(tiles):
+        img = td['image'].astype(np.float32)
+        s, e = td['start'], td['end']
+
+        if num_splits == 1:
+            if is_vertical:
+                result[s:e, :, :] = img
+            else:
+                result[:, s:e, :] = img
+            continue
+
+        if i == 0:
+            # First tile: write body, feather trailing edge
+            if is_vertical:
+                result[s:e - blend_size, :, :] = img[:-blend_size or None, :, :]
+                for j in range(blend_size):
+                    alpha = 1.0 - j / blend_size
+                    ri = e - blend_size + j
+                    ti = img.shape[0] - blend_size + j
+                    result[ri, :, :] = alpha * img[ti, :, :] + (1 - alpha) * result[ri, :, :]
+            else:
+                result[:, s:e - blend_size, :] = img[:, :-blend_size or None, :]
+                for j in range(blend_size):
+                    alpha = 1.0 - j / blend_size
+                    ri = e - blend_size + j
+                    ti = img.shape[1] - blend_size + j
+                    result[:, ri, :] = alpha * img[:, ti, :] + (1 - alpha) * result[:, ri, :]
+
+        elif i == len(tiles) - 1:
+            # Last tile: feather leading edge, write body
+            if is_vertical:
+                for j in range(blend_size):
+                    alpha = j / blend_size
+                    result[s + j, :, :] = (1 - alpha) * result[s + j, :, :] + alpha * img[j, :, :]
+                result[s + blend_size:e, :, :] = img[blend_size:, :, :]
+            else:
+                for j in range(blend_size):
+                    alpha = j / blend_size
+                    result[:, s + j, :] = (1 - alpha) * result[:, s + j, :] + alpha * img[:, j, :]
+                result[:, s + blend_size:e, :] = img[:, blend_size:, :]
+
+        else:
+            # Middle tiles: feather both edges
+            if is_vertical:
+                for j in range(blend_size):
+                    alpha = j / blend_size
+                    result[s + j, :, :] = (1 - alpha) * result[s + j, :, :] + alpha * img[j, :, :]
+                result[s + blend_size:e - blend_size, :, :] = img[blend_size:-blend_size or None, :, :]
+                for j in range(blend_size):
+                    alpha = 1.0 - j / blend_size
+                    ri = e - blend_size + j
+                    ti = img.shape[0] - blend_size + j
+                    result[ri, :, :] = alpha * img[ti, :, :] + (1 - alpha) * result[ri, :, :]
+            else:
+                for j in range(blend_size):
+                    alpha = j / blend_size
+                    result[:, s + j, :] = (1 - alpha) * result[:, s + j, :] + alpha * img[:, j, :]
+                result[:, s + blend_size:e - blend_size, :] = img[:, blend_size:-blend_size or None, :]
+                for j in range(blend_size):
+                    alpha = 1.0 - j / blend_size
+                    ri = e - blend_size + j
+                    ti = img.shape[1] - blend_size + j
+                    result[:, ri, :] = alpha * img[:, ti, :] + (1 - alpha) * result[:, ri, :]
+
+    result = np.clip(np.rint(result), 0, 255).astype(np.uint8)
     if verbose:
-        print("[Inpainting Rearrange] patches merged successfully")
-    return merged
+        print("[Inpainting Split] Tiles merged successfully")
+    return result

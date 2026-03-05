@@ -1394,43 +1394,10 @@ def det_rearrange_forward(
         DBNet output, mask or None, None if rearrangement is not required
     '''
 
-    def _unrearrange(patch_lst: List[np.ndarray], transpose: bool, channel=1, pad_num=0):
-        _psize = _h = patch_lst[0].shape[-1]
-        _step = int(ph_step * _psize / patch_size)
-        _pw = int(_psize / pw_num)
-        _h = int(_pw / w * h)
-        tgtmap = np.zeros((channel, _h, _pw), dtype=np.float32)
-        num_patches = len(patch_lst) * pw_num - pad_num
-        for ii, p in enumerate(patch_lst):
-            if transpose:
-                p = einops.rearrange(p, 'c h w -> c w h')
-            for jj in range(pw_num):
-                pidx = ii * pw_num + jj
-                rel_t = rel_step_list[pidx]
-                t = int(round(rel_t * _h))
-                b = min(t + _psize, _h)
-                l = jj * _pw
-                r = l + _pw
-                tgtmap[..., t: b, :] += p[..., : b - t, l: r]
-                if pidx > 0:
-                    interleave = _psize - _step
-                    tgtmap[..., t: t+interleave, :] /= 2.
-
-                if pidx >= num_patches - 1:
-                    break
-
-        if transpose:
-            tgtmap = einops.rearrange(tgtmap, 'c h w -> c w h')
-        return tgtmap[None, ...]
-
-    def _patch2batches(patch_lst: List[np.ndarray], p_num: int, transpose: bool):
-        if transpose:
-            patch_lst = einops.rearrange(patch_lst, '(p_num pw_num) ph pw c -> p_num (pw_num pw) ph c', p_num=p_num)
-        else:
-            patch_lst = einops.rearrange(patch_lst, '(p_num pw_num) ph pw c -> p_num ph (pw_num pw) c', p_num=p_num)
-        
+    def _patch2batches(patch_arr: np.ndarray):
         batches = [[]]
-        for ii, patch in enumerate(patch_lst):
+        down_scale_ratio, pad_size = 1.0, 0
+        for ii, patch in enumerate(patch_arr):
 
             if len(batches[-1]) >= max_batch_size:
                 batches.append([])
@@ -1449,19 +1416,12 @@ def det_rearrange_forward(
                 imwrite_unicode(debug_path, p[..., ::-1], logger)
         return batches, down_scale_ratio, pad_size
 
-    h, w = img.shape[:2]
-    transpose = False
-    if h < w:
-        transpose = True
-        h, w = img.shape[1], img.shape[0]
-
-    asp_ratio = h / w
-    down_scale_ratio = h / tgt_size
-
-    # rearrange condition
-    require_rearrange = down_scale_ratio > 2.5 and asp_ratio > 3
-    if not require_rearrange:
+    plan = build_det_rearrange_plan(img, tgt_size=tgt_size)
+    if plan is None:
         return None, None
+
+    transpose = plan['transpose']
+    patch_arr = det_rearrange_patch_array(plan)
 
     if verbose:
         if result_path_fn:
@@ -1469,28 +1429,7 @@ def det_rearrange_forward(
         else:
             print('Input image will be rearranged to square batches before fed into network.\n Rearranged batches will be saved to result/rearrange_%d.png')
 
-    if transpose:
-        img = einops.rearrange(img, 'h w c -> w h c')
-    
-    pw_num = max(int(np.floor(2 * tgt_size / w)), 2)
-    patch_size = ph = pw_num * w
-
-    ph_num = int(np.ceil(h / ph))
-    ph_step = int((h - ph) / (ph_num - 1)) if ph_num > 1 else 0
-    rel_step_list = []
-    patch_list = []
-    for ii in range(ph_num):
-        t = ii * ph_step
-        b = t + ph
-        rel_step_list.append(t / h)
-        patch_list.append(img[t: b])
-
-    p_num = int(np.ceil(ph_num / pw_num))
-    pad_num = p_num * pw_num - ph_num
-    for ii in range(pad_num):
-        patch_list.append(np.zeros_like(patch_list[0]))
-
-    batches, down_scale_ratio, pad_size = _patch2batches(patch_list, p_num, transpose)
+    batches, down_scale_ratio, pad_size = _patch2batches(patch_arr)
 
     db_lst, mask_lst = [], []
     for batch in batches:
@@ -1506,8 +1445,8 @@ def det_rearrange_forward(
             db_lst.append(d)
             mask_lst.append(m)
 
-    db = _unrearrange(db_lst, transpose, channel=2, pad_num=pad_num)
-    mask = _unrearrange(mask_lst, transpose, channel=1, pad_num=pad_num)
+    db = det_unrearrange_patch_maps(db_lst, plan, data_format='chw')[None, ...]
+    mask = det_unrearrange_patch_maps(mask_lst, plan, data_format='chw')[None, ...]
     return db, mask
 
 

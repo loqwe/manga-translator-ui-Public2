@@ -2986,5 +2986,29 @@
   {
     "hash": "839a772",
     "msg": "Initial commit"
+  },
+  {
+    "hash": "48f69a5d",
+    "msg": "chore: add disable_onnx_gpu to config-example"
+  },
+  {
+    "hash": "3289bcf8",
+    "msg": "release: v2.1.4 updates"
+  },
+  {
+    "hash": "30fd0390",
+    "msg": "chore: remove verbose HQ diagnostic logs"
+  },
+  {
+    "hash": "edd1eb5e",
+    "msg": "fix: improve no-BR vertical layout and special merge bridging"
+  },
+  {
+    "hash": "074576e3",
+    "msg": "release: v2.1.2"
+  },
+  {
+    "hash": "74f3c840",
+    "msg": "release: v2.1.1"
   }
 ]
