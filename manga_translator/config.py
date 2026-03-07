@@ -107,6 +107,7 @@ class Ocr(str, Enum):
     paddleocr = "paddleocr"
     paddleocr_korean = "paddleocr_korean"
     paddleocr_latin = "paddleocr_latin"
+    paddleocr_thai = "paddleocr_thai"
     paddleocr_vl = "paddleocr_vl"  # PaddleOCR-VL for Manga (VLM-based OCR)
 
 class Translator(str, Enum):

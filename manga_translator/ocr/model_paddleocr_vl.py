@@ -58,6 +58,59 @@ class ModelPaddleOCRVL(OfflineOCR):
 
     # 模型子目录名（在 models/ocr/ 下）
     MODEL_DIR_NAME = "paddleocr_vl"
+    _OCR_VL_LANGUAGE_HINTS = {
+        "auto": "OCR: Extract all text.",
+        "multilingual": "OCR: Extract all multilingual text.",
+        "arabic": "OCR: Extract all Arabic text.",
+        "simplified chinese": "OCR: Extract all Simplified Chinese text.",
+        "traditional chinese": "OCR: Extract all Traditional Chinese text.",
+        "english": "OCR: Extract all English text.",
+        "japanese": "OCR: Extract all Japanese text.",
+        "korean": "OCR: Extract all Korean text.",
+        "spanish": "OCR: Extract all Spanish text.",
+        "french": "OCR: Extract all French text.",
+        "german": "OCR: Extract all German text.",
+        "russian": "OCR: Extract all Russian text.",
+        "portuguese": "OCR: Extract all Portuguese text.",
+        "italian": "OCR: Extract all Italian text.",
+        "thai": "OCR: Extract all Thai text.",
+        "vietnamese": "OCR: Extract all Vietnamese text.",
+        "indonesian": "OCR: Extract all Indonesian text.",
+        "turkish": "OCR: Extract all Turkish text.",
+        "polish": "OCR: Extract all Polish text.",
+        "ukrainian": "OCR: Extract all Ukrainian text.",
+    }
+    _OCR_VL_LANGUAGE_ALIASES = {
+        # Legacy short forms
+        "ar": "Arabic",
+        "ja": "Japanese",
+        "ko": "Korean",
+        "zh": "Chinese",
+        "en": "English",
+        "fr": "French",
+        "de": "German",
+        "es": "Spanish",
+        "ru": "Russian",
+        # Common config language codes
+        "eng": "English",
+        "jpn": "Japanese",
+        "kor": "Korean",
+        "chs": "Simplified Chinese",
+        "cht": "Traditional Chinese",
+        "esp": "Spanish",
+        "fra": "French",
+        "deu": "German",
+        "rus": "Russian",
+        "ptb": "Portuguese",
+        "ptg": "Portuguese",
+        "ita": "Italian",
+        "tha": "Thai",
+        "vie": "Vietnamese",
+        "ind": "Indonesian",
+        "trk": "Turkish",
+        "pol": "Polish",
+        "ukr": "Ukrainian",
+    }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -256,9 +309,23 @@ class ModelPaddleOCRVL(OfflineOCR):
             del self.color_model
             self.color_model = None
         if self.use_gpu:
-            torch.cuda.empty_cache()
+            pass
 
-    def _recognize_single(self, img: np.ndarray) -> str:
+    def _build_ocr_prompt(self, config: OcrConfig) -> str:
+        """Build OCR prompt with user override and language template prompt."""
+        custom_prompt = (getattr(config, 'ocr_vl_custom_prompt', None) or '').strip()
+        if custom_prompt:
+            return custom_prompt
+        language_hint_raw = (getattr(config, 'ocr_vl_language_hint', 'auto') or 'auto').strip()
+        language_hint = language_hint_raw.lower()
+        if language_hint in self._OCR_VL_LANGUAGE_HINTS:
+            return self._OCR_VL_LANGUAGE_HINTS[language_hint]
+        if language_hint in self._OCR_VL_LANGUAGE_ALIASES:
+            full_name = self._OCR_VL_LANGUAGE_ALIASES[language_hint]
+            return f"OCR: Extract all {full_name} text."
+        return f"OCR: Extract all {language_hint_raw} text."
+
+    def _recognize_single(self, img: np.ndarray, prompt_text: str) -> str:
         """
         识别单个图像区域的文本
 
@@ -284,7 +351,7 @@ class ModelPaddleOCRVL(OfflineOCR):
                 "role": "user",
                 "content": [
                     {"type": "image", "image": pil_img},
-                    {"type": "text", "text": "Please OCR this image."}
+                    {"type": "text", "text": prompt_text}
                 ]
             }
         ]
@@ -348,9 +415,11 @@ class ModelPaddleOCRVL(OfflineOCR):
 
             region_resized = cv2.resize(region, (new_w, text_height), interpolation=cv2.INTER_AREA)
 
-            # 转换为 tensor
-            image_tensor = (torch.from_numpy(region_resized).float() - 127.5) / 127.5
-            image_tensor = einops.rearrange(image_tensor, 'H W C -> 1 C H W')
+            canvas_w = self._get_ocr_canvas_width([new_w], base_align=4)
+            batch_region = np.zeros((1, text_height, canvas_w, 3), dtype=np.uint8)
+            batch_region[0, :, :new_w, :] = region_resized
+            image_tensor = (torch.from_numpy(batch_region).float() - 127.5) / 127.5
+            image_tensor = einops.rearrange(image_tensor, 'N H W C -> N C H W')
 
             # GPU 加速
             if self.use_gpu:
@@ -429,6 +498,7 @@ class ModelPaddleOCRVL(OfflineOCR):
         text_height = 48  # 默认文本高度
         ignore_bubble = config.ignore_bubble
         use_model_bubble_filter = bool(getattr(config, 'use_model_bubble_filter', False))
+        ocr_prompt = self._build_ocr_prompt(config)
 
         # 生成文本方向信息
         quadrilaterals = list(self._generate_text_direction(textlines))
@@ -447,7 +517,7 @@ class ModelPaddleOCRVL(OfflineOCR):
 
             try:
                 # 识别文本
-                text = self._recognize_single(region_img)
+                text = self._recognize_single(region_img, ocr_prompt)
 
                 if not text:
                     self.logger.info(f'[EMPTY] Region {idx} - No text detected')
@@ -477,6 +547,8 @@ class ModelPaddleOCRVL(OfflineOCR):
 
         # 清理 GPU 显存
         if self.use_gpu:
-            torch.cuda.empty_cache()
+            pass
 
         return output_regions
+
+

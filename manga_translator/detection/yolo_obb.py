@@ -6,24 +6,26 @@ YOLO OBB (Oriented Bounding Box) 检测器
 import os
 import numpy as np
 import cv2
-import onnxruntime as ort
 from typing import List, Tuple, Optional
 
 from .common import OfflineDetector
-from ..utils import Quadrilateral, det_rearrange_forward
+from ..utils import Quadrilateral, build_det_rearrange_plan, det_rearrange_patch_array
+from ..utils.onnx_runtime import (
+    create_inference_session,
+    create_session_options,
+    import_onnxruntime,
+)
 
 
 class YOLOOBBDetector(OfflineDetector):
     """YOLO OBB 检测器 - 基于ONNX Runtime"""
+    _MODEL_FILENAME = 'yolo26obb.onnx'
     
     _MODEL_MAPPING = {
         'model': {
-            'url': [
-                'https://github.com/hgmzhn/manga-translator-ui/releases/download/v1.7.1/ysgyolo_1.2_OS1.0.onnx',
-                'https://www.modelscope.cn/models/hgmzhn/manga-translator-ui/resolve/master/ysgyolo_1.2_OS1.0.onnx',
-            ],
-            'hash': '6f3202925f01fdf045f8c31a3bf62e6c44944f56ce09107eb436bc5a5b185ebe',
-            'file': '.',
+            'url': 'https://www.modelscope.cn/models/hgmzhn/manga-translator-ui/resolve/master/yolo26obb.onnx',
+            'hash': 'a7c3b9eaaa87f3afb2df331abb087a1047637c8110fb3319fd269cf28c81f012',
+            'file': _MODEL_FILENAME,
         }
     }
     
@@ -31,77 +33,44 @@ class YOLOOBBDetector(OfflineDetector):
         os.makedirs(self.model_dir, exist_ok=True)
         super().__init__(*args, **kwargs)
         
-        # 类别列表（不包括other）
+        # 类别列表（主类）
         self.classes = ['balloon', 'qipao', 'shuqing', 'changfangtiao', 'hengxie']
-        self.input_size = 640  # ONNX模型固定输入尺寸
+        # yolo26obb 额外类别映射：other 仅用于模型辅助合并（包裹关系）
+        self.class_id_to_label = {
+            0: 'balloon',
+            1: 'qipao',
+            2: 'shuqing',
+            3: 'changfangtiao',
+            4: 'hengxie',
+            5: 'other',
+        }
+        # 使用 1600 作为默认推理尺寸（会在预处理阶段 letterbox 到方形输入）
+        self.input_size = 1600
         self.using_cuda = False  # 初始化标志
     
     async def _load(self, device: str):
         """加载ONNX模型"""
-        model_path = self._get_file_path('ysgyolo_1.2_OS1.0.onnx')
-        
-        # 设置会话选项
-        sess_options = ort.SessionOptions()
-        sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-        # 设置日志级别为 ERROR，隐藏 Memcpy 警告（这些警告是正常的，不影响性能）
-        sess_options.log_severity_level = 3  # 0=Verbose, 1=Info, 2=Warning, 3=Error, 4=Fatal
-        
-        # 配置ONNX Runtime providers
-        providers = []
-        use_cuda = False
-        
-        if device == 'cuda':
-            # 使用 onnxruntime.preload_dlls() 加载 PyTorch 的 CUDA 库
-            try:
-                ort.preload_dlls()
-            except AttributeError:
-                self.logger.warning("onnxruntime.preload_dlls() 不可用（需要 1.21+）")
-            except Exception as e:
-                self.logger.warning(f"preload_dlls() 失败: {e}")
-            
-            # 检查 CUDA 是否真的可用
-            try:
-                available_providers = ort.get_available_providers()
-                if 'CUDAExecutionProvider' in available_providers:
-                    # 只设置 device_id，不设置其他选项以避免 Fallback
-                    # 测试发现：额外的 CUDA 选项（如 cudnn_conv_algo_search）会导致 Fallback 模式
-                    cuda_options = {
-                        'device_id': 0,
-                    }
-                    providers.append(('CUDAExecutionProvider', cuda_options))
-                    use_cuda = True
-                else:
-                    self.logger.warning(f"CUDA 不在可用 providers 中: {available_providers}")
-            except Exception as e:
-                self.logger.warning(f"检查 CUDA 可用性时出错: {e}")
-        
-        providers.append('CPUExecutionProvider')
-        
-        # 先尝试使用 CUDA，如果失败则回退到 CPU
-        if use_cuda:
-            try:
-                self.session = ort.InferenceSession(model_path, sess_options=sess_options, providers=providers)
-                self.logger.info("YOLO OBB: CUDA 模式加载成功")
-            except Exception as cuda_e:
-                self.logger.warning(f"CUDA 模式加载失败: {cuda_e}")
-                self.logger.warning("将回退到 CPU 模式")
-                use_cuda = False
-        
-        # 如果 CUDA 失败或未启用，使用 CPU
-        if not use_cuda:
-            try:
-                self.session = ort.InferenceSession(
-                    model_path, 
-                    sess_options=sess_options, 
-                    providers=['CPUExecutionProvider']
-                )
-                self.logger.info("YOLO OBB: CPU 模式加载成功")
-            except Exception as cpu_e:
-                self.logger.error(f"CPU 模式加载也失败: {cpu_e}")
-                raise
-        
+        model_path = self._get_file_path(self._MODEL_FILENAME)
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"YOLO OBB 模型不存在: {model_path}")
+
+        ort = import_onnxruntime(
+            "onnxruntime is required for YOLO OBB inference. "
+            "Install with: pip install onnxruntime-gpu (or onnxruntime)"
+        )
+        sess_options = create_session_options(ort, log_severity_level=3)
+        self.session, active_device = create_inference_session(
+            ort,
+            model_path,
+            device=device,
+            sess_options=sess_options,
+            cuda_options={"device_id": 0},
+            logger=self.logger,
+        )
+
         self.device = device
-        self.using_cuda = 'CUDAExecutionProvider' in self.session.get_providers()
+        self.using_cuda = active_device == "cuda"
+        self.logger.info(f"YOLO OBB: {active_device.upper()} 模式加载成功")
     
     async def _unload(self):
         """卸载模型"""
@@ -110,8 +79,8 @@ class YOLOOBBDetector(OfflineDetector):
     def letterbox(
         self, 
         img: np.ndarray, 
-        new_shape: Tuple[int, int] = (640, 640), 
-        color: Tuple[int, int, int] = (114, 114, 114)
+        new_shape: Tuple[int, int] = (1600, 1600),
+        color: Tuple[int, int, int] = (0, 0, 0)
     ) -> Tuple[np.ndarray, float, Tuple[float, float]]:
         """
         调整图像大小并添加边框（保持宽高比）- YOLO风格
@@ -148,20 +117,17 @@ class YOLOOBBDetector(OfflineDetector):
         if (new_unpad_w, new_unpad_h) != (shape[1], shape[0]):
             # 再次验证图像有效性
             if img is None or img.size == 0:
-                self.logger.error(f"YOLO OBB letterbox: resize前图像变为空")
+                self.logger.error("YOLO OBB letterbox: resize前图像变为空")
                 raise ValueError("resize前图像变为空")
             img = cv2.resize(img, (new_unpad_w, new_unpad_h), interpolation=cv2.INTER_LINEAR)
         
-        # 计算需要的总padding
-        dw = new_shape[1] - new_unpad_w  # 宽度方向需要的总padding
-        dh = new_shape[0] - new_unpad_h  # 高度方向需要的总padding
-        
-        # 将padding分配到两边（确保总和精确）
-        # 一边向下取整，一边是剩余部分，确保 left + right = dw
-        left = dw // 2
-        right = dw - left
-        top = dh // 2
-        bottom = dh - top
+        # 计算需要的总padding（与主检测 square_pad_resize 对齐：只向右/下补边）
+        dw = new_shape[1] - new_unpad_w
+        dh = new_shape[0] - new_unpad_h
+        left = 0
+        top = 0
+        right = dw
+        bottom = dh
         
         # 添加边框
         img = cv2.copyMakeBorder(
@@ -172,7 +138,7 @@ class YOLOOBBDetector(OfflineDetector):
         assert img.shape[0] == new_shape[0] and img.shape[1] == new_shape[1], \
             f"Letterbox failed: expected {new_shape}, got {img.shape[:2]}"
         
-        # 返回左和上的padding（用于后续坐标转换）
+        # 返回左和上的padding（右/下补边时均为0）
         return img, gain, (float(left), float(top))
     
     def preprocess(self, img: np.ndarray) -> Tuple[np.ndarray, float, Tuple[float, float]]:
@@ -300,8 +266,8 @@ class YOLOOBBDetector(OfflineDetector):
                 break
             
             # 简化的 IoU 计算（使用外接矩形）
-            current_box = boxes[current]
-            other_boxes = boxes[indices[1:]]
+            _current_box = boxes[current]
+            _other_boxes = boxes[indices[1:]]
             
             # 计算边界框重叠（简化版）
             indices = indices[1:]
@@ -376,7 +342,6 @@ class YOLOOBBDetector(OfflineDetector):
         gain: float,
         pad: Tuple[float, float],
         conf_threshold: float,
-        iou_threshold: float
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         后处理模型输出
@@ -401,17 +366,17 @@ class YOLOOBBDetector(OfflineDetector):
         if len(predictions) == 0:
             return np.array([]), np.array([]), np.array([])
         
-        # YOLO OBB 输出格式: [cx, cy, w, h, class0, class1, ..., classN, angle]
-        nc = len(self.classes)
-        box = predictions[:, :4]  # [cx, cy, w, h]
-        cls = predictions[:, 4:4+nc]  # 类别分数
-        angle = predictions[:, -1:]  # angle（最后一列）
-        
-        # 获取最高置信度的类别
-        conf = np.max(cls, axis=1, keepdims=True)
-        j = np.argmax(cls, axis=1, keepdims=True).astype(float)
-        
-        # 组合：[box, conf, class_id, angle]
+        # 仅支持 yolo26obb end-to-end 输出格式:
+        # [cx, cy, w, h, conf, class_id, angle]
+        if predictions.shape[1] != 7:
+            self.logger.warning(
+                f"YOLO OBB输出格式异常，预期7列(yolo26obb)，实际: {predictions.shape}"
+            )
+            return np.array([]), np.array([]), np.array([])
+        box = predictions[:, :4]
+        conf = predictions[:, 4:5]
+        j = predictions[:, 5:6]
+        angle = predictions[:, 6:7]
         x = np.concatenate((box, conf, j, angle), axis=1)
         
         # 应用置信度阈值
@@ -432,16 +397,20 @@ class YOLOOBBDetector(OfflineDetector):
         )
         x[:, :4] = boxes_to_scale
         
-        # NMS
-        boxes_xywhr = np.concatenate((x[:, :4], x[:, -1:]), axis=-1)
-        scores = x[:, 4]
-        keep_indices = self.nms_rotated(boxes_xywhr, scores, iou_threshold)
-        x = x[keep_indices]
-        
         # 提取结果
         boxes_xywhr = np.concatenate((x[:, :4], x[:, -1:]), axis=-1)
         scores = x[:, 4]
         class_ids = x[:, 5].astype(int)
+
+        # 过滤掉无效类别：允许 yolo26obb 的 other=5 进入后续“模型辅助合并”链路
+        valid_class_ids = np.array(list(self.class_id_to_label.keys()), dtype=class_ids.dtype)
+        valid_cls_mask = np.isin(class_ids, valid_class_ids)
+        if not np.all(valid_cls_mask):
+            drop_count = int(np.size(valid_cls_mask) - np.sum(valid_cls_mask))
+            self.logger.info(f"YOLO OBB过滤无效类别: 移除 {drop_count} 个框")
+            boxes_xywhr = boxes_xywhr[valid_cls_mask]
+            scores = scores[valid_cls_mask]
+            class_ids = class_ids[valid_cls_mask]
         
         # 转换为角点格式
         if len(boxes_xywhr) > 0:
@@ -452,13 +421,6 @@ class YOLOOBBDetector(OfflineDetector):
             boxes_corners[:, :, 0] = np.clip(boxes_corners[:, :, 0], 0, img_w)
             boxes_corners[:, :, 1] = np.clip(boxes_corners[:, :, 1], 0, img_h)
             
-            # 内部去重
-            boxes_corners, scores, class_ids = self.deduplicate_boxes(
-                boxes_corners, scores, class_ids,
-                distance_threshold=10.0,
-                iou_threshold=0.3
-            )
-            self.logger.info(f"YOLO OBB内部去重后: {len(boxes_corners)} 个框")
         else:
             boxes_corners = np.array([])
         
@@ -469,7 +431,8 @@ class YOLOOBBDetector(OfflineDetector):
         image: np.ndarray,
         text_threshold: float,
         verbose: bool = False,
-        result_path_fn=None
+        result_path_fn=None,
+        rearrange_plan: Optional[dict] = None
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         使用与主检测器相同的切割逻辑进行检测
@@ -495,47 +458,28 @@ class YOLOOBBDetector(OfflineDetector):
             self.logger.error(f"YOLO OBB: 图片尺寸为0: {h}x{w}")
             return np.array([]), np.array([]), np.array([])
         
-        # 与 det_rearrange_forward 相同的切割逻辑
-        transpose = False
-        if h < w:
-            transpose = True
-            image = np.transpose(image, (1, 0, 2))  # h w c -> w h c
-            h, w = w, h
+        if rearrange_plan is None:
+            rearrange_plan = build_det_rearrange_plan(image, tgt_size=self.input_size)
+        if rearrange_plan is None:
+            self.logger.warning("YOLO OBB统一切割: 当前图像不满足切割条件")
+            return np.array([]), np.array([]), np.array([])
+
+        transpose = rearrange_plan['transpose']
+        h = rearrange_plan['h']
+        w = rearrange_plan['w']
+        pw_num = rearrange_plan['pw_num']
+        patch_size = rearrange_plan['patch_size']
+        ph_num = rearrange_plan['ph_num']
+        rel_step_list = rearrange_plan['rel_step_list']
+        pad_num = rearrange_plan['pad_num']
+
+        self.logger.info(
+            f"YOLO OBB统一切割: 原图={h}x{w}, patch_size={patch_size}, "
+            f"ph_num={ph_num}, pw_num={pw_num}, pad_num={pad_num}, transpose={transpose}"
+        )
         
-        # 计算patch参数（与主检测器完全一致）
-        tgt_size = self.input_size
-        pw_num = max(int(np.floor(2 * tgt_size / w)), 2)
-        patch_size = ph = pw_num * w
-        
-        ph_num = int(np.ceil(h / ph))
-        ph_step = int((h - ph) / (ph_num - 1)) if ph_num > 1 else 0
-        
-        self.logger.info(f"YOLO OBB统一切割: 原图={h}x{w}, patch_size={patch_size}, ph_num={ph_num}, pw_num={pw_num}, transpose={transpose}")
-        
-        # 生成patch列表
-        rel_step_list = []
-        patch_list = []
-        for ii in range(ph_num):
-            t = ii * ph_step
-            b = t + ph
-            rel_step_list.append(t / h)
-            patch_list.append(image[t: b])
-        
-        # padding
-        p_num = int(np.ceil(ph_num / pw_num))
-        pad_num = p_num * pw_num - ph_num
-        valid_patch_count = ph_num  # 记录有效patch数量
-        for ii in range(pad_num):
-            patch_list.append(np.zeros_like(patch_list[0]))
-        
-        # 重排patch（与 det_rearrange_forward 的 _patch2batches 逻辑一致）
-        import einops
-        if transpose:
-            patch_array = np.stack(patch_list, axis=0)
-            patch_array = einops.rearrange(patch_array, '(p_num pw_num) ph pw c -> p_num (pw_num pw) ph c', p_num=p_num)
-        else:
-            patch_array = np.stack(patch_list, axis=0)
-            patch_array = einops.rearrange(patch_array, '(p_num pw_num) ph pw c -> p_num ph (pw_num pw) c', p_num=p_num)
+        # 重排patch（与通用 det_rearrange_forward 一致）
+        patch_array = det_rearrange_patch_array(rearrange_plan)
         
         all_boxes = []
         all_scores = []
@@ -582,7 +526,7 @@ class YOLOOBBDetector(OfflineDetector):
                     try:
                         import torch
                         if torch.cuda.is_available():
-                            torch.cuda.empty_cache()
+                            pass
                     except:
                         pass
                 continue
@@ -595,7 +539,6 @@ class YOLOOBBDetector(OfflineDetector):
                 gain,
                 pad,
                 text_threshold,
-                0.6
             )
             
             if len(boxes) > 0:
@@ -608,7 +551,7 @@ class YOLOOBBDetector(OfflineDetector):
                 self.logger.debug(f"YOLO OBB patch {ii}: 检测到 {len(boxes)} 个框")
                 # 保存调试图
                 try:
-                    import cv2
+#                     import cv2
                     from ..utils import imwrite_unicode
                     import logging
                     logger = logging.getLogger('manga_translator')
@@ -633,35 +576,45 @@ class YOLOOBBDetector(OfflineDetector):
         for boxes, scores, class_ids, (patch_idx, patch_shape) in zip(all_boxes, all_scores, all_class_ids, all_patch_info):
             # 计算patch的宽度
             _pw = patch_shape[1] // pw_num
+            if _pw <= 0:
+                continue
             
             # 对每个框进行坐标映射
             for box, score, class_id in zip(boxes, scores, class_ids):
-                # 计算框的中心点在patch中的位置
-                center_x = np.mean(box[:, 0])
-                center_y = np.mean(box[:, 1])
-                
-                # 确定框属于patch中的哪个子区域 (jj)
-                jj = int(center_x / _pw)
-                jj = min(jj, pw_num - 1)  # 防止越界
-                
-                # 计算在原图中的索引
-                pidx = patch_idx * pw_num + jj
-                if pidx >= len(rel_step_list):
-                    continue
-                
-                # 获取该子区域在原图中的偏移
-                rel_t = rel_step_list[pidx]
-                t = int(round(rel_t * h))  # 在原图中的top位置
-                l = 0  # 宽度方向没有偏移（因为patch已经是完整宽度）
-                
-                # 映射坐标
-                mapped_box = box.copy()
-                mapped_box[:, 0] = box[:, 0] - jj * _pw + l  # x坐标：减去patch内偏移
-                mapped_box[:, 1] = box[:, 1] + t  # y坐标：加上原图偏移
-                
-                mapped_boxes.append(mapped_box)
-                mapped_scores.append(score)
-                mapped_class_ids.append(class_id)
+                x_min = float(np.min(box[:, 0]))
+                x_max = float(np.max(box[:, 0]))
+
+                # 按照主检测器 _unrearrange 的条带思路，把跨条带框拆分映射，避免仅按中心点归属导致偏移
+                jj_start = max(0, int(np.floor(x_min / _pw)))
+                jj_end = min(pw_num - 1, int(np.floor(max(x_max - 1e-6, x_min) / _pw)))
+
+                for jj in range(jj_start, jj_end + 1):
+                    pidx = patch_idx * pw_num + jj
+                    if pidx >= len(rel_step_list):
+                        continue
+
+                    stripe_l = jj * _pw
+                    stripe_r = (jj + 1) * _pw
+
+                    # 无交集则跳过
+                    if x_max <= stripe_l or x_min >= stripe_r:
+                        continue
+
+                    rel_t = rel_step_list[pidx]
+                    t = int(round(rel_t * h))
+
+                    mapped_box = box.copy()
+                    mapped_box[:, 0] = np.clip(mapped_box[:, 0], stripe_l, stripe_r) - stripe_l
+                    mapped_box[:, 1] = np.clip(mapped_box[:, 1] + t, 0, h)
+
+                    mapped_w = float(np.max(mapped_box[:, 0]) - np.min(mapped_box[:, 0]))
+                    mapped_h = float(np.max(mapped_box[:, 1]) - np.min(mapped_box[:, 1]))
+                    if mapped_w < 1.0 or mapped_h < 1.0:
+                        continue
+
+                    mapped_boxes.append(mapped_box)
+                    mapped_scores.append(score)
+                    mapped_class_ids.append(class_id)
         
         if len(mapped_boxes) == 0:
             return np.array([]), np.array([]), np.array([])
@@ -728,23 +681,13 @@ class YOLOOBBDetector(OfflineDetector):
         self.logger.debug(f"YOLO OBB输入图像: shape={image.shape}, dtype={image.dtype}, min={image.min()}, max={image.max()}")
         
         img_shape = image.shape[:2]
-        h, w = img_shape
-        
-        # 判断是否需要切割（与主检测器相同的逻辑）
-        transpose = False
-        if h < w:
-            transpose = True
-            h, w = w, h
-        
-        asp_ratio = h / w
-        down_scale_ratio = h / self.input_size
-        require_rearrange = down_scale_ratio > 2.5 and asp_ratio > 3
-        
-        if require_rearrange:
+        rearrange_plan = build_det_rearrange_plan(image, tgt_size=self.input_size)
+
+        if rearrange_plan is not None:
             # 长图模式：使用统一的切割逻辑
-            self.logger.info(f"YOLO OBB: 检测到长图，使用统一切割逻辑")
+            self.logger.info("YOLO OBB: 检测到长图，使用统一切割逻辑")
             boxes_corners, scores, class_ids = self._rearrange_detect_unified(
-                image, text_threshold, verbose, result_path_fn
+                image, text_threshold, verbose, result_path_fn, rearrange_plan=rearrange_plan
             )
         else:
             # 普通图模式：直接检测
@@ -783,15 +726,19 @@ class YOLOOBBDetector(OfflineDetector):
                 gain,
                 pad,
                 text_threshold,
-                0.6
             )
         
         # 转换为Quadrilateral对象
         textlines = []
         for corners, score, class_id in zip(boxes_corners, scores, class_ids):
             pts = corners.astype(np.int32)
-            label = self.classes[class_id] if class_id < len(self.classes) else f'class_{class_id}'
+            label = self.class_id_to_label.get(int(class_id))
+            if not label:
+                label = self.classes[class_id] if class_id < len(self.classes) else f'class_{class_id}'
             quad = Quadrilateral(pts, label, float(score))
+            quad.det_label = label
+            quad.yolo_label = label
+            quad.is_yolo_box = True
             textlines.append(quad)
         
         self.logger.info(f"YOLO OBB检测到 {len(textlines)} 个文本框")
@@ -800,9 +747,10 @@ class YOLOOBBDetector(OfflineDetector):
         try:
             import torch
             if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+                pass
         except Exception:
             pass
         
         return textlines, None, None
+
 

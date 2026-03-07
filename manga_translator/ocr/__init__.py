@@ -5,7 +5,7 @@ from .model_32px import Model32pxOCR
 from .model_48px import Model48pxOCR
 from .model_48px_ctc import Model48pxCTCOCR
 # ModelMangaOCR 延迟导入，避免未使用时下载模型
-from .model_paddleocr import ModelPaddleOCR, ModelPaddleOCRKorean, ModelPaddleOCRLatin
+from .model_paddleocr import ModelPaddleOCR, ModelPaddleOCRKorean, ModelPaddleOCRLatin, ModelPaddleOCRThai
 from ..config import Ocr, OcrConfig
 from ..utils import Quadrilateral
 
@@ -30,6 +30,7 @@ OCRS = {
     Ocr.paddleocr: ModelPaddleOCR,
     Ocr.paddleocr_korean: ModelPaddleOCRKorean,
     Ocr.paddleocr_latin: ModelPaddleOCRLatin,
+    Ocr.paddleocr_thai: ModelPaddleOCRThai,
     Ocr.paddleocr_vl: _get_paddleocr_vl_class,  # 延迟导入 PaddleOCR-VL
 }
 ocr_cache = {}
@@ -60,4 +61,6 @@ async def dispatch(ocr_key: Ocr, image: np.ndarray, regions: List[Quadrilateral]
     return await ocr.recognize(image, regions, config, verbose)
 
 async def unload(ocr_key: Ocr):
-    ocr_cache.pop(ocr_key, None)
+    ocr = ocr_cache.pop(ocr_key, None)
+    if isinstance(ocr, OfflineOCR):
+        await ocr.unload()

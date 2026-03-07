@@ -23,6 +23,11 @@ import einops
 from .common import OfflineOCR
 from ..config import OcrConfig
 from ..utils import Quadrilateral
+from ..utils.onnx_runtime import (
+    create_inference_session,
+    create_session_options,
+    import_onnxruntime,
+)
 
 
 class ModelPaddleOCR(OfflineOCR):
@@ -86,6 +91,20 @@ class ModelPaddleOCR(OfflineOCR):
             'hash': '3c0a8a79b612653c25f765271714f71281e4e955962c153e272b7b8c1d2b13ff',
             'file': '.',
         },
+        'thai_onnx': {
+            'url': [
+                'https://www.modelscope.cn/models/hgmzhn/manga-translator-ui/resolve/master/thai_PP-OCRv5_rec_mobile_infer.onnx',
+            ],
+            'hash': '2b6e56b1872200349e227574c25aeb0e0f9af9b8356e9ff5f75ac543a535669a',
+            'file': '.',
+        },
+        'thai_dict': {
+            'url': [
+                'https://www.modelscope.cn/models/hgmzhn/manga-translator-ui/resolve/master/ppocrv5_thai_dict.txt',
+            ],
+            'hash': '57f5406f94bb6688fb7077f7be65f08bbd71cecf48c01ea26c522cb5c4836b7a',
+            'file': '.',
+        },
         # 48px 模型用于颜色预测
         'model_48px': {
             'url': [
@@ -115,13 +134,17 @@ class ModelPaddleOCR(OfflineOCR):
         'latin': {  # Latin alphabet languages (English, Spanish, etc.)
             'onnx': 'latin_PP-OCRv5_rec_mobile_infer.onnx',
             'dict': 'ppocrv5_latin_dict.txt',
+        },
+        'thai': {  # Thai
+            'onnx': 'thai_PP-OCRv5_rec_mobile_infer.onnx',
+            'dict': 'ppocrv5_thai_dict.txt',
         }
     }
 
     def __init__(self, model_type='ch', *args, **kwargs):
         """
         Args:
-            model_type: 'ch' for Chinese/Japanese/English, 'korean' for Korean/English, 'latin' for Latin/English
+            model_type: 'ch' for Chinese/Japanese/English, 'korean' for Korean/English, 'latin' for Latin/English, 'thai' for Thai
         """
         super().__init__(*args, **kwargs)
         self.model_type = model_type
@@ -133,9 +156,12 @@ class ModelPaddleOCR(OfflineOCR):
 
     async def _load(self, device: str):
         """Load PP-OCRv5 ONNX model and 48px color prediction model"""
-        import onnxruntime as ort
         from .model_48px import OCR
 
+        ort = import_onnxruntime(
+            "onnxruntime is required for PaddleOCR ONNX inference. "
+            "Install with: pip install onnxruntime-gpu (or onnxruntime)"
+        )
         self.device = device
         model_config = self._MODELS[self.model_type]
 
@@ -152,18 +178,16 @@ class ModelPaddleOCR(OfflineOCR):
         with open(dict_path, 'r', encoding='utf-8') as f:
             self.char_dict = ['<blank>'] + [line.strip() for line in f]
 
-        # Create ONNX session
-        sess_options = ort.SessionOptions()
-        sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-        sess_options.log_severity_level = 3  # 只显示 Error 级别，隐藏 Memcpy 警告
-        
-        providers = ['CPUExecutionProvider']
-        if device == 'cuda':
-            # 只设置 device_id，避免 Fallback 模式
-            cuda_options = {'device_id': 0}
-            providers.insert(0, ('CUDAExecutionProvider', cuda_options))
-
-        self.session = ort.InferenceSession(model_path, sess_options=sess_options, providers=providers)
+        # Create ONNX session (official provider format + automatic CUDA->CPU fallback)
+        sess_options = create_session_options(ort, log_severity_level=3)
+        self.session, ort_device = create_inference_session(
+            ort,
+            model_path,
+            device=device,
+            sess_options=sess_options,
+            cuda_options={"device_id": 0},
+            logger=self.logger,
+        )
 
         # 加载 48px 模型用于颜色预测
         try:
@@ -206,7 +230,10 @@ class ModelPaddleOCR(OfflineOCR):
             self.logger.warning(f"Failed to load 48px color model: {e}")
             self.color_model = None
 
-        self.logger.info(f"PP-OCRv5 ONNX loaded: {model_config['onnx']} ({len(self.char_dict)} chars, device={device})")
+        self.logger.info(
+            f"PP-OCRv5 ONNX loaded: {model_config['onnx']} "
+            f"({len(self.char_dict)} chars, device={ort_device})"
+        )
 
     async def _unload(self):
         """Unload model"""
@@ -482,7 +509,7 @@ class ModelPaddleOCR(OfflineOCR):
                     widths.append(new_w)
                 
                 # 打包成 batch
-                max_width = 4 * (max(widths) + 7) // 4
+                max_width = self._get_ocr_canvas_width(widths, base_align=4)
                 batch_region = np.zeros((N, text_height, max_width, 3), dtype=np.uint8)
                 
                 for i, region_resized in enumerate(resized_regions):
@@ -579,9 +606,11 @@ class ModelPaddleOCR(OfflineOCR):
             
             region_resized = cv2.resize(region_rgb, (new_w, text_height), interpolation=cv2.INTER_AREA)
             
-            # 转换为 tensor
-            image_tensor = (torch.from_numpy(region_resized).float() - 127.5) / 127.5
-            image_tensor = einops.rearrange(image_tensor, 'H W C -> 1 C H W')
+            canvas_w = self._get_ocr_canvas_width([new_w], base_align=4)
+            batch_region = np.zeros((1, text_height, canvas_w, 3), dtype=np.uint8)
+            batch_region[0, :, :new_w, :] = region_resized
+            image_tensor = (torch.from_numpy(batch_region).float() - 127.5) / 127.5
+            image_tensor = einops.rearrange(image_tensor, 'N H W C -> N C H W')
             
             # GPU 加速
             if self.use_gpu:
@@ -745,3 +774,10 @@ class ModelPaddleOCRLatin(ModelPaddleOCR):
     """Latin/English OCR"""
     def __init__(self, *args, **kwargs):
         super().__init__(model_type='latin', *args, **kwargs)
+
+
+class ModelPaddleOCRThai(ModelPaddleOCR):
+    """Thai OCR"""
+    def __init__(self, *args, **kwargs):
+        super().__init__(model_type='thai', *args, **kwargs)
+

@@ -590,7 +590,7 @@ class DBConvNextDetector(OfflineDetector):
             try:
                 import torch
                 if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                    pass
             except Exception:
                 pass
         
@@ -603,3 +603,4 @@ if __name__ == '__main__' :
 	ret1, ret2 = net.forward(img)
 	print(ret1.shape)
 	print(ret2.shape)
+

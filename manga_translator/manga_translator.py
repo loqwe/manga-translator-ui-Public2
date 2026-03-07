@@ -227,6 +227,20 @@ class MangaTranslator:
         except Exception:
             pass
 
+    @staticmethod
+    def _translator_name(translator_value: Any) -> str:
+        """Return normalized translator key from Enum member or plain string."""
+        if translator_value is None:
+            return ''
+        return str(getattr(translator_value, 'value', translator_value))
+
+    def _is_t2s_translator(self, translator_value: Any) -> bool:
+        return self._translator_name(translator_value) == 't2s'
+
+    def _is_original_translator(self, translator_value: Any) -> bool:
+        original_value = getattr(getattr(Translator, 'original', None), 'value', 'original')
+        return self._translator_name(translator_value) == str(original_value)
+
     def parse_init_params(self, params: dict):
         self.verbose = params.get('verbose', False)
         # font_path 优先从配置文件读取，如果没有则使用命令行参数
@@ -1408,13 +1422,21 @@ class MangaTranslator:
         
         current_time = time.time()
         self._model_usage_timestamps[("detection", config.detector.detector)] = current_time
-        result = await dispatch_detection(config.detector.detector, ctx.img_rgb, config.detector.detection_size, config.detector.text_threshold,
-                                        config.detector.box_threshold,
-                                        config.detector.unclip_ratio, config.detector.det_invert, config.detector.det_gamma_correct, config.detector.det_rotate,
-                                        config.detector.det_auto_rotate,
-                                        self.device, self.verbose,
-                                        config.detector.use_yolo_obb, config.detector.yolo_obb_conf, config.detector.yolo_obb_iou, config.detector.yolo_obb_overlap_threshold,
-                                        config.detector.min_box_area_ratio, self._result_path)
+        result = await dispatch_detection(
+            config.detector.detector,
+            ctx.img_rgb,
+            config.detector.detection_size,
+            config.detector.text_threshold,
+            config.detector.box_threshold,
+            config.detector.unclip_ratio,
+            self.device,
+            self.verbose,
+            config.detector.use_yolo_obb,
+            config.detector.yolo_obb_conf,
+            config.detector.yolo_obb_overlap_threshold,
+            config.detector.min_box_area_ratio,
+            self._result_path,
+        )
         
         # 处理bbox调试图（如果检测器返回了）
         if self.verbose and result and len(result) == 3 and result[2] is not None:
@@ -2501,7 +2523,7 @@ class MangaTranslator:
             logger.info(f'[原文模式] 跳过翻译，直接使用 {len(ctx.text_regions)} 条原文')
             for region in ctx.text_regions:
                 region.translation = region.text
-        elif config.translator.translator == Translator.t2s:
+        elif self._is_t2s_translator(config.translator.translator):
             # T2S fast path: direct char-level conversion, skip all pre/post processing
             from .translators.t2s import smart_convert
             logger.info(f'[繁简转换] 直接转换 {len(ctx.text_regions)} 条文本')
@@ -2840,7 +2862,7 @@ class MangaTranslator:
                 if region.translation.isnumeric():
                     should_filter = True
                     filter_reason = "Numeric translation"
-                elif config.translator.translator not in (Translator.original, Translator.t2s):
+                elif (not self._is_original_translator(config.translator.translator)) and (not self._is_t2s_translator(config.translator.translator)):
                     text_equal = region.text.lower().strip() == region.translation.lower().strip()
                     if text_equal:
                         should_filter = True
@@ -4379,7 +4401,7 @@ class MangaTranslator:
 
                 # T2S per-line fixup: _batch_translate_texts returns concatenated text,
                 # reconstruct \n-separated translation to preserve original line structure
-                if sample_config and sample_config.translator.translator == Translator.t2s:
+                if sample_config and self._is_t2s_translator(sample_config.translator.translator):
                     from .translators.t2s import smart_convert
                     for ctx, config in batch:
                         if not ctx.text_regions:
@@ -4529,7 +4551,7 @@ class MangaTranslator:
                                 if region.translation.isnumeric():
                                     should_filter = True
                                     filter_reason = "Numeric translation"
-                                elif config.translator.translator not in (Translator.original, Translator.t2s):
+                                elif (not self._is_original_translator(config.translator.translator)) and (not self._is_t2s_translator(config.translator.translator)):
                                     text_equal = region.text.lower().strip() == region.translation.lower().strip()
                                     if text_equal:
                                         should_filter = True
@@ -4635,7 +4657,7 @@ class MangaTranslator:
 
                 # T2S per-line fixup: _batch_translate_texts returns concatenated text,
                 # reconstruct \n-separated translation to preserve original line structure
-                if config.translator.translator == Translator.t2s:
+                if self._is_t2s_translator(config.translator.translator):
                     from .translators.t2s import smart_convert
                     for region in ctx.text_regions:
                         if region.texts and len(region.texts) > 1:
@@ -4721,7 +4743,7 @@ class MangaTranslator:
                             if region.translation.isnumeric():
                                 should_filter = True
                                 filter_reason = "Numeric translation"
-                            elif config.translator.translator not in (Translator.original, Translator.t2s):
+                            elif (not self._is_original_translator(config.translator.translator)) and (not self._is_t2s_translator(config.translator.translator)):
                                 text_equal = region.text.lower().strip() == region.translation.lower().strip()
                                 if text_equal:
                                     should_filter = True
@@ -4823,7 +4845,7 @@ class MangaTranslator:
             return list(texts)
 
         # T2S fast path: direct char-level conversion, no dispatch overhead
-        if config.translator.translator == Translator.t2s:
+        if self._is_t2s_translator(config.translator.translator):
             from .translators.t2s import smart_convert
             logger.info(f'[繁简转换] 直接转换 {len(texts)} 条文本')
             converted_texts = []

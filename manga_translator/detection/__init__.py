@@ -1,6 +1,6 @@
 import numpy as np
 import cv2
-from typing import List
+from typing import List, Optional
 
 from .default import DefaultDetector
 from .dbnet_convnext import DBConvNextDetector
@@ -37,8 +37,8 @@ async def prepare(detector_key: Detector):
         await detector.download()
 
 async def dispatch(detector_key: Detector, image: np.ndarray, detect_size: int, text_threshold: float, box_threshold: float, unclip_ratio: float,
-                   invert: bool, gamma_correct: bool, rotate: bool, auto_rotate: bool = False, device: str = 'cpu', verbose: bool = False,
-                   use_yolo_obb: bool = False, yolo_obb_conf: float = 0.4, yolo_obb_iou: float = 0.6, yolo_obb_overlap_threshold: float = 0.1, min_box_area_ratio: float = 0.0009,
+                   device: str = 'cpu', verbose: bool = False,
+                   use_yolo_obb: bool = False, yolo_obb_conf: float = 0.4, yolo_obb_overlap_threshold: float = 0.1, min_box_area_ratio: float = 0.0009,
                    result_path_fn=None):
     """
     检测调度函数，支持混合检测模式
@@ -46,7 +46,6 @@ async def dispatch(detector_key: Detector, image: np.ndarray, detect_size: int, 
     Args:
         use_yolo_obb: 是否启用YOLO OBB辅助检测器
         yolo_obb_conf: YOLO OBB检测器的置信度阈值
-        yolo_obb_iou: YOLO OBB检测器的IoU阈值（交叉比）
         min_box_area_ratio: 最小检测框面积占比（相对图片总像素）
         result_path_fn: 结果路径生成函数（用于保存调试图）
     """
@@ -54,7 +53,9 @@ async def dispatch(detector_key: Detector, image: np.ndarray, detect_size: int, 
     detector = get_detector(detector_key)
     if isinstance(detector, OfflineDetector):
         await detector.load(device)
-    main_textlines, mask, raw_image = await detector.detect(image, detect_size, text_threshold, box_threshold, unclip_ratio, invert, gamma_correct, rotate, auto_rotate, verbose, min_box_area_ratio, result_path_fn)
+    main_textlines, mask, raw_image = await detector.detect(
+        image, detect_size, text_threshold, box_threshold, unclip_ratio, verbose, min_box_area_ratio, result_path_fn
+    )
     
     # 如果不启用YOLO OBB，直接返回主检测器结果
     if not use_yolo_obb:
@@ -68,7 +69,7 @@ async def dispatch(detector_key: Detector, image: np.ndarray, detect_size: int, 
         # YOLO OBB检测（使用yolo_obb_conf作为text_threshold）
         yolo_textlines, _, _ = await yolo_detector.detect(
             image, detect_size, yolo_obb_conf, box_threshold, unclip_ratio,
-            invert, gamma_correct, rotate, auto_rotate, verbose, min_box_area_ratio, result_path_fn
+            verbose, min_box_area_ratio, result_path_fn
         )
         
         # 智能合并：YOLO框可以替换过小的主检测器框，或添加新框
@@ -98,6 +99,72 @@ def get_detector_instance(key: str, detector_class):
         detector_cache[key] = detector_class()
     return detector_cache[key]
 
+def _get_box_label(box: Quadrilateral) -> Optional[str]:
+    label = getattr(box, 'det_label', None)
+    if label is None:
+        label = getattr(box, 'yolo_label', None)
+    if isinstance(label, str):
+        label = label.strip().lower()
+        if label:
+            return label
+    return None
+
+def _apply_yolo_label_infection(main_boxes: List[Quadrilateral], yolo_boxes: List[Quadrilateral], min_overlap_ratio: float = 0.05) -> None:
+    """
+    让每个 YOLO 框按照重叠率“感染”一个主检测器框标签（最多感染一个）。
+    只写入标签，不改动框几何。
+    """
+    if not main_boxes or not yolo_boxes:
+        return
+
+    for yolo_box in yolo_boxes:
+        yolo_label = _get_box_label(yolo_box)
+        if not yolo_label:
+            continue
+        # other 仅用于包裹辅助，不参与标签感染
+        if yolo_label == 'other':
+            continue
+
+        yolo_min_x = np.min(yolo_box.pts[:, 0])
+        yolo_max_x = np.max(yolo_box.pts[:, 0])
+        yolo_min_y = np.min(yolo_box.pts[:, 1])
+        yolo_max_y = np.max(yolo_box.pts[:, 1])
+        yolo_area = (yolo_max_x - yolo_min_x) * (yolo_max_y - yolo_min_y)
+        if yolo_area <= 0:
+            continue
+
+        best_idx = -1
+        best_overlap = 0.0
+        for idx, main_box in enumerate(main_boxes):
+            main_min_x = np.min(main_box.pts[:, 0])
+            main_max_x = np.max(main_box.pts[:, 0])
+            main_min_y = np.min(main_box.pts[:, 1])
+            main_max_y = np.max(main_box.pts[:, 1])
+            main_area = (main_max_x - main_min_x) * (main_max_y - main_min_y)
+            if main_area <= 0:
+                continue
+
+            inter_min_x = max(yolo_min_x, main_min_x)
+            inter_max_x = min(yolo_max_x, main_max_x)
+            inter_min_y = max(yolo_min_y, main_min_y)
+            inter_max_y = min(yolo_max_y, main_max_y)
+            inter_w = inter_max_x - inter_min_x
+            inter_h = inter_max_y - inter_min_y
+            if inter_w <= 0 or inter_h <= 0:
+                continue
+
+            inter_area = inter_w * inter_h
+            overlap_ratio = inter_area / min(yolo_area, main_area)
+            if overlap_ratio > best_overlap:
+                best_overlap = overlap_ratio
+                best_idx = idx
+
+        if best_idx >= 0 and best_overlap >= min_overlap_ratio:
+            infected_box = main_boxes[best_idx]
+            infected_box.det_label = yolo_label
+            infected_box.yolo_label = yolo_label
+            infected_box.yolo_infected = True
+
 
 def merge_detection_boxes(yolo_boxes: List[Quadrilateral], main_boxes: List[Quadrilateral], overlap_threshold: float = 0.1) -> List[Quadrilateral]:
     """
@@ -123,6 +190,9 @@ def merge_detection_boxes(yolo_boxes: List[Quadrilateral], main_boxes: List[Quad
     
     if len(yolo_boxes) == 0:
         return main_boxes
+
+    # 先进行标签感染：每个 YOLO 框最多感染一个主框
+    _apply_yolo_label_infection(main_boxes, yolo_boxes, min_overlap_ratio=max(0.01, overlap_threshold * 0.5))
     
     # 标记要移除的主检测器框索引
     main_boxes_to_remove = set()
@@ -132,6 +202,11 @@ def merge_detection_boxes(yolo_boxes: List[Quadrilateral], main_boxes: List[Quad
     yolo_boxes_to_add_set = set()  # 使用set避免重复
     
     for yolo_idx, yolo_box in enumerate(yolo_boxes):
+        yolo_label = _get_box_label(yolo_box)
+        # other 仅用于包裹辅助：不参与替换/去除主框的几何决策
+        if yolo_label == 'other':
+            continue
+
         # 计算YOLO框的AABB和面积
         yolo_min_x = np.min(yolo_box.pts[:, 0])
         yolo_max_x = np.max(yolo_box.pts[:, 0])
@@ -221,6 +296,10 @@ def merge_detection_boxes(yolo_boxes: List[Quadrilateral], main_boxes: List[Quad
     for idx, yolo_box in enumerate(yolo_boxes):
         # 如果不在删除列表中，就添加（包括替换框和新框）
         if idx not in yolo_boxes_to_remove:
+            if not hasattr(yolo_box, 'det_label'):
+                yolo_label = _get_box_label(yolo_box)
+                if yolo_label:
+                    yolo_box.det_label = yolo_label
             result.append(yolo_box)
     
     return result
@@ -250,6 +329,10 @@ def draw_detection_debug_image(image: np.ndarray, main_boxes: List[Quadrilateral
     
     # 绘制YOLO检测器的框（蓝色），并计算重叠率
     for yolo_idx, yolo_box in enumerate(yolo_boxes):
+        yolo_label = _get_box_label(yolo_box) or 'unknown'
+        # other 仅用于包裹辅助，不在该调试图中绘制
+        if yolo_label == 'other':
+            continue
         pts = yolo_box.pts.astype(np.int32)
         
         # 计算与主检测器框的最大重叠率
@@ -285,11 +368,11 @@ def draw_detection_debug_image(image: np.ndarray, main_boxes: List[Quadrilateral
         if max_overlap_ratio >= overlap_threshold:
             # 重叠率超过阈值，用红色表示（会被删除）
             color = (255, 0, 0)  # Red
-            label = f"YOLO:{max_overlap_ratio:.2f}(X)"
+            label = f"YOLO({yolo_label}):{max_overlap_ratio:.2f}(X)"
         else:
             # 重叠率低于阈值，用蓝色表示（会保留）
             color = (0, 0, 255)  # Blue
-            label = f"YOLO:{max_overlap_ratio:.2f}"
+            label = f"YOLO({yolo_label}):{max_overlap_ratio:.2f}"
         
         cv2.polylines(debug_img, [pts], True, color, 2)
         cv2.putText(debug_img, label, tuple(pts[0]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
@@ -307,4 +390,11 @@ def draw_detection_debug_image(image: np.ndarray, main_boxes: List[Quadrilateral
     return debug_img
 
 async def unload(detector_key: Detector):
-    detector_cache.pop(detector_key, None)
+    detector = detector_cache.pop(detector_key, None)
+    if isinstance(detector, OfflineDetector):
+        await detector.unload()
+
+    # YOLO OBB 作为辅助检测器使用字符串 key 缓存，主检测器卸载时一并释放。
+    yolo_detector = detector_cache.pop('yolo_obb', None)
+    if isinstance(yolo_detector, OfflineDetector):
+        await yolo_detector.unload()

@@ -16,7 +16,7 @@ import functools
 from .utils import Context, load_image
 from .utils.generic import is_mostly_noise_text
 from .utils.failure_record import save_failure_record, remove_failure_record
-from .config import Config, Translator
+from .config import Config
 from .rate_limiter import RateLimiter
 
 # 使用 manga_translator 的主 logger，确保日志能被UI捕获
@@ -144,7 +144,9 @@ class ConcurrentPipeline:
         - >=95%: force cleanup and pause OCR enqueue until cleanup completes.
         """
         translator_cfg = getattr(config, 'translator', None)
-        if not translator_cfg or getattr(translator_cfg, 'translator', None) != Translator.t2s:
+        translator_value = getattr(translator_cfg, 'translator', None) if translator_cfg else None
+        translator_name = str(getattr(translator_value, 'value', translator_value)) if translator_value is not None else ''
+        if translator_name != 't2s':
             return
 
         force_threshold = float(getattr(self.translator, '_t2s_memory_force_cleanup_threshold', 95.0))

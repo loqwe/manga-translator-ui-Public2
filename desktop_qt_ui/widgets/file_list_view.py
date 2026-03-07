@@ -243,6 +243,7 @@ class FileListView(QTreeWidget):
     """显示文件列表的自定义控件（支持文件夹分组）"""
     file_remove_requested = pyqtSignal(str)
     file_selected = pyqtSignal(str)
+    file_activated = pyqtSignal(str)
     files_dropped = pyqtSignal(list)  # 新增：拖放文件信号
     _folders_scanned = pyqtSignal(list)  # 内部信号：文件夹扫描完成
 
@@ -268,6 +269,7 @@ class FileListView(QTreeWidget):
         
         # 连接选择信号
         self.itemSelectionChanged.connect(self._on_selection_changed)
+        self.itemDoubleClicked.connect(self._on_item_double_clicked)
         
         # 连接内部信号（确保在主线程中处理）
         self._folders_scanned.connect(self._on_folders_scanned)
@@ -320,6 +322,12 @@ class FileListView(QTreeWidget):
         # 只有当选中的是文件（不是文件夹节点）时才发出信号
         if file_path and not os.path.isdir(file_path):
             self.file_selected.emit(file_path)
+
+    def _on_item_double_clicked(self, tree_item: QTreeWidgetItem, column: int):
+        _ = column
+        file_path = tree_item.data(0, Qt.ItemDataRole.UserRole) if tree_item else None
+        if file_path and not os.path.isdir(file_path):
+            self.file_activated.emit(file_path)
 
     def add_files(self, file_paths: List[str]):
         """添加多个文件/文件夹到列表（异步处理大文件夹）"""
@@ -1605,6 +1613,7 @@ class FileListContainer(QWidget):
     # 转发 FileListView 的信号
     file_remove_requested = pyqtSignal(str)
     file_selected = pyqtSignal(str)
+    file_activated = pyqtSignal(str)
     files_dropped = pyqtSignal(list)
     
     # 失败记录导入请求信号
@@ -1640,6 +1649,7 @@ class FileListContainer(QWidget):
         # 连接信号
         self.file_list_view.file_remove_requested.connect(self.file_remove_requested.emit)
         self.file_list_view.file_selected.connect(self.file_selected.emit)
+        self.file_list_view.file_activated.connect(self.file_activated.emit)
         self.file_list_view.files_dropped.connect(self.files_dropped.emit)
         self.failed_records_list.import_requested.connect(self._on_failed_import_requested)
         self.failed_records_list.retry_requested.connect(self._on_failed_retry_requested)

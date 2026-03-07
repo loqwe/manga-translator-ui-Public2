@@ -95,17 +95,17 @@ class DefaultDetector(OfflineDetector):
         bbox_debug_img = None
         if verbose:
             try:
-                self.logger.debug(f'[DEBUG] mask shape: {mask.shape}, image shape: {image.shape}, text_threshold: {text_threshold}')
+                self.logger.info(f'[DEBUG] mask shape: {mask.shape}, image shape: {image.shape}, text_threshold: {text_threshold}')
                 # 诊断mask和db的数值分布
                 mid_values_ratio_mask = np.sum((mask > 0.1) & (mask < 0.9)) / mask.size * 100
-                self.logger.debug(f'[DEBUG] mask数值分布: min={mask.min():.3f}, max={mask.max():.3f}, mean={mask.mean():.3f}')
-                self.logger.debug(f'[DEBUG] mask中间值(0.1-0.9)占比: {mid_values_ratio_mask:.2f}%')
+                self.logger.info(f'[DEBUG] mask数值分布: min={mask.min():.3f}, max={mask.max():.3f}, mean={mask.mean():.3f}')
+                self.logger.info(f'[DEBUG] mask中间值(0.1-0.9)占比: {mid_values_ratio_mask:.2f}%')
                 
                 # 检查db的分布（用于对比）
                 db_slice = db[0, 0, :, :]
                 mid_values_ratio_db = np.sum((db_slice > 0.1) & (db_slice < 0.9)) / db_slice.size * 100
-                self.logger.debug(f'[DEBUG] db数值分布: min={db_slice.min():.3f}, max={db_slice.max():.3f}, mean={db_slice.mean():.3f}')
-                self.logger.debug(f'[DEBUG] db中间值(0.1-0.9)占比: {mid_values_ratio_db:.2f}%')
+                self.logger.info(f'[DEBUG] db数值分布: min={db_slice.min():.3f}, max={db_slice.max():.3f}, mean={db_slice.mean():.3f}')
+                self.logger.info(f'[DEBUG] db中间值(0.1-0.9)占比: {mid_values_ratio_db:.2f}%')
                 
                 # resize mask和db到和原图相同的尺寸（用于调试图）
                 mask_resized_debug = cv2.resize(mask, (mask.shape[1] * 2, mask.shape[0] * 2), interpolation=cv2.INTER_LINEAR)
@@ -117,16 +117,16 @@ class DefaultDetector(OfflineDetector):
                     mask_resized_debug = mask_resized_debug[:, :-pad_w]
                     db_resized_debug = db_resized_debug[:, :-pad_w]
                 
-                self.logger.debug(f'[DEBUG] mask_resized_debug shape: {mask_resized_debug.shape}')
+                self.logger.info(f'[DEBUG] mask_resized_debug shape: {mask_resized_debug.shape}')
                 
                 # 对mask进行二值化（只使用text_threshold，不使用box_threshold）
                 binary_mask = (mask_resized_debug > text_threshold).astype(np.uint8)
                 num_white_pixels = np.sum(binary_mask)
-                self.logger.debug(f'[DEBUG] binary_mask has {num_white_pixels} white pixels out of {binary_mask.size} total')
+                self.logger.info(f'[DEBUG] binary_mask has {num_white_pixels} white pixels out of {binary_mask.size} total')
                 
                 # 找到所有连通区域
                 contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                self.logger.debug(f'[DEBUG] Found {len(contours)} contours from mask')
+                self.logger.info(f'[DEBUG] Found {len(contours)} contours from mask')
                 
                 if len(contours) > 0:
                     all_textlines = []
@@ -154,7 +154,7 @@ class DefaultDetector(OfflineDetector):
                             all_textlines.append(quad)
                             all_scores.append(region_score)
                     
-                    self.logger.debug(f'[DEBUG] Found {len(all_textlines)} regions from mask (before box_threshold filtering)')
+                    self.logger.info(f'[DEBUG] Found {len(all_textlines)} regions from mask (before box_threshold filtering)')
                     
                     # 创建调试图像（使用原图）
                     debug_img = image.copy()
@@ -190,7 +190,7 @@ class DefaultDetector(OfflineDetector):
                                    font, font_scale, (255, 255, 255), font_thickness)
                     
                     bbox_debug_img = cv2.cvtColor(debug_img, cv2.COLOR_RGB2BGR)
-                    self.logger.debug(f'Generated bbox debug image with {len(all_textlines)} regions from mask')
+                    self.logger.info(f'Generated bbox debug image with {len(all_textlines)} regions from mask')
                     
                     # 同时生成经过text_threshold筛选后的二值化mask
                     binary_mask_bgr = cv2.cvtColor(binary_mask * 255, cv2.COLOR_GRAY2BGR)
@@ -251,8 +251,9 @@ class DefaultDetector(OfflineDetector):
             try:
                 import torch
                 if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                    pass
             except Exception:
                 pass
         
         return textlines, raw_mask, bbox_debug_img
+

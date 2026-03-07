@@ -12,8 +12,8 @@
       "interval_ms": 500,
       "log_expanded": false
     },
-    "window_x": 422,
-    "window_y": 266,
+    "window_x": 29,
+    "window_y": 337,
     "window_width": 1300,
     "window_height": 800,
     "window_maximized": false
@@ -47,8 +47,8 @@
     "merge_gamma": 0.8,
     "merge_sigma": 2.5,
     "merge_edge_ratio_threshold": 0.0,
-    "merge_special_require_full_wrap": false,
-    "yolo_restrict_merge": true,
+    "merge_special_require_full_wrap": true,
+    "yolo_restrict_merge": false,
     "ocr_vl_language_hint": "auto",
     "ocr_vl_custom_prompt": null
   },

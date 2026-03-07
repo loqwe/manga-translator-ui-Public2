@@ -79,7 +79,7 @@ class Model32pxOCR(OfflineOCR):
         for indices in chunks(perm, max_chunk_size):
             N = len(indices)
             widths = [region_imgs[i].shape[1] for i in indices]
-            max_width = 4 * (max(widths) + 7) // 4
+            max_width = self._get_ocr_canvas_width(widths, base_align=4)
             region = np.zeros((N, text_height, max_width, 3), dtype = np.uint8)
             for i, idx in enumerate(indices):
                 W = region_imgs[idx].shape[1]
