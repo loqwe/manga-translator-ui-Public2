@@ -124,7 +124,7 @@ class Model48pxOCR(OfflineOCR):
                 continue
             
             N = len(valid_indices)
-            max_width = 4 * (max(valid_widths) + 7) // 4
+            max_width = self._get_ocr_canvas_width(valid_widths, base_align=4)
             region = np.zeros((N, text_height, max_width, 3), dtype = np.uint8)
             for i, idx in enumerate(valid_indices):
                 W = valid_region_imgs[i].shape[1]

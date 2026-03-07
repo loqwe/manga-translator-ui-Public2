@@ -19,6 +19,7 @@ warnings.filterwarnings('ignore', message='.*Triton.*')
 warnings.filterwarnings('ignore', message='.*triton.*')
 warnings.filterwarnings('ignore', message='.*pkg_resources.*')
 warnings.filterwarnings('ignore', category=DeprecationWarning, module='ctranslate2')
+logging.getLogger('xformers').setLevel(logging.ERROR)
 
 def main():
     """主函数"""

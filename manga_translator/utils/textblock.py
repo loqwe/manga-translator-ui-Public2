@@ -1,13 +1,14 @@
 import cv2
 import numpy as np
 from typing import List, Tuple
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from shapely.geometry import Polygon, MultiPoint
 from functools import cached_property
 # import copy
 import re
 import py3langid as langid
 from .panel import get_panels_from_array
-from .generic import color_difference, is_right_to_left_char, is_valuable_char
+from .generic import color_difference, fg_bg_compare, is_right_to_left_char, is_valuable_char
 # from ..detection.ctd_utils.utils.imgproc_utils import union_area, xywh2xyxypoly
 
 # LANG_LIST = ['eng', 'ja', 'unknown']
@@ -71,8 +72,7 @@ class TextBlock(object):
                  shadow_offset: List = [0, 0],
                  prob: float = 1,
                  layout_mode: str = 'default',
-                 stroke_color_type: str = None,  # 新增：描边颜色类型 "white" 或 "black"
-                 adjust_bg_color: bool = True,  # 新增：是否自动调整描边颜色
+                 adjust_bg_color: bool = True,  # 是否自动调整描边颜色
                  **kwargs) -> None:
         self.lines = np.array(lines, dtype=np.float64)
         # self.lines.sort()
@@ -135,15 +135,18 @@ class TextBlock(object):
         self.shadow_strength = shadow_strength
         self.shadow_color = shadow_color
         self.shadow_offset = shadow_offset
-        
-        # 描边颜色类型：如果没有指定，根据字体颜色自动确定
-        if stroke_color_type is None:
-            # 计算字体颜色的平均值
-            fg_avg = sum(self.fg_colors) / 3 if isinstance(self.fg_colors, (list, tuple)) else 127
-            # 暗色字体用白色描边，亮色字体用黑色描边
-            self.stroke_color_type = "white" if fg_avg <= 127 else "black"
-        else:
-            self.stroke_color_type = stroke_color_type
+
+        # 可选：从 JSON 读取的渲染中心（优先于 lines 自动计算中心）
+        center_override = kwargs.get('center', None)
+        self._center_override = None
+        if isinstance(center_override, (list, tuple, np.ndarray)) and len(center_override) == 2:
+            try:
+                self._center_override = np.array(
+                    [float(center_override[0]), float(center_override[1])],
+                    dtype=np.float64
+                )
+            except (TypeError, ValueError):
+                self._center_override = None
 
     @cached_property
     def xyxy(self):
@@ -161,6 +164,8 @@ class TextBlock(object):
 
     @cached_property
     def center(self) -> np.ndarray:
+        if self._center_override is not None:
+            return self._center_override
         xyxy = np.array(self.xyxy)
         return (xyxy[:2] + xyxy[2:]) / 2
 
@@ -253,10 +258,15 @@ class TextBlock(object):
         # 将倾斜的多边形反旋转成正矩形（配合angle字段使用）
         import math
         
-        # 计算中心点
-        all_vertices = self.lines.reshape((-1, 2))
-        center_x = np.mean(all_vertices[:, 0])
-        center_y = np.mean(all_vertices[:, 1])
+        # 计算中心点：使用 lines 的最小外接矩形中心（而非顶点均值）
+        all_vertices = self.lines.reshape((-1, 2)).astype(np.float32)
+        if len(all_vertices) >= 3:
+            (center_x, center_y), _, _ = cv2.minAreaRect(all_vertices)
+        elif len(all_vertices) > 0:
+            center_x = float(np.mean(all_vertices[:, 0]))
+            center_y = float(np.mean(all_vertices[:, 1]))
+        else:
+            center_x, center_y = 0.0, 0.0
         
         # 反旋转角度（将倾斜的坐标旋转回正）
         angle_rad = -math.radians(self.angle)  # 负号表示反旋转
@@ -277,24 +287,27 @@ class TextBlock(object):
                 unrotated_poly.append([new_x + center_x, new_y + center_y])
             new_lines.append(unrotated_poly)
 
+        # 保存时走一遍对比度检查，确保 fg/bg 颜色有足够差异
+        fg_out, bg_out = self.get_font_colors()
+
         return {
             'lines': new_lines,
+            'center': [float(center_x), float(center_y)],
             'texts': self.texts,
             'text': self.text,
             'translation': self.translation,
             'angle': self.angle,
-            'font_size': getattr(self, 'offset_applied_font_size', getattr(self, 'original_font_size', self.font_size)),  # 导出应用偏移量后的字体大小
-            'fg_colors': self.fg_colors,
-            'bg_colors': self.bg_colors,
+            'font_size': self.font_size,  # 保存最终渲染的字体大小
+            'fg_colors': fg_out,
+            'bg_colors': bg_out,
             'direction': self.direction,
             'alignment': self.alignment,
             'target_lang': self.target_lang,
             'source_lang': self.source_lang,
             'line_spacing': self.line_spacing,
             'stroke_width': self.default_stroke_width,  # 统一使用 stroke_width（后端加载时会转换为 default_stroke_width）
-            'stroke_color_type': self.stroke_color_type,  # 新增：描边颜色类型
-            'adjust_bg_color': self.adjust_bg_color,
-            'prob': self.prob
+            'prob': self.prob,
+            'font_path': getattr(self, 'font_path', ''),  # 区域特定字体路径（空字符串=使用全局默认字体）
         }
 
     def get_transformed_region(self, img: np.ndarray, line_idx: int, textheight: int, maxwidth: int = None) -> np.ndarray:
@@ -436,9 +449,7 @@ class TextBlock(object):
             brgb = brgb[::-1]
 
         if self.adjust_bg_color:
-            fg_avg = np.mean(frgb)
-            if color_difference(frgb, brgb) < 30:
-                brgb = (255, 255, 255) if fg_avg <= 127 else (0, 0, 0)
+            frgb, brgb = fg_bg_compare(frgb, brgb)
 
         return frgb, brgb
 
@@ -660,7 +671,19 @@ def sort_regions(
         from ..utils import get_logger
         logger = get_logger('textblock')
         try:
-            panels_raw = get_panels_from_array(img, rtl=right_to_left, logger=logger)
+            timeout_sec = 60.0
+            executor = ThreadPoolExecutor(max_workers=1)
+            try:
+                future = executor.submit(get_panels_from_array, img, right_to_left, logger)
+                try:
+                    panels_raw = future.result(timeout=timeout_sec)
+                except FuturesTimeoutError:
+                    future.cancel()
+                    logger.warning(f'Panel detection timeout ({timeout_sec:.0f}s), using simple text sorting')
+                    return _simple_sort(regions, right_to_left)
+            finally:
+                # Do not block current pipeline thread when panel worker is stuck.
+                executor.shutdown(wait=False, cancel_futures=True)
             # Convert to [x1, y1, x2, y2]
             panels = [(x, y, x + w, y + h) for x, y, w, h in panels_raw]
             # Use the customised sorter that keeps vertically stacked panels together.

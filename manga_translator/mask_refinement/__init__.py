@@ -91,43 +91,6 @@ def _build_line_protect_mask(
     return protect_mask
 
 
-def _build_bubble_clip_debug_image(
-    raw_image: np.ndarray,
-    bubble_mask: np.ndarray,
-    mask_before_clip: np.ndarray,
-    mask_after_clip: np.ndarray,
-    protected_mask: np.ndarray,
-) -> np.ndarray:
-    img = raw_image.copy()
-    if img.ndim == 2:
-        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-    if img.shape[-1] == 4:
-        img = img[..., :3]
-
-    overlay = img.astype(np.uint8).copy()
-    bubble_bin = (bubble_mask > 0).astype(np.uint8) * 255
-    before_bin = (mask_before_clip > 0).astype(np.uint8) * 255
-    after_bin = (mask_after_clip > 0).astype(np.uint8) * 255
-    protected_bin = (protected_mask > 0).astype(np.uint8) * 255
-    removed_bin = (before_bin > 0) & (after_bin == 0)
-
-    # Blue: bubble
-    overlay[bubble_bin > 0] = np.array([255, 0, 0], dtype=np.uint8)
-    # Green: final
-    overlay[after_bin > 0] = np.array([0, 255, 0], dtype=np.uint8)
-    # Yellow: protected restore
-    overlay[protected_bin > 0] = np.array([0, 255, 255], dtype=np.uint8)
-    # Red: removed by clipping (highest priority)
-    overlay[removed_bin > 0] = np.array([0, 0, 255], dtype=np.uint8)
-
-    legend = "Blue=bubble, Green=final, Yellow=protected, Red=removed"
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    cv2.putText(overlay, legend, (8, 22), font, 0.58, (255, 255, 255), 2, cv2.LINE_AA)
-    cv2.putText(overlay, legend, (8, 22), font, 0.58, (0, 0, 0), 1, cv2.LINE_AA)
-
-    return overlay
-
-
 def _keep_bubble_components_intersecting_refined_mask(
     bubble_mask: np.ndarray,
     refined_mask: np.ndarray,
@@ -197,6 +160,55 @@ def _clip_refined_components_by_bubble_mask(
 
     return clipped_mask, total_components, intersected_components, preserved_components
 
+
+def _build_bubble_clip_debug_image(
+    raw_image: np.ndarray,
+    bubble_mask: np.ndarray,
+    mask_before_clip: np.ndarray,
+    mask_after_clip: np.ndarray,
+    protected_mask: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    h, w = bubble_mask.shape[:2]
+
+    if raw_image.ndim == 3 and raw_image.shape[2] == 3:
+        image_bgr = cv2.cvtColor(raw_image, cv2.COLOR_RGB2BGR)
+    elif raw_image.ndim == 2:
+        image_bgr = cv2.cvtColor(raw_image, cv2.COLOR_GRAY2BGR)
+    else:
+        image_bgr = np.zeros((h, w, 3), dtype=np.uint8)
+
+    bubble_bin = np.where(bubble_mask > 0, 255, 0).astype(np.uint8)
+    before_bin = np.where(mask_before_clip > 0, 255, 0).astype(np.uint8)
+    after_bin = np.where(mask_after_clip > 0, 255, 0).astype(np.uint8)
+    final_bin = np.where(after_bin > 0, 255, 0).astype(np.uint8)
+    removed_bin = np.where((before_bin > 0) & (after_bin == 0), 255, 0).astype(np.uint8)
+    protected_bin = (
+        np.where(protected_mask > 0, 255, 0).astype(np.uint8)
+        if protected_mask is not None
+        else np.zeros_like(final_bin)
+    )
+
+    overlay = image_bgr.copy()
+    # Blue: bubble mask
+    overlay[bubble_bin > 0] = (
+        overlay[bubble_bin > 0] * 0.55 + np.array([255, 0, 0], dtype=np.float32) * 0.45
+    ).astype(np.uint8)
+    # Green: final kept mask
+    overlay[final_bin > 0] = (
+        overlay[final_bin > 0] * 0.45 + np.array([0, 255, 0], dtype=np.float32) * 0.55
+    ).astype(np.uint8)
+    # Yellow: protected (rescued from being removed)
+    overlay[protected_bin > 0] = np.array([0, 255, 255], dtype=np.uint8)
+    # Red: removed by clipping (highest priority)
+    overlay[removed_bin > 0] = np.array([0, 0, 255], dtype=np.uint8)
+
+    legend = "Blue=bubble, Green=final, Yellow=protected, Red=removed"
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    cv2.putText(overlay, legend, (8, 22), font, 0.58, (255, 255, 255), 2, cv2.LINE_AA)
+    cv2.putText(overlay, legend, (8, 22), font, 0.58, (0, 0, 0), 1, cv2.LINE_AA)
+
+    return overlay
+
 async def dispatch(
     text_regions: List[TextBlock],
     raw_image: np.ndarray,
@@ -262,6 +274,7 @@ async def dispatch(
                     refined_mask=final_mask,
                     bubble_mask=bubble_mask,
                 )
+                # 仅保护，不扩张：只回填“裁剪前已有且落在保护区且被裁掉”的像素
                 line_protect_mask = _build_line_protect_mask(
                     text_regions=text_regions,
                     image_shape=final_mask.shape[:2],
@@ -280,6 +293,7 @@ async def dispatch(
                     f"output_pixels={int(np.count_nonzero(clipped_mask))}"
                 )
                 final_mask = clipped_mask
+
                 if verbose and debug_path_fn is not None:
                     try:
                         debug_img = _build_bubble_clip_debug_image(

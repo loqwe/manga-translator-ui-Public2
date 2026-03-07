@@ -9,6 +9,7 @@ warnings.filterwarnings('ignore', message='.*triton.*')
 warnings.filterwarnings('ignore', message='.*pkg_resources.*')
 warnings.filterwarnings('ignore', category=DeprecationWarning, module='ctranslate2')
 warnings.filterwarnings('ignore', module='xformers')
+logging.getLogger('xformers').setLevel(logging.ERROR)
 
 # 在 PyTorch 初始化前设置显存优化，允许使用共享显存
 # expandable_segments 可以减少显存碎片，避免 OOM 错误

@@ -7,67 +7,58 @@ import networkx as nx
 import itertools
 
 from ..config import OcrConfig
-from ..utils import InfererModule, TextBlock, ModelWrapper, Quadrilateral, detect_bubbles_with_mangalens, imwrite_unicode
+from ..utils import (
+    InfererModule,
+    TextBlock,
+    ModelWrapper,
+    Quadrilateral,
+    detect_bubbles_with_mangalens,
+    build_bubble_mask_from_mangalens_result,
+)
 
 class CommonOCR(InfererModule):
     @staticmethod
-    def _calc_bbox_overlap_ratio(
+    def _calc_bbox_mask_overlap_ratio(
         text_bbox: Tuple[int, int, int, int],
-        bubble_bbox: Tuple[float, float, float, float],
+        bubble_mask: np.ndarray,
     ) -> float:
         """
-        Calculates intersection ratio using text box area as denominator.
+        Calculates overlap ratio of text box covered by bubble mask.
         """
         tx, ty, tw, th = text_bbox
-        bx1, by1, bx2, by2 = bubble_bbox
-
-        tx1, ty1 = tx, ty
-        tx2, ty2 = tx + tw, ty + th
-
-        inter_x1 = max(tx1, bx1)
-        inter_y1 = max(ty1, by1)
-        inter_x2 = min(tx2, bx2)
-        inter_y2 = min(ty2, by2)
-
-        inter_w = max(0.0, inter_x2 - inter_x1)
-        inter_h = max(0.0, inter_y2 - inter_y1)
-        inter_area = inter_w * inter_h
         text_area = max(float(tw * th), 1.0)
-        return inter_area / text_area
+        h, w = bubble_mask.shape[:2]
+        x1 = max(0, min(w, int(tx)))
+        y1 = max(0, min(h, int(ty)))
+        x2 = max(0, min(w, int(tx + tw)))
+        y2 = max(0, min(h, int(ty + th)))
+        if x2 <= x1 or y2 <= y1:
+            return 0.0
+        covered = int(np.count_nonzero(bubble_mask[y1:y2, x1:x2] > 0))
+        return covered / text_area
 
-    def _get_model_bubble_boxes(self, full_image: np.ndarray) -> List[Tuple[float, float, float, float]]:
+    def _get_model_bubble_mask(self, full_image: np.ndarray) -> np.ndarray:
         """
-        Runs the bubble detector once per image and caches the bounding boxes.
-        When MANGA_OCR_RESULT_DIR is set (verbose mode), saves an annotated image.
+        Runs MangaLens once per image and caches the merged bubble mask.
         """
         cache_key = (id(full_image), full_image.shape[0], full_image.shape[1])
         if getattr(self, '_model_bubble_cache_key', None) == cache_key:
-            return getattr(self, '_model_bubble_cache_boxes', [])
+            return getattr(self, '_model_bubble_cache_mask', np.zeros(full_image.shape[:2], dtype=np.uint8))
 
         try:
-            ocr_result_dir = os.environ.get('MANGA_OCR_RESULT_DIR', '')
-            want_annotated = bool(ocr_result_dir)
-            result = detect_bubbles_with_mangalens(full_image, return_annotated=want_annotated, verbose=False)
-            boxes = [det.xyxy for det in result.detections]
-            self.logger.info(f"Model bubble filter: detected {len(boxes)} bubbles")
-
-            # Save annotated debug image when verbose
-            if want_annotated and result.annotated_image is not None:
-                try:
-                    import cv2
-                    save_path = os.path.join(ocr_result_dir, 'model_bubble_detection.png')
-                    annotated_bgr = cv2.cvtColor(result.annotated_image, cv2.COLOR_RGB2BGR)
-                    imwrite_unicode(save_path, annotated_bgr, self.logger)
-                    self.logger.info(f"Saved bubble detection debug image: {save_path}")
-                except Exception as e:
-                    self.logger.warning(f"Failed to save bubble detection debug image: {e}")
+            result = detect_bubbles_with_mangalens(full_image, return_annotated=False, verbose=False)
+            bubble_mask = build_bubble_mask_from_mangalens_result(result, full_image.shape[:2])
+            detected = len(result.detections) if result is not None else 0
+            self.logger.info(
+                f"Model bubble filter: detected {detected} bubbles, mask_pixels={int(np.count_nonzero(bubble_mask))}"
+            )
         except Exception as e:
             self.logger.warning(f"Model bubble filter failed, fallback to heuristic filter: {e}")
-            boxes = []
+            bubble_mask = np.zeros(full_image.shape[:2], dtype=np.uint8)
 
         self._model_bubble_cache_key = cache_key
-        self._model_bubble_cache_boxes = boxes
-        return boxes
+        self._model_bubble_cache_mask = bubble_mask
+        return bubble_mask
 
     def _generate_text_direction(self, bboxes: List[Union[Quadrilateral, TextBlock]]):
         if len(bboxes) > 0:
@@ -98,19 +89,19 @@ class CommonOCR(InfererModule):
                     for node in nodes:
                         yield bboxes[node], majority_dir
 
-    def _should_ignore_region(self, region_img: np.ndarray, ignore_bubble: float,
+    def _should_ignore_region(self, region_img: np.ndarray, ignore_bubble: float, 
                               full_image: np.ndarray = None, textline: Quadrilateral = None,
                               ocr_config: OcrConfig = None) -> bool:
         """
         通用的气泡过滤方法，判断文本区域是否应该被忽略
-
+        
         Args:
             region_img: 裁剪后的文本区域图像（用于简单方法）
             ignore_bubble: 忽略气泡阈值 (0-1)
             full_image: 完整图像（可选，用于高级方法）
             textline: 文本行对象（可选，用于获取坐标）
             ocr_config: OCR配置（可选，用于模型气泡过滤）
-
+            
         Returns:
             True: 应该忽略（非气泡区域）
             False: 应该保留（气泡区域）
@@ -123,34 +114,28 @@ class CommonOCR(InfererModule):
             bbox = textline.aabb
             text_bbox = (int(bbox.x), int(bbox.y), int(bbox.w), int(bbox.h))
 
-            bubble_boxes = self._get_model_bubble_boxes(full_image)
-            if not bubble_boxes:
+            bubble_mask = self._get_model_bubble_mask(full_image)
+            if np.count_nonzero(bubble_mask) == 0:
                 if not getattr(self, '_model_bubble_no_boxes_logged', False):
-                    self.logger.info("Model bubble filter: no bubble boxes detected, skip model gating for this image")
+                    self.logger.info("Model bubble filter: no bubble mask detected, skip model gating for this image")
                     self._model_bubble_no_boxes_logged = True
             else:
                 overlap_threshold = float(getattr(ocr_config, 'model_bubble_overlap_threshold', 0.1))
                 overlap_threshold = max(0.0, min(1.0, overlap_threshold))
-
-                max_overlap_ratio = 0.0
-                for bubble_bbox in bubble_boxes:
-                    ratio = self._calc_bbox_overlap_ratio(text_bbox, bubble_bbox)
-                    if ratio > max_overlap_ratio:
-                        max_overlap_ratio = ratio
-
-                if max_overlap_ratio < overlap_threshold:
+                overlap_ratio = self._calc_bbox_mask_overlap_ratio(text_bbox, bubble_mask)
+                if overlap_ratio < overlap_threshold:
                     self.logger.info(
-                        f"Model bubble filter: overlap={max_overlap_ratio:.3f} < threshold={overlap_threshold:.3f}, filtering region"
+                        f"Model bubble filter: overlap={overlap_ratio:.3f} < threshold={overlap_threshold:.3f}, filtering region"
                     )
                     return True
-
+        
         # 如果提供了完整图像和文本行，使用高级方法
         if full_image is not None and textline is not None:
             # 获取文本行的边界框
             bbox = textline.aabb
             x, y, w, h = int(bbox.x), int(bbox.y), int(bbox.w), int(bbox.h)
             return is_ignore(region_img, ignore_bubble, full_image, [x, y, w, h])
-
+        
         # 否则使用简单方法
         return is_ignore(region_img, ignore_bubble)
 
@@ -161,7 +146,7 @@ class CommonOCR(InfererModule):
         '''
         # Reset per-image model bubble cache
         self._model_bubble_cache_key = None
-        self._model_bubble_cache_boxes = []
+        self._model_bubble_cache_mask = None
         self._model_bubble_no_boxes_logged = False
         if bool(getattr(config, 'use_model_bubble_filter', False)):
             threshold = float(getattr(config, 'model_bubble_overlap_threshold', 0.1))
@@ -220,7 +205,7 @@ class OfflineOCR(CommonOCR, ModelWrapper):
             try:
                 import torch
                 if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                    pass
             except:
                 pass
         
@@ -262,6 +247,31 @@ class OfflineOCR(CommonOCR, ModelWrapper):
             try:
                 import torch
                 if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                    pass
             except:
                 pass
+
+    def _get_ocr_canvas_width(self, valid_widths: List[int], base_align: int = 4, extra_pad: int = 0) -> int:
+        """
+        Normalize OCR canvas width to reduce dynamic-shape explosion on cuDNN.
+        Env vars:
+        - MANGA_OCR_FIXED_WIDTH: force a minimum fixed width when > 0
+        - MANGA_OCR_WIDTH_BUCKET: round width up to this bucket on GPU (default: 256)
+        """
+        max_content_width = max(valid_widths) + max(0, int(extra_pad))
+        base_align = max(1, int(base_align))
+        aligned_width = base_align * ((max_content_width + base_align - 1) // base_align)
+
+        # CPU path keeps the original fine-grained width for lower memory overhead.
+        if not (hasattr(self, 'use_gpu') and self.use_gpu):
+            return aligned_width
+
+        fixed_width = int(os.environ.get("MANGA_OCR_FIXED_WIDTH", "0") or 0)
+        if fixed_width > 0:
+            return max(aligned_width, fixed_width)
+
+        bucket = int(os.environ.get("MANGA_OCR_WIDTH_BUCKET", "256") or 1)
+        if bucket <= 1:
+            return aligned_width
+        return bucket * ((aligned_width + bucket - 1) // bucket)
+

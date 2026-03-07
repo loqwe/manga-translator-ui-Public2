@@ -11,6 +11,7 @@ import time
 import logging
 import traceback
 import numpy as np
+import threading
 from PIL import Image
 from typing import Optional, Any, List
 import py3langid as langid
@@ -208,6 +209,17 @@ class MangaTranslator:
         
         # 过滤列表开关（默认启用）
         self.filter_text_enabled = params.get('filter_text_enabled', True)
+        
+        # T2S memory guard: trigger cleanup when system memory usage reaches threshold.
+        self._t2s_memory_cleanup_threshold = float(params.get('t2s_memory_cleanup_threshold', 90.0))
+        self._t2s_memory_force_cleanup_threshold = float(params.get('t2s_memory_force_cleanup_threshold', 95.0))
+        self._t2s_memory_check_interval = float(params.get('t2s_memory_check_interval', 0.5))
+        self._t2s_memory_cleanup_cooldown = float(params.get('t2s_memory_cleanup_cooldown', 5.0))
+        self._t2s_memory_force_cleanup_cooldown = float(params.get('t2s_memory_force_cleanup_cooldown', 3.0))
+        self._last_t2s_memory_check = 0.0
+        self._last_t2s_memory_cleanup = 0.0
+        self._last_t2s_memory_force_cleanup = 0.0
+        self._t2s_memory_guard_lock = threading.Lock()
         
         # 确保过滤列表文件存在
         try:
@@ -1544,6 +1556,79 @@ class MangaTranslator:
                     torch.cuda.synchronize()
             except Exception:
                 pass
+
+    def _get_system_memory_percent(self) -> Optional[float]:
+        """Best-effort read system memory percent."""
+        try:
+            import psutil
+            return float(psutil.virtual_memory().percent)
+        except Exception:
+            return None
+
+    def _run_t2s_memory_cleanup(self, aggressive: bool = False):
+        """Run T2S memory cleanup. Aggressive mode does extra GC passes."""
+        import gc
+        gc.collect()
+        if aggressive:
+            gc.collect()
+            gc.collect()
+
+        self._cleanup_gpu_memory()
+        try:
+            import ctypes
+            ctypes.windll.kernel32.SetProcessWorkingSetSize(-1, -1, -1)
+        except Exception:
+            pass
+
+    def _maybe_cleanup_t2s_memory(self, force: bool = False, min_level: str = 'normal') -> str:
+        """
+        T2S memory guard with dual thresholds.
+        Returns one of: 'none' | 'normal' | 'force'
+        """
+        now = time.time()
+        with self._t2s_memory_guard_lock:
+            if not force and (now - self._last_t2s_memory_check) < self._t2s_memory_check_interval:
+                return 'none'
+            self._last_t2s_memory_check = now
+
+            system_memory_percent = self._get_system_memory_percent()
+            if system_memory_percent is None:
+                return 'none'
+
+            force_due = (
+                system_memory_percent >= self._t2s_memory_force_cleanup_threshold and
+                (force or (now - self._last_t2s_memory_force_cleanup) >= self._t2s_memory_force_cleanup_cooldown)
+            )
+            normal_due = (
+                system_memory_percent >= self._t2s_memory_cleanup_threshold and
+                (force or (now - self._last_t2s_memory_cleanup) >= self._t2s_memory_cleanup_cooldown)
+            )
+
+            if min_level == 'force':
+                normal_due = False
+
+            if force_due:
+                self._last_t2s_memory_force_cleanup = now
+                self._last_t2s_memory_cleanup = now
+                logger.warning(
+                    f"[T2S][MEMORY] System memory {system_memory_percent:.1f}% >= "
+                    f"{self._t2s_memory_force_cleanup_threshold:.1f}%, triggering force cleanup"
+                )
+                self._run_t2s_memory_cleanup(aggressive=True)
+                logger.info("[T2S][MEMORY] Force cleanup completed")
+                return 'force'
+
+            if normal_due:
+                self._last_t2s_memory_cleanup = now
+                logger.warning(
+                    f"[T2S][MEMORY] System memory {system_memory_percent:.1f}% >= "
+                    f"{self._t2s_memory_cleanup_threshold:.1f}%, triggering regular cleanup"
+                )
+                self._run_t2s_memory_cleanup(aggressive=False)
+                logger.info("[T2S][MEMORY] Regular cleanup completed")
+                return 'normal'
+
+            return 'none'
     
     def _cleanup_context_memory(self, ctx, keep_result=True):
         """
@@ -2440,6 +2525,7 @@ class MangaTranslator:
                     # Single line: always preserve
                     region._t2s_preserve_lines = True
                     logger.info(f'[T2S] 单行保留: "{region.translation}"')
+                self._maybe_cleanup_t2s_memory()
         else: # Actual network translation
             # --- BEGIN PRE-TRANSLATION DE-DUPLICATION ---
             # Per user request, clean up duplicate lines within regions before sending to translator.
@@ -4312,6 +4398,7 @@ class MangaTranslator:
                             else:
                                 region._t2s_preserve_lines = True
                                 logger.info(f'[T2S] 单行保留: "{region.translation}"')
+                            self._maybe_cleanup_t2s_memory()
 
                 # 应用后处理逻辑（括号修正、过滤等）
                 for ctx, config in batch:
@@ -4560,6 +4647,7 @@ class MangaTranslator:
                                 region._t2s_preserve_lines = True
                         else:
                             region._t2s_preserve_lines = True
+                        self._maybe_cleanup_t2s_memory()
 
                 # 应用后处理逻辑（括号修正、过滤等）
                 if ctx.text_regions:
@@ -4738,7 +4826,11 @@ class MangaTranslator:
         if config.translator.translator == Translator.t2s:
             from .translators.t2s import smart_convert
             logger.info(f'[繁简转换] 直接转换 {len(texts)} 条文本')
-            return [smart_convert(t) for t in texts]
+            converted_texts = []
+            for text in texts:
+                converted_texts.append(smart_convert(text))
+                self._maybe_cleanup_t2s_memory()
+            return converted_texts
 
         # If this is an OpenAI/Gemini translator
         if config.translator.translator in [Translator.openai, Translator.gemini, Translator.openai_hq, Translator.gemini_hq]:

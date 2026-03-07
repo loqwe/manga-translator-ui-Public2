@@ -16,7 +16,7 @@ import functools
 from .utils import Context, load_image
 from .utils.generic import is_mostly_noise_text
 from .utils.failure_record import save_failure_record, remove_failure_record
-from .config import Config
+from .config import Config, Translator
 from .rate_limiter import RateLimiter
 
 # 使用 manga_translator 的主 logger，确保日志能被UI捕获
@@ -137,6 +137,33 @@ class ConcurrentPipeline:
         self._main_workers_target = 0
         self._main_workers_finished = 0
         self._main_workers_lock = asyncio.Lock()
+
+    async def _guard_t2s_memory_before_ocr_enqueue(self, config: Config):
+        """
+        T2S memory guard for OCR enqueue stage:
+        - >=95%: force cleanup and pause OCR enqueue until cleanup completes.
+        """
+        translator_cfg = getattr(config, 'translator', None)
+        if not translator_cfg or getattr(translator_cfg, 'translator', None) != Translator.t2s:
+            return
+
+        force_threshold = float(getattr(self.translator, '_t2s_memory_force_cleanup_threshold', 95.0))
+        current_memory = self.translator._get_system_memory_percent()
+        if current_memory is None or current_memory < force_threshold:
+            return
+
+        logger.warning(
+            f"[T2S][MEMORY] System memory {current_memory:.1f}% >= {force_threshold:.1f}%, "
+            "pause OCR enqueue and run force cleanup"
+        )
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            self.executor,
+            functools.partial(self.translator._maybe_cleanup_t2s_memory, True, 'force')
+        )
+
+        logger.info("[T2S][MEMORY] OCR enqueue resumed after force cleanup")
 
     async def _detection_ocr_worker(self, file_paths: List[str], configs: List):
         """
@@ -374,6 +401,7 @@ class ConcurrentPipeline:
                 
                 # 放入翻译队列和修复队列（只传image_name和config，不传ctx）
                 if ctx.text_regions:
+                    await self._guard_t2s_memory_before_ocr_enqueue(config)
                     await self.translation_queue.put((ctx.image_name, config))
                     await self.inpaint_queue.put((ctx.image_name, config))
                     self.translation_enqueued_total += 1

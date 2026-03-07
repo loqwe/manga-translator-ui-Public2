@@ -78,16 +78,83 @@ def _is_fully_wrapped(inner: Quadrilateral, outer: Quadrilateral, eps: float = 1
         inner_y2 <= outer_y2 + eps
     )
 
+def _aabb_bounds(txtln: Quadrilateral) -> Tuple[float, float, float, float]:
+    x1, y1 = np.min(txtln.pts[:, 0]), np.min(txtln.pts[:, 1])
+    x2, y2 = np.max(txtln.pts[:, 0]), np.max(txtln.pts[:, 1])
+    return float(x1), float(y1), float(x2), float(y2)
+
+def _aabb_area(txtln: Quadrilateral) -> float:
+    x1, y1, x2, y2 = _aabb_bounds(txtln)
+    return max(0.0, x2 - x1) * max(0.0, y2 - y1)
+
+def _required_uniform_shrink_scale(inner: Quadrilateral, outer: Quadrilateral, eps: float = 1.0) -> float:
+    """
+    返回 outer 围绕中心等比例缩小时，仍能包裹 inner 所需的最小 scale（越小越“抗缩”）。
+    若 outer 退化（宽/高为 0），返回 inf。
+    """
+    inner_x1, inner_y1, inner_x2, inner_y2 = _aabb_bounds(inner)
+    outer_x1, outer_y1, outer_x2, outer_y2 = _aabb_bounds(outer)
+
+    cx = (outer_x1 + outer_x2) / 2.0
+    cy = (outer_y1 + outer_y2) / 2.0
+    half_w = (outer_x2 - outer_x1) / 2.0
+    half_h = (outer_y2 - outer_y1) / 2.0
+    if half_w <= 0 or half_h <= 0:
+        return float('inf')
+
+    need_left = (cx - inner_x1 - eps) / half_w
+    need_right = (inner_x2 - cx - eps) / half_w
+    need_top = (cy - inner_y1 - eps) / half_h
+    need_bottom = (inner_y2 - cy - eps) / half_h
+
+    return max(0.0, need_left, need_right, need_top, need_bottom)
+
 def _group_by_full_wrap(candidates: List[Quadrilateral], wrap_eps: float = 1.0) -> List[Set[int]]:
     """
     使用“完全包裹”关系分组：只有存在 A 包裹 B 或 B 包裹 A 才连接。
+    对同一个非 other 框，如果被多个 other 包裹，只保留一个 other 连接：
+    以“outer 等比例缩小时仍可包裹 inner 的最小所需 scale”作为主判据（越小越优）。
+    这样可避免 one-to-many 的 other 占用把多个 other 粘成同一连通组。
     """
-    G = nx.Graph()
-    for i in range(len(candidates)):
-        G.add_node(i)
+    node_count = len(candidates)
+    labels = [_get_det_label(txtln) for txtln in candidates]
+    edge_set = set()
     for i, j in itertools.combinations(range(len(candidates)), 2):
+        if labels[i] in WRAP_ONLY_LABELS and labels[j] in WRAP_ONLY_LABELS:
+            # 包裹辅助框之间不互相连边，避免 helper 之间形成无意义连通桥。
+            continue
         if _is_fully_wrapped(candidates[i], candidates[j], wrap_eps) or _is_fully_wrapped(candidates[j], candidates[i], wrap_eps):
-            G.add_edge(i, j)
+            edge_set.add((i, j))
+
+    # 同一 inner 被多个 other 包裹时，裁剪为“单一 other 归属”
+    for inner_idx, inner_txtln in enumerate(candidates):
+        if labels[inner_idx] in WRAP_ONLY_LABELS:
+            continue
+
+        wrapped_by_other = []
+        for other_idx, other_txtln in enumerate(candidates):
+            if inner_idx == other_idx:
+                continue
+            if labels[other_idx] not in WRAP_ONLY_LABELS:
+                continue
+            if not _is_fully_wrapped(inner_txtln, other_txtln, wrap_eps):
+                continue
+
+            min_scale = _required_uniform_shrink_scale(inner_txtln, other_txtln, eps=wrap_eps)
+            other_area = _aabb_area(other_txtln)
+            wrapped_by_other.append((min_scale, other_area, other_idx))
+
+        if len(wrapped_by_other) <= 1:
+            continue
+
+        wrapped_by_other.sort(key=lambda x: (x[0], x[1], x[2]))
+        for _, _, other_idx in wrapped_by_other[1:]:
+            edge = (min(inner_idx, other_idx), max(inner_idx, other_idx))
+            edge_set.discard(edge)
+
+    G = nx.Graph()
+    G.add_nodes_from(range(node_count))
+    G.add_edges_from(edge_set)
     return list(nx.algorithms.components.connected_components(G))
 
 def _sort_group_textlines(txtlns: List[Quadrilateral]) -> List[Quadrilateral]:
