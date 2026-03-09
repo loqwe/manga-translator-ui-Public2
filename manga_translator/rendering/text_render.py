@@ -652,6 +652,9 @@ def _smart_vertical_ellipsis_advance(slot, font_size: int, char_bitmap_rows: int
     return max(1, raw)
 
 def _measure_vertical_char_metrics(font_size: int, cdpt: str):
+    if _is_newline_control_char(cdpt):
+        return 0, 0, 0, False
+
     """Return (advance_y, top_offset, bitmap_rows, has_visible_ink) for vertical rendering."""
     cdpt_trans, _ = CJK_Compatibility_Forms_translate(cdpt, 1)
     slot = get_char_glyph(cdpt_trans, font_size, 1)
@@ -687,6 +690,9 @@ def _measure_vertical_char_metrics(font_size: int, cdpt: str):
     return char_offset_y, 0, 0, False
 
 def _get_vertical_column_char_width(font_size: int, cdpt: str) -> int:
+    if _is_newline_control_char(cdpt):
+        return 0
+
     """Column frame width for vertical layout (Ballons-style: frame + ink), in pixels."""
     cdpt_trans, _ = CJK_Compatibility_Forms_translate(cdpt, 1)
     slot = get_char_glyph(cdpt_trans, font_size, 1)
@@ -720,6 +726,8 @@ def _measure_horizontal_block_render_height(font_size: int, content: str, border
     pen_h = [font_size // 2, font_size]
 
     for char_h in content:
+        if _is_newline_control_char(char_h):
+            continue
         if char_h == '！':
             char_h = '!'
         elif char_h == '？':
@@ -808,6 +816,8 @@ def _measure_horizontal_line_visual_extents(line_text: str, font_size: int, bord
     pen = [origin_x, font_size + border_size]
 
     for c in line_text:
+        if _is_newline_control_char(c):
+            continue
         if reversed_direction:
             cdpt, _ = CJK_Compatibility_Forms_translate(c, 0)
             glyph = get_char_glyph(cdpt, font_size, 0)
@@ -957,7 +967,7 @@ def calc_vertical(font_size: int, text: str, max_height: int, config=None):
                     current_line_height += block_height
             else:  # It's a vertical part, process character by character
                 for cdpt in part:
-                    if not cdpt:
+                    if not cdpt or _is_newline_control_char(cdpt):
                         continue
                     
                     cdpt_trans, rot_degree = CJK_Compatibility_Forms_translate(cdpt, 1)
@@ -998,6 +1008,9 @@ def calc_vertical(font_size: int, text: str, max_height: int, config=None):
     return line_text_list, line_height_list
 
 def put_char_vertical(font_size: int, cdpt: str, pen_l: Tuple[int, int], canvas_text: np.ndarray, canvas_border: np.ndarray, border_size: int, config=None, line_width: int = 0, force_rotate_90: bool = False, stroke_width: float = None):
+    if _is_newline_control_char(cdpt):
+        return 0
+
     if cdpt == '＿':
         # For the placeholder, just advance the pen vertically and do nothing else.
         return font_size
@@ -1385,6 +1398,8 @@ def put_text_vertical(font_size: int, text: str, h: int, alignment: str, fg: Tup
 
             else: # It's a vertical part
                 for char_idx, c in enumerate(part):
+                    if _is_newline_control_char(c):
+                        continue
                     offset_y = put_char_vertical(font_size, c, pen_line, canvas_text, canvas_border, border_size=bg_size, config=config, line_width=line_width, stroke_width=stroke_ratio)
                     pen_line[1] += offset_y
         
@@ -1431,7 +1446,13 @@ def select_hyphenator(lang: str):
         _hyphenator_cache[lang] = None
         return None
 
+def _is_newline_control_char(cdpt: str) -> bool:
+    return cdpt in ('\n', '\r')
+
 def get_char_offset_x(font_size: int, cdpt: str):
+    if _is_newline_control_char(cdpt):
+        return 0
+
     if cdpt == '＿':
         # Return the width of a full-width space for the placeholder
         return get_char_offset_x(font_size, '　')
@@ -1446,9 +1467,12 @@ def get_char_offset_x(font_size: int, cdpt: str):
     return char_offset_x
 
 def get_string_width(font_size: int, text: str):
-    return sum([get_char_offset_x(font_size, c) for c in text])
+    return sum(get_char_offset_x(font_size, c) for c in text if not _is_newline_control_char(c))
 
 def get_char_offset_y(font_size: int, cdpt: str):
+    if _is_newline_control_char(cdpt):
+        return 0
+
     """获取单个字符的竖排高度（像素）"""
     if cdpt == '＿':
         return get_char_offset_y(font_size, '　')
@@ -1818,6 +1842,9 @@ def calc_horizontal(font_size: int, text: str, max_width: int, max_height: int, 
     return line_text_list, line_width_list
 
 def put_char_horizontal(font_size: int, cdpt: str, pen_l: Tuple[int, int], canvas_text: np.ndarray, canvas_border: np.ndarray, border_size: int, config=None, stroke_width: float = None):
+    if _is_newline_control_char(cdpt):
+        return 0
+
     if cdpt == '＿':
         # For the placeholder, just advance the pen and do nothing else.
         return get_char_offset_x(font_size, '＿')
@@ -2030,6 +2057,8 @@ def put_text_horizontal(font_size: int, text: str, width: int, height: int, alig
             pen_line[0] = round(target_right - line_right)
 
         for char_idx, c in enumerate(line_text):
+            if _is_newline_control_char(c):
+                continue
             if reversed_direction:
                 cdpt, rot_degree = CJK_Compatibility_Forms_translate(c, 0)
                 glyph = get_char_glyph(cdpt, font_size, 0)

@@ -3009,6 +3009,7 @@ class TranslationWorker(QObject):
             
             # 注册进度钩子，接收后端的批次进度
             progress_signal = self.progress  # 捕获信号引用
+            global_progress_total = len(self.files)
             
             async def progress_hook(state: str, finished: bool):
                 try:
@@ -3018,6 +3019,8 @@ class TranslationWorker(QObject):
                         if len(parts) == 4:
                             batch_end = int(parts[2])
                             total = int(parts[3])
+                            if global_progress_total > 1 and total <= 1:
+                                return
                             # 进度条显示图片数量
                             progress_signal.emit(batch_end, total, "")
                 except Exception:
@@ -3209,7 +3212,7 @@ class TranslationWorker(QObject):
             # 检查是否启用并发模式
             batch_concurrent = self.config_dict.get('cli', {}).get('batch_concurrent', False)
             
-            if is_hq or (len(self.files) > 0 and batch_size > 1):
+            if is_hq or batch_concurrent or (len(self.files) > 0 and batch_size > 1):
                 self.log_received.emit(f"--- 开始批量处理 ({'高质量模式' if is_hq else '批量模式'})")
 
                 # 输出批量处理信息

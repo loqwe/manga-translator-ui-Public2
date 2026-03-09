@@ -3,7 +3,6 @@
 支持 PDF、EPUB、CBZ 格式
 """
 import os
-import tempfile
 import zipfile
 import shutil
 from typing import List, Optional, Tuple
@@ -16,6 +15,9 @@ ARCHIVE_EXTENSIONS = {'.pdf', '.epub', '.cbz', '.cbr', '.cb7', '.zip'}
 # 支持的图片格式
 IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.bmp', '.webp', '.avif', '.gif', '.tiff', '.tif'}
 
+# Archive extraction temp root directory
+ARCHIVE_TEMP_ROOT = os.path.normpath(r'D:\漫画\原始解压图临时文件夹')
+
 
 def is_archive_file(file_path: str) -> bool:
     """检查文件是否是支持的压缩包/文档格式"""
@@ -25,8 +27,8 @@ def is_archive_file(file_path: str) -> bool:
 
 def get_temp_extract_dir(archive_path: str) -> str:
     """获取压缩包的临时解压目录"""
-    # 使用系统临时目录下的固定子目录，便于管理
-    base_temp = os.path.join(tempfile.gettempdir(), 'manga_translator_archives')
+    # 使用固定目录作为解压临时根目录，便于管理和排查
+    base_temp = ARCHIVE_TEMP_ROOT
     os.makedirs(base_temp, exist_ok=True)
     
     # 使用文件名和修改时间生成唯一目录名
@@ -202,7 +204,7 @@ def extract_images_from_archive(archive_path: str, output_dir: Optional[str] = N
 
 def cleanup_temp_archives():
     """清理所有临时解压目录"""
-    base_temp = os.path.join(tempfile.gettempdir(), 'manga_translator_archives')
+    base_temp = ARCHIVE_TEMP_ROOT
     if os.path.exists(base_temp):
         shutil.rmtree(base_temp, ignore_errors=True)
 

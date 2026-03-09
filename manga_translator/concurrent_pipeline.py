@@ -41,7 +41,7 @@ class ConcurrentPipeline:
     """
     
     def __init__(self, translator_instance, batch_size: int = 3, max_workers: int = 4,
-                 translation_concurrency: int = 1, preset_rpm: int = 0):
+                 translation_concurrency: int = 1, inpaint_concurrency: int = 1, preset_rpm: int = 0):
         """
         初始化并发流水线
         
@@ -51,11 +51,13 @@ class ConcurrentPipeline:
             max_workers: 线程池最大工作线程数（用于CPU/GPU密集型操作）
                         默认4个：检测+OCR、修复、渲染可以同时执行
             translation_concurrency: 翻译并发数（同时发起的翻译请求数）
+            inpaint_concurrency: 修复并发数（同时运行的修复worker数）
             preset_rpm: 预设的每分钟最大请求数（0表示不限制）
         """
         self.translator = translator_instance
         self.batch_size = batch_size
         self.translation_concurrency = translation_concurrency
+        self.inpaint_concurrency = max(1, int(inpaint_concurrency or 1))
         self.preset_rpm = preset_rpm
         
         # ✅ 术语缓存初始化（启动时并发=1，直接写入模式）
@@ -67,6 +69,9 @@ class ConcurrentPipeline:
         self.inpaint_worker_stopped = False
         self.glossary_mode_switched = False  # 术语模式是否已切换
         self.rpm_restored = False  # RPM是否已恢复
+        self._inpaint_workers_target = self.inpaint_concurrency
+        self._inpaint_workers_finished = 0
+        self._inpaint_workers_lock = asyncio.Lock()
         
         # 修复线程停止事件（用于异步通知翻译线程恢复并发数）
         self.inpaint_stopped_event = asyncio.Event()
@@ -74,10 +79,11 @@ class ConcurrentPipeline:
         # 速率限制器（启动时线程数=1，修复线程停止后恢复用户配置）
         # 传入 RPM 配置启用令牌桶算法
         self.rate_limiter = RateLimiter(concurrency=1, rpm=preset_rpm)  # 启动时串行，但已启用 RPM 限制
-        
+
         # 线程池：用于执行CPU/GPU密集型操作
         # 4个工作线程：允许检测、OCR、修复、渲染同时执行
-        self.executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="pipeline_worker")
+        effective_max_workers = max(int(max_workers or 4), self.inpaint_concurrency + 2)
+        self.executor = ThreadPoolExecutor(max_workers=effective_max_workers, thread_name_prefix="pipeline_worker")
         
         # 队列
         self.translation_queue = asyncio.Queue()  # 翻译队列
@@ -131,41 +137,79 @@ class ConcurrentPipeline:
         
         # Worker busy flags (for serial mode when only one worker is used)
         self._worker_busy = {}  # {worker_id: bool}
-        
-        # 延迟重试队列（安全限制等错误时，先放入这里，等主队列完成后由Worker并行处理）
+
+        # Delayed retry queue; items are retried after the main queue drains.
         self.retry_queue = asyncio.Queue()  # items: (ctx, config, error_type)
         self._main_workers_target = 0
         self._main_workers_finished = 0
         self._main_workers_lock = asyncio.Lock()
 
-    async def _guard_t2s_memory_before_ocr_enqueue(self, config: Config):
-        """
-        T2S memory guard for OCR enqueue stage:
-        - >=95%: force cleanup and pause OCR enqueue until cleanup completes.
-        """
-        translator_cfg = getattr(config, 'translator', None)
-        translator_value = getattr(translator_cfg, 'translator', None) if translator_cfg else None
-        translator_name = str(getattr(translator_value, 'value', translator_value)) if translator_value is not None else ''
-        if translator_name != 't2s':
-            return
+    def _finalize_completed_context(self, ctx: Context, results: List[Context]):
+        results.append(ctx)
 
-        force_threshold = float(getattr(self.translator, '_t2s_memory_force_cleanup_threshold', 95.0))
-        current_memory = self.translator._get_system_memory_percent()
-        if current_memory is None or current_memory < force_threshold:
-            return
+        logger.debug(f"[render] cleanup: {ctx.image_name}")
+        for attr in ('img_rgb', 'img_colorized', 'upscaled', 'mask', 'img_inpainted', 'img_rendered'):
+            if getattr(ctx, attr, None) is not None:
+                setattr(ctx, attr, None)
 
-        logger.warning(
-            f"[T2S][MEMORY] System memory {current_memory:.1f}% >= {force_threshold:.1f}%, "
-            "pause OCR enqueue and run force cleanup"
+        import gc
+        gc.collect()
+
+        if ctx.image_name in self.base_contexts:
+            del self.base_contexts[ctx.image_name]
+            logger.debug(f"[render] base context cleared: {ctx.image_name}")
+
+    def _should_stop_render_worker(self, rendered_count: int) -> bool:
+        total_processed = rendered_count + len(self.failed_images)
+        return (
+            self.detection_ocr_done
+            and len(self.translation_done) >= self.total_images
+            and total_processed >= self.total_images
         )
 
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(
-            self.executor,
-            functools.partial(self.translator._maybe_cleanup_t2s_memory, True, 'force')
-        )
+    async def _guard_t2s_backlog_before_detection(self):
+        """Pause detection when downstream backlog is too high (T2S mode only).
 
-        logger.info("[T2S][MEMORY] OCR enqueue resumed after force cleanup")
+        Pure backlog control. Large image contexts stay referenced in
+        base_contexts until render completes, so limiting backlog is the
+        effective way to cap T2S pipeline memory growth.
+        """
+        if not getattr(self, '_is_t2s_mode', False):
+            return
+
+        backlog_pause_threshold = max(self.inpaint_concurrency * 5, 10)
+        backlog_resume_threshold = max(self.inpaint_concurrency * 3, 6)
+        pause_logged = False
+
+        while not self.stop_workers and not self.has_critical_error:
+            base_backlog = len(self.base_contexts)
+            inpaint_backlog = self.inpaint_queue.qsize()
+
+            if base_backlog < backlog_pause_threshold and inpaint_backlog < backlog_pause_threshold:
+                if pause_logged:
+                    logger.info(
+                        f"[T2S][BACKLOG] 检测恢复: base_contexts={base_backlog}, "
+                        f"修复队列={inpaint_backlog}"
+                    )
+                return
+
+            if not pause_logged:
+                logger.warning(
+                    f"[T2S][BACKLOG] 检测暂停: base_contexts={base_backlog}, "
+                    f"修复队列={inpaint_backlog}, 阈值={backlog_pause_threshold}"
+                )
+                pause_logged = True
+
+            await asyncio.sleep(0.5)
+
+            base_backlog = len(self.base_contexts)
+            inpaint_backlog = self.inpaint_queue.qsize()
+            if base_backlog <= backlog_resume_threshold and inpaint_backlog <= backlog_resume_threshold:
+                logger.info(
+                    f"[T2S][BACKLOG] 检测恢复: base_contexts={base_backlog}, "
+                    f"修复队列={inpaint_backlog}"
+                )
+                return
 
     async def _detection_ocr_worker(self, file_paths: List[str], configs: List):
         """
@@ -186,6 +230,8 @@ class ConcurrentPipeline:
             # Main-queue backpressure: pause OCR/detection (only takes effect between images; won't interrupt the current image).
             while (not self.stop_workers) and (not self.has_critical_error) and (not self._ocr_can_run_event.is_set()):
                 await asyncio.sleep(0.2)
+
+            await self._guard_t2s_backlog_before_detection()
 
             # 检查是否需要停止（其他线程出错）
             if self.stop_workers:
@@ -403,7 +449,6 @@ class ConcurrentPipeline:
                 
                 # 放入翻译队列和修复队列（只传image_name和config，不传ctx）
                 if ctx.text_regions:
-                    await self._guard_t2s_memory_before_ocr_enqueue(config)
                     await self.translation_queue.put((ctx.image_name, config))
                     await self.inpaint_queue.put((ctx.image_name, config))
                     self.translation_enqueued_total += 1
@@ -445,18 +490,86 @@ class ConcurrentPipeline:
         # 标记检测+OCR全部完成
         self.detection_ocr_done = True
         logger.info("[检测+OCR线程] 处理完成")
-    
+
+    async def _translation_worker_t2s(self):
+        """T2S fast path: direct sequential processing, no collector/worker/rate_limiter.
+
+        OCR starts the next image only when the backlog guard allows it.
+        render_queue(maxsize=20) adds another layer of downstream backpressure.
+        """
+        logger.info(f"【翻译线程】 启动（T2S快速模式），render_queue上限: {self.render_queue.maxsize}")
+        processed = 0
+
+        while not self.stop_workers:
+            try:
+                if self.has_critical_error:
+                    logger.warning("[T2S] 检测到严重错误，停止")
+                    break
+
+                # Pull from translation_queue
+                try:
+                    image_name, config = await asyncio.wait_for(
+                        self.translation_queue.get(), timeout=1.0
+                    )
+                except asyncio.TimeoutError:
+                    if self.detection_ocr_done and self.translation_queue.empty():
+                        break
+                    continue
+
+                ctx = self.base_contexts.get(image_name)
+                if not ctx:
+                    logger.error(f"[T2S] 找不到 {image_name} 的基础上下文")
+                    continue
+
+                # Apply T2S conversion
+                if ctx.text_regions:
+                    logger.info(f'[繁简转换] 直接转换 {len(ctx.text_regions)} 条文本')
+                    self.translator._apply_t2s_to_regions(ctx.text_regions)
+
+                    # Set target_lang and render attributes
+                    for region in ctx.text_regions:
+                        region.target_lang = config.translator.target_lang
+                        region._alignment = config.render.alignment
+                        region._direction = config.render.direction
+
+                    # Post-translation processing (bracket fix, filtering, etc.)
+                    ctx.text_regions = await self.translator._apply_post_translation_processing(ctx, config)
+
+                processed += 1
+                self.stats['translation'] += 1
+                self.translation_done[ctx.image_name] = ctx.text_regions if ctx.text_regions else []
+
+                # Sync back to base_contexts
+                if ctx.image_name in self.base_contexts:
+                    self.base_contexts[ctx.image_name].text_regions = ctx.text_regions
+
+                # Put into render_queue (blocks when queue is full, backpressuring upstream)
+                if ctx.image_name in self.inpaint_done:
+                    await self.render_queue.put((ctx, config))
+
+                logger.info(f"[T2S] {image_name} 完成 ({processed}/{self.total_images})")
+
+            except Exception as e:
+                logger.error(f"[T2S] 错误: {e}")
+                logger.error(traceback.format_exc())
+
+        logger.info(f"【翻译线程】 T2S完成，共处理 {processed} 张图片")
+
     async def _translation_worker(self):
         """
         翻译工作线程（任务池模式）
-        
+
         架构：
-        1. 收集者协程：从 translation_queue 收集图片，凑够批次后放入 batch_queue
-        2. N 个 worker 协程：各自从 batch_queue 拉取并处理，互不干扰
-        3. 每个 worker 独立运行，一个慢了不影响其他 worker
+        - T2S模式：积压守卫 + render_queue(maxsize=20) 反压上游
+        - 其它翻译器：收集者→batch_queue→Worker池→rate_limiter
         """
         await asyncio.sleep(0)
-        
+
+        # T2S fast path: bypass collector/worker/rate_limiter entirely
+        if self._is_t2s_mode:
+            await self._translation_worker_t2s()
+            return
+
         logger.info(f"【翻译线程】 启动（任务池模式），批量大小: {self.batch_size}，初始worker数: 1，目标worker数: {self.translation_concurrency}，预设RPM: {self.preset_rpm}")
         
         # 内部批次队列（收集者 -> workers）
@@ -1597,7 +1710,7 @@ class ConcurrentPipeline:
         except Exception as e:
             logger.error(f"【后台任务】 错误: {e}")
     
-    async def _inpaint_worker(self):
+    async def _inpaint_worker(self, worker_id: int = 0):
         """
         修复工作线程
         从修复队列中取出上下文，进行修复
@@ -1605,13 +1718,13 @@ class ConcurrentPipeline:
         # 让出控制权，确保线程能被调度
         await asyncio.sleep(0)
         
-        logger.info("[修复线程] 启动")
+        logger.info(f"[修复线程-{worker_id}] 启动")
         
         while not self.stop_workers:
             try:
                 # 如果发生严重错误，立即退出
                 if self.has_critical_error:
-                    logger.warning(f"[修复] 检测到严重错误，停止修复 (已完成 {self.stats['inpaint']}/{self.total_images})")
+                    logger.warning(f"[修复-{worker_id}] 检测到严重错误，停止修复 (已完成 {self.stats['inpaint']}/{self.total_images})")
                     break
                 
                 # 检查是否完成所有任务：检测+OCR完成 且 队列为空
@@ -1619,7 +1732,7 @@ class ConcurrentPipeline:
                     # 再等待一小段时间，确保没有新任务
                     await asyncio.sleep(0.5)
                     if self.inpaint_queue.empty():
-                        logger.info(f"[修复线程] 所有任务已完成 ({self.stats['inpaint']}/{self.total_images})")
+                        logger.info(f"[修复线程-{worker_id}] 所有任务已完成 ({self.stats['inpaint']}/{self.total_images})")
                         break
                 
                 # 尝试获取任务（超时1秒）
@@ -1636,17 +1749,17 @@ class ConcurrentPipeline:
                                 f"total_processed={total_processed}/{self.total_images}")
                     if self.detection_ocr_done and self.inpaint_queue.empty():
                         if total_processed >= self.total_images:
-                            logger.info(f"[修复线程] 所有图片处理完成（成功: {self.stats['inpaint']}, 失败: {len(self.failed_images)}），结束")
+                            logger.info(f"[修复线程-{worker_id}] 所有图片处理完成（成功: {self.stats['inpaint']}, 失败: {len(self.failed_images)}），结束")
                             break
                     continue
                 
                 # ✅ 从base_contexts获取ctx
                 ctx = self.base_contexts.get(image_name)
                 if not ctx:
-                    logger.error(f"[修复] 找不到 {image_name} 的基础上下文")
+                    logger.error(f"[修复-{worker_id}] 找不到 {image_name} 的基础上下文")
                     continue
-                
-                logger.info(f"[修复] 处理: {ctx.image_name}")
+
+                logger.info(f"[修复-{worker_id}] 处理: {ctx.image_name}")
                 
                 # Mask refinement（在线程池中执行）
                 if ctx.mask is None and ctx.text_regions:
@@ -1667,7 +1780,7 @@ class ConcurrentPipeline:
                     ctx.img_inpainted = await loop.run_in_executor(self.executor, inpaint_func)
                 
                 self.stats['inpaint'] += 1
-                logger.info(f"[修复] 完成: {ctx.image_name} ({self.stats['inpaint']}/{self.total_images})")
+                logger.info(f"[修复-{worker_id}] 完成: {ctx.image_name} ({self.stats['inpaint']}/{self.total_images})")
                 
                 # ✅ 标记修复完成（img_inpainted已经设置到base_contexts中的ctx了）
                 self.inpaint_done[ctx.image_name] = True
@@ -1678,7 +1791,7 @@ class ConcurrentPipeline:
                     translated_regions = self.translation_done.get(ctx.image_name)
                     if translated_regions == 'FAILED':
                         # 翻译失败，跳过修复和渲染，不输出任何文件
-                        logger.warning(f"[修复] {ctx.image_name} 翻译失败，跳过所有后续处理")
+                        logger.warning(f"[修复-{worker_id}] {ctx.image_name} 翻译失败，跳过所有后续处理")
                         continue
                     # ✅ 从 base_contexts获取完整的ctx，合并翻译和修复结果
                     render_ctx = self.base_contexts.get(ctx.image_name)
@@ -1688,28 +1801,35 @@ class ConcurrentPipeline:
                         if isinstance(translated_regions, (list, tuple)):
                             render_ctx.text_regions = translated_regions
                         elif translated_regions:
-                            logger.warning(f"[修复] {ctx.image_name} 的翻译结果类型异常: {type(translated_regions)}, 使用空列表")
+                            logger.warning(f"[修复-{worker_id}] {ctx.image_name} 的翻译结果类型异常: {type(translated_regions)}, 使用空列表")
                             render_ctx.text_regions = []
                         else:
                             render_ctx.text_regions = []
                         # img_inpainted已经在上面设置好了
                         await self.render_queue.put((render_ctx, config))
-                        logger.info(f"[修复] {ctx.image_name} 翻译+修复都完成，加入渲染队列")
+                        logger.info(f"[修复-{worker_id}] {ctx.image_name} 翻译+修复都完成，加入渲染队列")
                     else:
-                        logger.error(f"[修复] 找不到 {ctx.image_name} 的基础上下文")
-                
+                        logger.error(f"[修复-{worker_id}] 找不到 {ctx.image_name} 的基础上下文")
+
             except Exception as e:
-                logger.error(f"[修复线程] 错误: {e}")
+                logger.error(f"[修复线程-{worker_id}] 错误: {e}")
                 # 标记严重错误，停止所有线程
                 self.has_critical_error = True
                 self.critical_error_msg = f"修复线程错误: {e}"
                 self.critical_error_exception = e
                 self.stop_workers = True
                 break
-        
-        self.inpaint_worker_stopped = True  # 标记修复线程已停止
-        self.inpaint_stopped_event.set()  # 触发事件，唤醒等待的后台任务
-        logger.info("【修复线程】 停止，已触发 inpaint_stopped_event")
+
+        should_set_event = False
+        async with self._inpaint_workers_lock:
+            self._inpaint_workers_finished += 1
+            if self._inpaint_workers_finished >= self._inpaint_workers_target:
+                should_set_event = not self.inpaint_stopped_event.is_set()
+                self.inpaint_worker_stopped = True
+        if should_set_event:
+            self.inpaint_stopped_event.set()  # 触发事件，唤醒等待的后台任务
+            logger.info("【修复线程】 全部停止，已触发 inpaint_stopped_event")
+        logger.info(f"[修复线程-{worker_id}] 停止 ({self._inpaint_workers_finished}/{self._inpaint_workers_target})")
     
     async def _render_worker(self, results: List[Context]):
         """
@@ -1742,10 +1862,9 @@ class ConcurrentPipeline:
                                 f"translation_done={len(self.translation_done)}/{self.total_images}, "
                                 f"rendered={rendered_count}, failed={len(self.failed_images)}, "
                                 f"total_processed={total_processed}/{self.total_images}")
-                    if self.detection_ocr_done and len(self.translation_done) >= self.total_images:
-                        if total_processed >= self.total_images:
-                            logger.info(f"[渲染线程] 所有图片处理完成（成功: {rendered_count}, 失败: {len(self.failed_images)}），结束")
-                            break
+                    if self._should_stop_render_worker(rendered_count):
+                        logger.info(f"[渲染线程] 所有图片处理完成（成功: {rendered_count}, 失败: {len(self.failed_images)}），结束")
+                        break
                     continue
                 
                 logger.info(f"[渲染] 从队列获取任务: {ctx.image_name} (队列剩余: {self.render_queue.qsize()})")
@@ -1880,41 +1999,8 @@ class ConcurrentPipeline:
                     logger.error(f"[渲染] ctx.result 为 None！")
                 
                 # 添加到结果列表
-                results.append(ctx)
-                
-                # 渲染完成后立即清理内存（注意：_run_text_rendering 已经清理了 ctx.img_rgb）
-                logger.debug(f"[渲染] 清理内存: {ctx.image_name}")
-                # ctx.img_rgb 已在 _run_text_rendering 中清理
-                if hasattr(ctx, 'img_rgb') and ctx.img_rgb is not None:
-                    del ctx.img_rgb
-                    ctx.img_rgb = None
-                # 保留 ctx.img_alpha 用于dump_image
-                if hasattr(ctx, 'img_colorized') and ctx.img_colorized is not None:
-                    del ctx.img_colorized
-                    ctx.img_colorized = None
-                if hasattr(ctx, 'upscaled') and ctx.upscaled is not None:
-                    del ctx.upscaled
-                    ctx.upscaled = None
-                if hasattr(ctx, 'mask') and ctx.mask is not None:
-                    del ctx.mask
-                    ctx.mask = None
-                if hasattr(ctx, 'img_inpainted') and ctx.img_inpainted is not None:
-                    del ctx.img_inpainted
-                    ctx.img_inpainted = None
-                if hasattr(ctx, 'img_rendered') and ctx.img_rendered is not None:
-                    del ctx.img_rendered
-                    ctx.img_rendered = None
-                # 保留 ctx.result 和 ctx.img_alpha 用于保存
-                
-                # 强制垃圾回收
-                import gc
-                gc.collect()
-                
-                # ✅ 清理base_contexts中的ctx，释放内存
-                if ctx.image_name in self.base_contexts:
-                    del self.base_contexts[ctx.image_name]
-                    logger.debug(f"[渲染] 已清理 {ctx.image_name} 的基础上下文")
-                
+                self._finalize_completed_context(ctx, results)
+
             except Exception as e:
                 logger.error(f"[渲染线程] 错误: {e}")
                 # 标记严重错误，停止所有线程
@@ -1953,16 +2039,36 @@ class ConcurrentPipeline:
         self.detection_ocr_done = False  # 重置标志
         self.failed_images.clear()  # 重置失败图片列表
         self.translation_enqueued_total = 0
-        
+        self.inpaint_worker_stopped = False
+        self.inpaint_stopped_event.clear()
+        self._inpaint_workers_finished = 0
+
+        # Detect T2S mode from first config
+        self._is_t2s_mode = False
+        if configs:
+            first_cfg = configs[0]
+            translator_cfg = getattr(first_cfg, 'translator', None)
+            translator_value = getattr(translator_cfg, 'translator', None) if translator_cfg else None
+            translator_name = str(getattr(translator_value, 'value', translator_value)) if translator_value is not None else ''
+            self._is_t2s_mode = (translator_name == 't2s')
+
+        # T2S mode: render_queue with maxsize=20 to backpressure upstream
+        if self._is_t2s_mode:
+            self.render_queue = asyncio.Queue(maxsize=20)
+
         # 结果列表
         results = []
         
-        # 启动4个工作线程
+        # 启动工作线程
+        inpaint_tasks = [
+            asyncio.create_task(self._inpaint_worker(i))
+            for i in range(self.inpaint_concurrency)
+        ]
         tasks = [
             asyncio.create_task(self._detection_ocr_worker(file_paths, configs)),
             asyncio.create_task(self._translation_worker()),
-            asyncio.create_task(self._inpaint_worker()),
-            asyncio.create_task(self._render_worker(results))
+            asyncio.create_task(self._render_worker(results)),
+            *inpaint_tasks
         ]
         
         # 是否被取消

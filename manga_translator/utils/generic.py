@@ -604,7 +604,6 @@ class Quadrilateral(object):
         [l1a, l1b, l2a, l2b] = [a.astype(np.float32) for a in self.structure]
         v_vec = l1b - l1a
         h_vec = l2b - l2a
-        ratio = np.linalg.norm(v_vec) / np.linalg.norm(h_vec)
 
         src_pts = self.pts.astype(np.int64).copy()
         im_h, im_w = img.shape[:2]
@@ -628,6 +627,22 @@ class Quadrilateral(object):
                 region = np.ones((h, w, 3), dtype=np.uint8) * 255
                 region = cv2.rotate(region, cv2.ROTATE_90_COUNTERCLOCKWISE)
                 return region
+
+        v_norm = np.linalg.norm(v_vec)
+        h_norm = np.linalg.norm(h_vec)
+        if (not np.isfinite(v_norm)) or (not np.isfinite(h_norm)) or v_norm <= 1e-6 or h_norm <= 1e-6:
+            if direction == 'h':
+                h = max(int(textheight), 2)
+                w = max(int(textheight / 8), 2)
+                return np.ones((h, w, 3), dtype=np.uint8) * 255
+            else:
+                w = max(int(textheight), 2)
+                h = max(int(textheight * 8), 2)
+                region = np.ones((h, w, 3), dtype=np.uint8) * 255
+                region = cv2.rotate(region, cv2.ROTATE_90_COUNTERCLOCKWISE)
+                return region
+
+        ratio = v_norm / h_norm
         
         # cv2.warpPerspective could overflow if image size is too large, better crop it here
         img_croped = img[y1: y2, x1: x2]

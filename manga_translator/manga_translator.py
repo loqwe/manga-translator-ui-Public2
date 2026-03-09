@@ -1,4 +1,4 @@
-
+﻿
 import asyncio
 import torch
 import cv2
@@ -209,18 +209,7 @@ class MangaTranslator:
         
         # 过滤列表开关（默认启用）
         self.filter_text_enabled = params.get('filter_text_enabled', True)
-        
-        # T2S memory guard: trigger cleanup when system memory usage reaches threshold.
-        self._t2s_memory_cleanup_threshold = float(params.get('t2s_memory_cleanup_threshold', 90.0))
-        self._t2s_memory_force_cleanup_threshold = float(params.get('t2s_memory_force_cleanup_threshold', 95.0))
-        self._t2s_memory_check_interval = float(params.get('t2s_memory_check_interval', 0.5))
-        self._t2s_memory_cleanup_cooldown = float(params.get('t2s_memory_cleanup_cooldown', 5.0))
-        self._t2s_memory_force_cleanup_cooldown = float(params.get('t2s_memory_force_cleanup_cooldown', 3.0))
-        self._last_t2s_memory_check = 0.0
-        self._last_t2s_memory_cleanup = 0.0
-        self._last_t2s_memory_force_cleanup = 0.0
-        self._t2s_memory_guard_lock = threading.Lock()
-        
+
         # 确保过滤列表文件存在
         try:
             ensure_filter_list_exists()
@@ -236,6 +225,42 @@ class MangaTranslator:
 
     def _is_t2s_translator(self, translator_value: Any) -> bool:
         return self._translator_name(translator_value) == 't2s'
+
+
+    def _prepare_t2s_ocr_configs(self, images_with_configs):
+        adjusted_items = []
+        adjusted_cache = {}
+        adjusted_count = 0
+
+        for item in images_with_configs:
+            if not isinstance(item, tuple) or len(item) < 2:
+                adjusted_items.append(item)
+                continue
+
+            image, config = item
+            adjusted_config = config
+
+            if config and hasattr(config, 'ocr') and hasattr(config, 'translator'):
+                translator_value = getattr(config.translator, 'translator', None)
+                ocr_engine = getattr(getattr(config, 'ocr', None), 'ocr', None)
+                ocr_prob = getattr(getattr(config, 'ocr', None), 'prob', None)
+                ocr_name = getattr(ocr_engine, 'value', ocr_engine)
+
+                if self._is_t2s_translator(translator_value) and ocr_name == '48px' and ocr_prob is None:
+                    cache_key = id(config)
+                    adjusted_config = adjusted_cache.get(cache_key)
+                    if adjusted_config is None:
+                        adjusted_config = config.copy(deep=True)
+                        adjusted_config.ocr.prob = 0.0
+                        adjusted_cache[cache_key] = adjusted_config
+                    adjusted_count += 1
+
+            adjusted_items.append((image, adjusted_config))
+
+        if adjusted_count:
+            logger.info(f"T2S 模式下放宽 48px OCR 过滤阈值: {adjusted_count} 张图片使用 prob=0.0")
+
+        return adjusted_items
 
     def _is_original_translator(self, translator_value: Any) -> bool:
         original_value = getattr(getattr(Translator, 'original', None), 'value', 'original')
@@ -287,6 +312,8 @@ class MangaTranslator:
         
         # 翻译并发数（并发流水线模式下，同时发起的翻译请求数）
         self.translation_concurrency = params.get('translation_concurrency', 1)
+        # 修复并发数（并发流水线模式下，同时运行的修复worker数）
+        self.inpaint_concurrency = params.get('inpaint_concurrency', 1)
         
         
         # batch_concurrent 已在初始化时设置并验证
@@ -1579,79 +1606,32 @@ class MangaTranslator:
             except Exception:
                 pass
 
-    def _get_system_memory_percent(self) -> Optional[float]:
-        """Best-effort read system memory percent."""
-        try:
-            import psutil
-            return float(psutil.virtual_memory().percent)
-        except Exception:
-            return None
+    def _apply_t2s_to_regions(self, text_regions):
+        """Apply T2S (Traditional -> Simplified) conversion to all text regions.
 
-    def _run_t2s_memory_cleanup(self, aggressive: bool = False):
-        """Run T2S memory cleanup. Aggressive mode does extra GC passes."""
-        import gc
-        gc.collect()
-        if aggressive:
-            gc.collect()
-            gc.collect()
-
-        self._cleanup_gpu_memory()
-        try:
-            import ctypes
-            ctypes.windll.kernel32.SetProcessWorkingSetSize(-1, -1, -1)
-        except Exception:
-            pass
-
-    def _maybe_cleanup_t2s_memory(self, force: bool = False, min_level: str = 'normal') -> str:
+        Unified method that handles per-line conversion and line structure preservation.
+        Pure synchronous CPU operation (OpenCC char-level mapping).
         """
-        T2S memory guard with dual thresholds.
-        Returns one of: 'none' | 'normal' | 'force'
-        """
-        now = time.time()
-        with self._t2s_memory_guard_lock:
-            if not force and (now - self._last_t2s_memory_check) < self._t2s_memory_check_interval:
-                return 'none'
-            self._last_t2s_memory_check = now
+        from .translators.t2s import smart_convert
+        for region in text_regions:
+            if region.texts and len(region.texts) > 1:
+                converted_lines = [smart_convert(t) for t in region.texts]
+                original_len = sum(len(t) for t in region.texts)
+                converted_len = sum(len(t) for t in converted_lines)
+                if original_len == converted_len:
+                    # Char count unchanged: join with \n to lock line structure
+                    region.translation = '\n'.join(converted_lines)
+                    region._t2s_preserve_lines = True
+                    logger.info(f'[T2S] 保留行结构: texts={region.texts} -> lines={converted_lines}, 行数={len(converted_lines)}')
+                else:
+                    # Char count changed: fall back to concatenated conversion
+                    region.translation = smart_convert(region.text)
+                    logger.info(f'[T2S] 字数变化({original_len}->{converted_len}), 走标准管线: {region.text[:20]}')
+            else:
+                region.translation = smart_convert(region.text)
+                region._t2s_preserve_lines = True
+                logger.info(f'[T2S] 单行保留: "{region.translation}"')
 
-            system_memory_percent = self._get_system_memory_percent()
-            if system_memory_percent is None:
-                return 'none'
-
-            force_due = (
-                system_memory_percent >= self._t2s_memory_force_cleanup_threshold and
-                (force or (now - self._last_t2s_memory_force_cleanup) >= self._t2s_memory_force_cleanup_cooldown)
-            )
-            normal_due = (
-                system_memory_percent >= self._t2s_memory_cleanup_threshold and
-                (force or (now - self._last_t2s_memory_cleanup) >= self._t2s_memory_cleanup_cooldown)
-            )
-
-            if min_level == 'force':
-                normal_due = False
-
-            if force_due:
-                self._last_t2s_memory_force_cleanup = now
-                self._last_t2s_memory_cleanup = now
-                logger.warning(
-                    f"[T2S][MEMORY] System memory {system_memory_percent:.1f}% >= "
-                    f"{self._t2s_memory_force_cleanup_threshold:.1f}%, triggering force cleanup"
-                )
-                self._run_t2s_memory_cleanup(aggressive=True)
-                logger.info("[T2S][MEMORY] Force cleanup completed")
-                return 'force'
-
-            if normal_due:
-                self._last_t2s_memory_cleanup = now
-                logger.warning(
-                    f"[T2S][MEMORY] System memory {system_memory_percent:.1f}% >= "
-                    f"{self._t2s_memory_cleanup_threshold:.1f}%, triggering regular cleanup"
-                )
-                self._run_t2s_memory_cleanup(aggressive=False)
-                logger.info("[T2S][MEMORY] Regular cleanup completed")
-                return 'normal'
-
-            return 'none'
-    
     def _cleanup_context_memory(self, ctx, keep_result=True):
         """
         清理单个上下文的中间数据（用于特殊模式）
@@ -2525,29 +2505,8 @@ class MangaTranslator:
                 region.translation = region.text
         elif self._is_t2s_translator(config.translator.translator):
             # T2S fast path: direct char-level conversion, skip all pre/post processing
-            from .translators.t2s import smart_convert
             logger.info(f'[繁简转换] 直接转换 {len(ctx.text_regions)} 条文本')
-            for region in ctx.text_regions:
-                # Per-line conversion to preserve original line structure
-                if region.texts and len(region.texts) > 1:
-                    converted_lines = [smart_convert(t) for t in region.texts]
-                    original_len = sum(len(t) for t in region.texts)
-                    converted_len = sum(len(t) for t in converted_lines)
-                    if original_len == converted_len:
-                        # Char count unchanged: join with \n to lock line structure
-                        region.translation = '\n'.join(converted_lines)
-                        region._t2s_preserve_lines = True
-                        logger.info(f'[T2S] 保留行结构: texts={region.texts} -> lines={converted_lines}, 行数={len(converted_lines)}')
-                    else:
-                        # Char count changed: fall back to standard pipeline
-                        region.translation = smart_convert(region.text)
-                        logger.info(f'[T2S] 字数变化({original_len}->{converted_len}), 走标准管线: {region.text[:20]}')
-                else:
-                    region.translation = smart_convert(region.text)
-                    # Single line: always preserve
-                    region._t2s_preserve_lines = True
-                    logger.info(f'[T2S] 单行保留: "{region.translation}"')
-                self._maybe_cleanup_t2s_memory()
+            self._apply_t2s_to_regions(ctx.text_regions)
         else: # Actual network translation
             # --- BEGIN PRE-TRANSLATION DE-DUPLICATION ---
             # Per user request, clean up duplicate lines within regions before sending to translator.
@@ -3176,12 +3135,15 @@ class MangaTranslator:
         
         # === 步骤1: 检查是否需要使用高质量翻译模式 ===
         is_hq_translator = False
+        is_t2s_translator = False
+        first_config = None
         if images_with_configs:
             first_config = images_with_configs[0][1]
             if first_config and hasattr(first_config.translator, 'translator'):
                 from manga_translator.config import Translator
                 translator_type = first_config.translator.translator
                 is_hq_translator = translator_type in [Translator.openai_hq, Translator.gemini_hq]
+                is_t2s_translator = self._is_t2s_translator(translator_type)
                 is_import_export_mode = self.load_text or self.template
 
                 # 如果是高质量翻译且未启用并发模式，使用专用的高质量翻译流程
@@ -3200,6 +3162,9 @@ class MangaTranslator:
         # === 步骤2: 检查是否需要使用顺序处理模式 ===
         # 注意：不要在这里调用 translate()，因为 translate() 会调用 translate_batch()，造成无限循环
         # 相反，我们直接使用批量处理逻辑，但 batch_size 设置为 1
+        if is_t2s_translator and images_with_configs:
+            images_with_configs = self._prepare_t2s_ocr_configs(images_with_configs)
+
         is_template_save_mode = self.template and self.save_text
         if is_template_save_mode:
             logger.info("Template+SaveText mode detected. Forcing sequential processing to save files one by one.")
@@ -3252,13 +3217,21 @@ class MangaTranslator:
         if self.batch_concurrent and not has_incompatible_mode:
             mode_desc = "高质量翻译" if is_hq_translator else "标准翻译"
             logger.info(f'🚀 启用并发流水线模式 ({mode_desc}): {len(images_with_configs)} 张图片, 翻译批量大小: {batch_size}')
-            from .concurrent_pipeline import ConcurrentPipeline
+            if is_t2s_translator:
+                from .t2s_pipeline import T2SPipeline
+                pipeline_cls = T2SPipeline
+                logger.info('启用 T2S 专属流水线模式')
+            else:
+                from .concurrent_pipeline import ConcurrentPipeline
+                pipeline_cls = ConcurrentPipeline
             
             # 保存save_info供并发流水线使用
             self._current_save_info = save_info
             
             # 从配置中获取翻译并发参数
             translation_concurrency = getattr(self, 'translation_concurrency', 1)
+            # 从配置中获取修复并发参数
+            inpaint_concurrency = getattr(self, 'inpaint_concurrency', 1)
             
             # 从配置与环境变量获取RPM限制（每分钟最大请求数）
             preset_rpm = 0
@@ -3286,10 +3259,11 @@ class MangaTranslator:
                 except Exception:
                     pass
             
-            pipeline = ConcurrentPipeline(
-                self, 
+            pipeline = pipeline_cls(
+                self,
                 batch_size,
                 translation_concurrency=translation_concurrency,
+                inpaint_concurrency=inpaint_concurrency,
                 preset_rpm=preset_rpm
             )
             
@@ -4402,25 +4376,10 @@ class MangaTranslator:
                 # T2S per-line fixup: _batch_translate_texts returns concatenated text,
                 # reconstruct \n-separated translation to preserve original line structure
                 if sample_config and self._is_t2s_translator(sample_config.translator.translator):
-                    from .translators.t2s import smart_convert
                     for ctx, config in batch:
                         if not ctx.text_regions:
                             continue
-                        for region in ctx.text_regions:
-                            if region.texts and len(region.texts) > 1:
-                                converted_lines = [smart_convert(t) for t in region.texts]
-                                original_len = sum(len(t) for t in region.texts)
-                                converted_len = sum(len(t) for t in converted_lines)
-                                if original_len == converted_len:
-                                    region.translation = '\n'.join(converted_lines)
-                                    region._t2s_preserve_lines = True
-                                    logger.info(f'[T2S] 保留行结构: texts={region.texts} -> lines={converted_lines}, 行数={len(converted_lines)}')
-                                else:
-                                    logger.info(f'[T2S] 字数变化({original_len}->{converted_len}), 走标准管线')
-                            else:
-                                region._t2s_preserve_lines = True
-                                logger.info(f'[T2S] 单行保留: "{region.translation}"')
-                            self._maybe_cleanup_t2s_memory()
+                        self._apply_t2s_to_regions(ctx.text_regions)
 
                 # 应用后处理逻辑（括号修正、过滤等）
                 for ctx, config in batch:
@@ -4658,18 +4617,7 @@ class MangaTranslator:
                 # T2S per-line fixup: _batch_translate_texts returns concatenated text,
                 # reconstruct \n-separated translation to preserve original line structure
                 if self._is_t2s_translator(config.translator.translator):
-                    from .translators.t2s import smart_convert
-                    for region in ctx.text_regions:
-                        if region.texts and len(region.texts) > 1:
-                            converted_lines = [smart_convert(t) for t in region.texts]
-                            original_len = sum(len(t) for t in region.texts)
-                            converted_len = sum(len(t) for t in converted_lines)
-                            if original_len == converted_len:
-                                region.translation = '\n'.join(converted_lines)
-                                region._t2s_preserve_lines = True
-                        else:
-                            region._t2s_preserve_lines = True
-                        self._maybe_cleanup_t2s_memory()
+                    self._apply_t2s_to_regions(ctx.text_regions)
 
                 # 应用后处理逻辑（括号修正、过滤等）
                 if ctx.text_regions:
@@ -4851,7 +4799,6 @@ class MangaTranslator:
             converted_texts = []
             for text in texts:
                 converted_texts.append(smart_convert(text))
-                self._maybe_cleanup_t2s_memory()
             return converted_texts
 
         # If this is an OpenAI/Gemini translator
@@ -6280,3 +6227,4 @@ class MangaTranslator:
 
         logger.info(f"High quality translation completed: processed {len(results)} images")
         return results
+

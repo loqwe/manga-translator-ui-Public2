@@ -144,8 +144,8 @@ class Model48pxOCR(OfflineOCR):
                     height, width = img_data.shape[:2]
                     if max(height, width) > max_ocr_size:
                         scale = max_ocr_size / max(height, width)
-                        new_width = int(width * scale)
-                        new_height = int(height * scale)
+                        new_width = max(1, int(width * scale))
+                        new_height = max(1, int(height * scale))
                         img_data = cv2.resize(img_data, (new_width, new_height), interpolation=cv2.INTER_AREA)
                     
                     # 使用高压缩保存

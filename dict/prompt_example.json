@@ -667,13 +667,34 @@
           {
             "original": "나희",
             "translation": "娜熙"
+          },
+          {
+            "original": "덕팔",
+            "translation": "德八"
+          },
+          {
+            "original": "유리",
+            "translation": "侑莉"
+          },
+          {
+            "original": "오나희",
+            "translation": "吴娜熙"
           }
         ],
-        "Location": [],
+        "Location": [
+          {
+            "original": "드림마트",
+            "translation": "梦想超市"
+          }
+        ],
         "Org": [
           {
             "original": "자영식품",
             "translation": "自营食品"
+          },
+          {
+            "original": "달자 식품",
+            "translation": "达子食品"
           }
         ],
         "Item": [],
@@ -1525,10 +1546,22 @@
       }
     },
     "unassigned": {
-      "Person": [],
+      "Person": [
+        {
+          "original": "ユニカ",
+          "translation": "优妮卡",
+          "raw_work_name": "QQ"
+        }
+      ],
       "Location": [],
       "Org": [],
-      "Item": [],
+      "Item": [
+        {
+          "original": "ノヴァ",
+          "translation": "诺瓦",
+          "raw_work_name": "QQ"
+        }
+      ],
       "Skill": [],
       "Creature": []
     },
@@ -2419,6 +2452,14 @@
         "original": "인하",
         "translation": "仁荷",
         "lang": "auto"
+      },
+      {
+        "original": "덕팔",
+        "translation": "德八"
+      },
+      {
+        "original": "오나희",
+        "translation": "吴娜熙"
       }
     ],
     "Location": [
@@ -2555,6 +2596,10 @@
         "original": "부산",
         "translation": "釜山",
         "lang": "auto"
+      },
+      {
+        "original": "드림마트",
+        "translation": "梦想超市"
       }
     ],
     "Org": [
@@ -2648,6 +2693,10 @@
       {
         "original": "도서출판 물들",
         "translation": "图书出版 Mul-deul"
+      },
+      {
+        "original": "달자 식품",
+        "translation": "达子食品"
       }
     ],
     "Item": [

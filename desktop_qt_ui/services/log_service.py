@@ -60,11 +60,14 @@ class LogService:
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(logging.INFO)
         
-        # ✅ 强制每次日志后刷新输出
+        # Flush after each log entry; silently ignore broken pipe on shutdown
         class FlushingStreamHandler(logging.StreamHandler):
             def emit(self, record):
-                super().emit(record)
-                self.flush()
+                try:
+                    super().emit(record)
+                    self.flush()
+                except OSError:
+                    pass
         
         console_handler = FlushingStreamHandler(sys.stdout)
         console_handler.setLevel(logging.INFO)
