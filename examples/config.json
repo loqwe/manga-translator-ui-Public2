@@ -12,10 +12,10 @@
       "interval_ms": 500,
       "log_expanded": false
     },
-    "window_x": 133,
-    "window_y": 236,
+    "window_x": 509,
+    "window_y": 482,
     "window_width": 1300,
-    "window_height": 876,
+    "window_height": 626,
     "window_maximized": false
   },
   "enable_watermark_filter": true,
@@ -39,7 +39,7 @@
     "secondary_ocr": "paddleocr",
     "min_text_length": 0,
     "ignore_bubble": 0.0,
-    "use_model_bubble_filter": false,
+    "use_model_bubble_filter": true,
     "model_bubble_overlap_threshold": 0.1,
     "use_model_bubble_repair_intersection": false,
     "limit_mask_dilation_to_bubble_mask": true,

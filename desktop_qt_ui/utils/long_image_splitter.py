@@ -183,9 +183,11 @@ class LocalSplitter:
             
             self.logger.info("加载 YOLO 气泡检测模型...")
             self._yolo_detector = YOLOOBBDetector()
-            await self._yolo_detector._load('cpu')  # 使用 CPU 模式，更稳定
+            device = YOLOOBBDetector.get_preferred_device()
+            await self._yolo_detector.load(device)
             self._yolo_loaded = True
-            self.logger.info("YOLO 气泡检测模型加载完成")
+            active_device = 'cuda' if getattr(self._yolo_detector, 'using_cuda', False) else getattr(self._yolo_detector, 'device', device)
+            self.logger.info(f"YOLO bubble detector ready, device: {active_device}")
             
         except ImportError as e:
             self.logger.warning(f"无法导入 YOLO 检测器: {e}")

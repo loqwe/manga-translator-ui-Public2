@@ -6,6 +6,7 @@
 智能聚合、名称映射、章节详情、多选等功能
 """
 
+import asyncio
 import os
 import sys
 import logging
@@ -33,9 +34,10 @@ except ImportError:
     NameReplacer = None
 
 try:
-    from utils.long_image_stitcher import LongImageStitcher
+    from utils.long_image_stitcher import LongImageStitcher, StitchResult
 except ImportError:
     LongImageStitcher = None
+    StitchResult = None
 
 try:
     from utils.long_image_splitter import LocalSplitter, split_image_sync, SplitResult
@@ -243,241 +245,112 @@ class ScanWorker(QObject):
 
 
 class StitchWorker(QObject):
-    """后台拼接工作线程"""
-    finished = pyqtSignal(list)  # 拼接完成，发送结果文件列表
-    progress = pyqtSignal(str)   # 进度日志
-    chapter_progress = pyqtSignal(int, int)  # 当前章节进度 (current, total)
-    error = pyqtSignal(str)      # 错误信息
-    
-    def __init__(self, chapters: List[str], max_height: int, margin: int):
+    """Background stitch worker using LongImageStitcher with YOLO boundary detection."""
+    finished = pyqtSignal(list)  # list of output file paths
+    progress = pyqtSignal(str)
+    chapter_progress = pyqtSignal(int, int)
+    error = pyqtSignal(str)
+
+    def __init__(
+        self,
+        chapters: List[str],
+        max_height: int,
+        margin: int,
+        trigger_ratio: float = 0.85,
+        naming_pattern: str = "{index}_{source}",
+        index_digits: int = 3,
+        index_start: int = 1,
+        reset_index_per_chapter: bool = True,
+    ):
         super().__init__()
         self.chapters = chapters
         self.max_height = max_height
         self.margin = margin
+        self.trigger_ratio = trigger_ratio
+        self.naming_pattern = naming_pattern
+        self.index_digits = index_digits
+        self.index_start = index_start
+        self.reset_index_per_chapter = reset_index_per_chapter
         self._is_running = True
-    
+
     def stop(self):
-        """请求停止拼接"""
+        """Request stop."""
         self._is_running = False
-    
+
     def run(self):
-        """执行拼接（在后台线程中运行）"""
-        from PIL import Image
-        import re
-        
+        """Execute stitching in background thread with its own event loop."""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self._run_async())
+        finally:
+            loop.close()
+
+    async def _run_async(self):
+        """Async stitch pipeline."""
         all_result_files = []
         total_chapters = len(self.chapters)
-        
+
         try:
-            self.progress.emit(f"[长图拼接] 启用智能长图拼接功能")
-            self.progress.emit(f"[长图拼接] 配置: 最大高度={self.max_height}px, 边界检测={self.margin}px")
-            self.progress.emit(f"[长图拼接] 检测到 {total_chapters} 个章节，分别处理避免跨章节拼接")
-            
+            self.progress.emit(f"[长图拼接] 启用智能长图拼接功能 (YOLO 模式)")
+            self.progress.emit(
+                f"[长图拼接] 配置: 最大高度={self.max_height}px, "
+                f"触发阈值={int(self.max_height * self.trigger_ratio)}px, "
+                f"间距={self.margin}px"
+            )
+            self.progress.emit(
+                f"[长图拼接] 命名: 模式={self.naming_pattern}, "
+                f"位数={self.index_digits}, 起始序号={self.index_start}"
+            )
+            self.progress.emit(
+                f"[长图拼接] 检测到 {total_chapters} 个章节，分别处理"
+            )
+
+            # Create stitcher instance
+            stitcher = LongImageStitcher(
+                max_height=self.max_height,
+                trigger_ratio=self.trigger_ratio,
+                margin=self.margin,
+                naming_pattern=self.naming_pattern,
+                index_digits=self.index_digits,
+                index_start=self.index_start,
+                reset_index_per_chapter=self.reset_index_per_chapter,
+            )
+
             for idx, chapter_path in enumerate(self.chapters):
                 if not self._is_running:
                     self.progress.emit(f"[长图拼接] ⚠️ 拼接已取消")
                     break
-                
+
                 chapter_name = os.path.basename(chapter_path)
                 self.chapter_progress.emit(idx + 1, total_chapters)
-                
+
                 try:
-                    result_files = self._stitch_chapter_images(chapter_path)
-                    all_result_files.extend(result_files)
-                    if result_files:
-                        self.progress.emit(f"[长图拼接] ✓ 完成: {chapter_name} 生成 {len(result_files)} 张拼接图")
+                    result = await stitcher.stitch_chapter(
+                        chapter_path,
+                        delete_originals=True,
+                        progress_callback=lambda msg: self.progress.emit(msg),
+                    )
+                    all_result_files.extend(result.output_files)
+                    if result.output_files:
+                        self.progress.emit(
+                            f"[长图拼接] ✓ 完成: {chapter_name} "
+                            f"{result.source_count} 张 → {result.group_count} 张拼接图"
+                        )
                 except Exception as e:
                     self.progress.emit(f"[长图拼接] ⚠️ 失败: {chapter_name} - {e}")
-            
+
             if self._is_running:
-                self.progress.emit(f"[长图拼接] ✓ 全部完成，共生成 {len(all_result_files)} 张拼接图")
-            
+                self.progress.emit(
+                    f"[长图拼接] ✓ 全部完成，共生成 {len(all_result_files)} 张拼接图"
+                )
+
             self.finished.emit(all_result_files)
-            
+
         except Exception as e:
-            self.error.emit(f"拼接失败: {e}")
+            import traceback
+            self.error.emit(f"拼接失败: {e}\n{traceback.format_exc()}")
             self.finished.emit([])
-    
-    def _stitch_chapter_images(self, chapter_path: str) -> List[str]:
-        """拼接章节内的图片（优化版：使用PIL处理，解决中文路径问题）"""
-        from PIL import Image
-        import numpy as np
-        import re
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        
-        image_extensions = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'}
-        image_files = []
-        
-        # 收集所有图片文件
-        for f in sorted(os.listdir(chapter_path)):
-            if not self._is_running:
-                return []
-            ext = os.path.splitext(f)[1].lower()
-            if ext not in image_extensions:
-                continue
-            if f.lower().startswith('seg'):
-                return []  # 已拼接过
-            image_files.append(os.path.join(chapter_path, f))
-        
-        if len(image_files) <= 1:
-            return []
-        
-        # 提取图片序号
-        def extract_number(filepath: str) -> int:
-            match = re.search(r'(\d+)', os.path.splitext(os.path.basename(filepath))[0])
-            return int(match.group(1)) if match else 0
-        
-        # === 第一阶段：快速扫描尺寸（使用PIL，支持中文路径） ===
-        def get_image_size(path: str) -> dict:
-            try:
-                with Image.open(path) as img:
-                    w, h = img.size
-                    return {'path': path, 'width': w, 'height': h, 
-                            'number': extract_number(path), 'filename': os.path.basename(path)}
-            except Exception as e:
-                self.progress.emit(f"[长图拼接] ⚠️ 无法读取图片: {os.path.basename(path)} - {e}")
-                pass
-            return None
-        
-        # 并行扫描尺寸
-        image_info = []
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            futures = {executor.submit(get_image_size, p): p for p in image_files}
-            for future in as_completed(futures):
-                if not self._is_running:
-                    return []
-                result = future.result()
-                if result:
-                    image_info.append(result)
-        
-        # 按文件名排序
-        image_info.sort(key=lambda x: x['number'])
-        
-        if len(image_info) <= 1:
-            return []
-        
-        # === 第二阶段：根据尺寸计算分组 ===
-        groups = []
-        current_group = []
-        current_height = 0
-        
-        for info in image_info:
-            if current_height + info['height'] > self.max_height and current_group:
-                groups.append(current_group)
-                current_group = [info]
-                current_height = info['height']
-            else:
-                current_group.append(info)
-                current_height += info['height']
-        if current_group:
-            groups.append(current_group)
-        
-        # === 第三阶段：并行拼接各组 ===
-        def stitch_group(args) -> tuple:
-            batch_index, group = args
-            try:
-                # 读取图片
-                imgs = []
-                for info in group:
-                    try:
-                        with Image.open(info['path']) as img:
-                            imgs.append((img.copy(), info))
-                    except Exception as e:
-                        self.progress.emit(f"[长图拼接] ⚠️ 无法读取图片: {info['filename']} - {e}")
-                
-                if not imgs:
-                    return None, []
-                
-                # 计算画布尺寸
-                max_width = max(img.width for img, _ in imgs)
-                total_height = sum(img.height for img, _ in imgs) + self.margin * (len(imgs) - 1)
-                
-                # 创建白色画布并拼接
-                canvas = Image.new('RGB', (max_width, total_height), (255, 255, 255))
-                y_offset = 0
-                for img, info in imgs:
-                    # 居中放置
-                    x_offset = (max_width - img.width) // 2
-                    canvas.paste(img.convert('RGB'), (x_offset, y_offset))
-                    y_offset += img.height + self.margin
-                
-                # 生成文件名
-                start_num = group[0]['number']
-                end_num = group[-1]['number']
-                filename = f"seg{batch_index:02d}_img{start_num:03d}-{end_num:03d}_{len(group)}p.jpg"
-                result_path = os.path.join(chapter_path, filename)
-                
-                # 保存为JPEG（比PNG快很多）
-                canvas.save(result_path, 'JPEG', quality=95, optimize=True)
-                
-                return result_path, [info['path'] for info in group]
-            except Exception as e:
-                self.progress.emit(f"[长图拼接] ⚠️ 拼接失败: {e}")
-                return None, []
-        
-        result_files = []
-        files_to_delete = []
-        
-        # 并行拼接
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            futures = [executor.submit(stitch_group, (i+1, g)) for i, g in enumerate(groups)]
-            for future in as_completed(futures):
-                if not self._is_running:
-                    break
-                result_path, paths = future.result()
-                if result_path:
-                    result_files.append(result_path)
-                    files_to_delete.extend(paths)
-        
-        # 删除原图
-        for path in files_to_delete:
-            try:
-                os.remove(path)
-            except Exception:
-                pass
-        
-        return result_files
-    
-    def _save_stitched_image(self, chapter_path: str, batch: List[dict], batch_index: int) -> Optional[str]:
-        """保存拼接后的图片"""
-        from PIL import Image
-        
-        if not batch:
-            return None
-        
-        try:
-            # 计算总高度和最大宽度
-            total_height = sum(item['image'].height for item in batch) + self.margin * (len(batch) - 1)
-            max_width = max(item['image'].width for item in batch)
-            
-            # 创建新图片
-            stitched = Image.new('RGB', (max_width, total_height), (255, 255, 255))
-            
-            # 拼接
-            y_offset = 0
-            for item in batch:
-                img = item['image']
-                x_offset = (max_width - img.width) // 2
-                stitched.paste(img.convert('RGB'), (x_offset, y_offset))
-                y_offset += img.height + self.margin
-            
-            # 生成文件名
-            start_num = batch[0]['number']
-            end_num = batch[-1]['number']
-            count = len(batch)
-            
-            filename = f"seg{batch_index:02d}_img{start_num:03d}-{end_num:03d}_{count}p.png"
-            result_path = os.path.join(chapter_path, filename)
-            
-            # 保存为PNG格式
-            stitched.save(result_path, 'PNG', optimize=True)
-            stitched.close()
-            
-            return result_path
-            
-        except Exception as e:
-            self.progress.emit(f"[长图拼接] ⚠️ 保存失败: {e}")
-            return None
 
 
 class SplitWorker(QObject):
@@ -1191,9 +1064,47 @@ class AdvancedFolderDialog(QDialog):
         self.stitch_margin_spin = QSpinBox()
         self.stitch_margin_spin.setRange(0, 500)
         self.stitch_margin_spin.setSingleStep(10)
-        self.stitch_margin_spin.setValue(settings.value("stitch_margin", 100, type=int))
+        saved_stitch_margin = settings.value("stitch_margin", 0, type=int)
+        seamless_default_applied = settings.value("stitch_margin_seamless_default_applied", 0, type=int)
+        # Reset the historical stitched gap once so seamless stitching becomes the new default.
+        if seamless_default_applied == 0:
+            saved_stitch_margin = 0
+            settings.setValue("stitch_margin", 0)
+            settings.setValue("stitch_margin_seamless_default_applied", 1)
+        self.stitch_margin_spin.setValue(saved_stitch_margin)
         self.stitch_margin_spin.setVisible(False)
-        
+
+        # Trigger ratio as percentage (0-100), default 85 => 0.85
+        self.stitch_trigger_ratio_spin = QSpinBox()
+        self.stitch_trigger_ratio_spin.setRange(50, 100)
+        self.stitch_trigger_ratio_spin.setSingleStep(5)
+        self.stitch_trigger_ratio_spin.setValue(settings.value("stitch_trigger_ratio", 85, type=int))
+        self.stitch_trigger_ratio_spin.setVisible(False)
+
+        self.stitch_naming_combo = QComboBox()
+        self.stitch_naming_combo.addItems(["序号_源文件名", "序号", "源文件名_序号", "序号_宽x高"])
+        saved_naming = settings.value("stitch_naming", "序号_源文件名", type=str)
+        idx = self.stitch_naming_combo.findText(saved_naming)
+        if idx >= 0:
+            self.stitch_naming_combo.setCurrentIndex(idx)
+        self.stitch_naming_combo.setVisible(False)
+
+        self.stitch_index_digits_spin = QSpinBox()
+        self.stitch_index_digits_spin.setRange(1, 6)
+        self.stitch_index_digits_spin.setSingleStep(1)
+        self.stitch_index_digits_spin.setValue(settings.value("stitch_index_digits", 3, type=int))
+        self.stitch_index_digits_spin.setVisible(False)
+
+        self.stitch_index_start_spin = QSpinBox()
+        self.stitch_index_start_spin.setRange(0, 9999)
+        self.stitch_index_start_spin.setSingleStep(1)
+        self.stitch_index_start_spin.setValue(settings.value("stitch_index_start", 1, type=int))
+        self.stitch_index_start_spin.setVisible(False)
+
+        self.stitch_reset_index_per_chapter_cb = QCheckBox("序号按章节重置")
+        self.stitch_reset_index_per_chapter_cb.setChecked(settings.value("stitch_reset_index_per_chapter", True, type=bool))
+        self.stitch_reset_index_per_chapter_cb.setVisible(False)
+
         # 启用长图拆分 + 设置按钮（同一行）
         split_row = QHBoxLayout()
         split_row.setSpacing(4)
@@ -3366,7 +3277,12 @@ class AdvancedFolderDialog(QDialog):
         settings.setValue("stitch_enabled", self.stitch_enabled_cb.isChecked())
         settings.setValue("stitch_max_height", self.stitch_max_height_spin.value())
         settings.setValue("stitch_margin", self.stitch_margin_spin.value())
-        
+        settings.setValue("stitch_trigger_ratio", self.stitch_trigger_ratio_spin.value())
+        settings.setValue("stitch_naming", self.stitch_naming_combo.currentText())
+        settings.setValue("stitch_index_digits", self.stitch_index_digits_spin.value())
+        settings.setValue("stitch_index_start", self.stitch_index_start_spin.value())
+        settings.setValue("stitch_reset_index_per_chapter", self.stitch_reset_index_per_chapter_cb.isChecked())
+
         # 刷新已选章节列表显示
         selected_chapters = self.get_selected_chapters()
         self._update_selected_chapters_list(selected_chapters)
@@ -3380,12 +3296,12 @@ class AdvancedFolderDialog(QDialog):
         """显示长图拼接参数设置弹窗"""
         dialog = QDialog(self)
         dialog.setWindowTitle("长图拼接设置")
-        dialog.setFixedSize(250, 120)
-        
+        dialog.setFixedWidth(300)
+
         layout = QFormLayout(dialog)
         layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
-        
+        layout.setSpacing(10)
+
         # 最大拼接高度
         height_spin = QSpinBox()
         height_spin.setRange(1000, 50000)
@@ -3393,35 +3309,85 @@ class AdvancedFolderDialog(QDialog):
         height_spin.setValue(self.stitch_max_height_spin.value())
         height_spin.setSuffix(" px")
         layout.addRow("最大拼接高度:", height_spin)
-        
-        # 气泡边距
+
+        # 触发阈值 (百分比)
+        trigger_spin = QSpinBox()
+        trigger_spin.setRange(50, 100)
+        trigger_spin.setSingleStep(5)
+        trigger_spin.setValue(self.stitch_trigger_ratio_spin.value())
+        trigger_spin.setSuffix(" %")
+        trigger_spin.setToolTip("累计高度达到最大高度的此百分比时，开始检测边界安全性")
+        layout.addRow("触发阈值:", trigger_spin)
+
+        # 拼接间距
         margin_spin = QSpinBox()
         margin_spin.setRange(0, 500)
         margin_spin.setSingleStep(10)
         margin_spin.setValue(self.stitch_margin_spin.value())
         margin_spin.setSuffix(" px")
-        layout.addRow("气泡边距:", margin_spin)
-        
+        layout.addRow("拼接间距:", margin_spin)
+
+        # 分隔线
+        from PyQt6.QtWidgets import QFrame
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setFrameShadow(QFrame.Shadow.Sunken)
+        layout.addRow(sep)
+
+        # 命名模式
+        from desktop_qt_ui.utils.long_image_splitter import NAMING_PRESETS
+        naming_combo = QComboBox()
+        naming_combo.addItems(list(NAMING_PRESETS.keys()))
+        naming_combo.setCurrentText(self.stitch_naming_combo.currentText())
+        layout.addRow("命名模式:", naming_combo)
+
+        # 序号位数
+        digits_spin = QSpinBox()
+        digits_spin.setRange(1, 6)
+        digits_spin.setSingleStep(1)
+        digits_spin.setValue(self.stitch_index_digits_spin.value())
+        layout.addRow("序号位数:", digits_spin)
+
+        # 起始序号
+        start_spin = QSpinBox()
+        start_spin.setRange(0, 9999)
+        start_spin.setSingleStep(1)
+        start_spin.setValue(self.stitch_index_start_spin.value())
+        layout.addRow("起始序号:", start_spin)
+
+        # 序号按章节重置
+        reset_index_cb = QCheckBox()
+        reset_index_cb.setChecked(self.stitch_reset_index_per_chapter_cb.isChecked())
+        reset_index_cb.setToolTip("批量拼接多个章节时，每个章节的序号从起始序号重新开始")
+        layout.addRow("序号按章节重置:", reset_index_cb)
+
         # 按钮
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-        
+
         ok_btn = QPushButton("确定")
         ok_btn.clicked.connect(dialog.accept)
         btn_layout.addWidget(ok_btn)
-        
+
         cancel_btn = QPushButton("取消")
         cancel_btn.clicked.connect(dialog.reject)
         btn_layout.addWidget(cancel_btn)
-        
+
         layout.addRow(btn_layout)
-        
+
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            # 保存设置
             self.stitch_max_height_spin.setValue(height_spin.value())
+            self.stitch_trigger_ratio_spin.setValue(trigger_spin.value())
             self.stitch_margin_spin.setValue(margin_spin.value())
+            self.stitch_naming_combo.setCurrentText(naming_combo.currentText())
+            self.stitch_index_digits_spin.setValue(digits_spin.value())
+            self.stitch_index_start_spin.setValue(start_spin.value())
+            self.stitch_reset_index_per_chapter_cb.setChecked(reset_index_cb.isChecked())
             self._save_stitch_settings()
-            self._log(f"✓ 长图拼接参数已更新: 高度={height_spin.value()}px, 边距={margin_spin.value()}px")
+            self._log(
+                f"✓ 长图拼接参数已更新: 高度={height_spin.value()}px, "
+                f"阈值={trigger_spin.value()}%, 间距={margin_spin.value()}px"
+            )
     
     def _on_ok_clicked(self):
         """确定按钮点击：如启用拼接则先拼接再导入翻译器队列"""
@@ -3471,7 +3437,7 @@ class AdvancedFolderDialog(QDialog):
     
     def _start_stitch_async(self, chapters: List[str], accept_after: bool = False):
         """启动异步拼接任务
-        
+
         Args:
             chapters: 要拼接的章节路径列表
             accept_after: 拼接完成后是否自动接受对话框
@@ -3479,14 +3445,30 @@ class AdvancedFolderDialog(QDialog):
         if self._is_stitching:
             self._log("⚠️ 拼接正在进行中，请稍候...")
             return
-        
+
         self._is_stitching = True
         self._stitch_accept_after = accept_after
-        
+
+        # 清空上一次的撤回数据，创建备份
+        self._clear_undo_data()
+        self._pending_undo_data = {}
+        self._pending_chapters = chapters[:]
+        self._backup_chapters_for_undo(chapters, "stitch")
+
         # 获取拼接参数
         max_height = self.stitch_max_height_spin.value()
         margin = self.stitch_margin_spin.value()
-        
+        trigger_ratio = self.stitch_trigger_ratio_spin.value() / 100.0
+
+        # 获取命名模式
+        from desktop_qt_ui.utils.long_image_splitter import NAMING_PRESETS
+        naming_key = self.stitch_naming_combo.currentText()
+        naming_pattern = NAMING_PRESETS.get(naming_key, "{index}_{source}")
+
+        index_digits = self.stitch_index_digits_spin.value()
+        index_start = self.stitch_index_start_spin.value()
+        reset_index_per_chapter = self.stitch_reset_index_per_chapter_cb.isChecked()
+
         # 显示进度条，禁用按钮
         self.stitch_button.setEnabled(False)
         self.stitch_button.setText("拼接中...")
@@ -3496,12 +3478,19 @@ class AdvancedFolderDialog(QDialog):
         self.stitch_progress.setVisible(True)
         self.stitch_progress_label.setText(f"拼接进度: 0/{len(chapters)}")
         self.stitch_progress_label.setVisible(True)
-        
+
         # 创建后台线程和工作器
         self._stitch_thread = QThread()
-        self._stitch_worker = StitchWorker(chapters, max_height, margin)
+        self._stitch_worker = StitchWorker(
+            chapters, max_height, margin,
+            trigger_ratio=trigger_ratio,
+            naming_pattern=naming_pattern,
+            index_digits=index_digits,
+            index_start=index_start,
+            reset_index_per_chapter=reset_index_per_chapter,
+        )
         self._stitch_worker.moveToThread(self._stitch_thread)
-        
+
         # 连接信号
         self._stitch_thread.started.connect(self._stitch_worker.run)
         self._stitch_worker.finished.connect(self._on_stitch_finished)
@@ -3511,7 +3500,7 @@ class AdvancedFolderDialog(QDialog):
         self._stitch_worker.finished.connect(self._stitch_thread.quit)
         self._stitch_worker.finished.connect(self._stitch_worker.deleteLater)
         self._stitch_thread.finished.connect(self._stitch_thread.deleteLater)
-        
+
         # 启动拼接
         self._stitch_thread.start()
     
@@ -3523,18 +3512,22 @@ class AdvancedFolderDialog(QDialog):
     def _on_stitch_finished(self, result_files: list):
         """拼接完成回调"""
         self._is_stitching = False
-        
+
+        # 记录生成的文件用于撤回
+        if result_files and hasattr(self, '_pending_undo_data'):
+            self._finalize_undo_data(result_files, "stitch")
+
         # 恢复UI状态
         self.stitch_button.setEnabled(True)
         self.stitch_button.setText("拼接")
         self.ok_button.setEnabled(True)
         self.stitch_progress.setVisible(False)
         self.stitch_progress_label.setVisible(False)
-        
+
         # 刷新已选章节列表显示
         selected_chapters = self.get_selected_chapters()
         self._update_selected_chapters_list(selected_chapters)
-        
+
         # 如果需要在拼接完成后接受对话框
         if self._stitch_accept_after:
             self._log(f"[长图拼接] ✓ 全部完成，导入翻译器队列")
@@ -3562,223 +3555,9 @@ class AdvancedFolderDialog(QDialog):
                 self._stitch_thread.quit()
                 self._stitch_thread.wait(1000)  # 最多等待1秒
             self._is_stitching = False
-    
-    def _stitch_chapter_images(self, chapter_path: str, max_height: int, margin: int) -> List[str]:
-        """拼接章节内的图片
-        
-        改进说明：
-        1. 输出文件名格式：seg{batch:02d}_img{start:03d}-{end:03d}_{count}p.png
-        2. 当文件名以seg开头时跳过拼接（表示已经是拼接后的文件）
-        3. 当文件不满足拼接条件时（只有1张图或已是seg文件）不拼接
-        4. 只有在拼接成功后才删除原图，防止文件被清零
-        """
-        from PIL import Image
-        import re
-        
-        image_extensions = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'}
-        image_files = []
-        seg_files_exist = False
-        
-        # 收集所有图片文件
-        for f in sorted(os.listdir(chapter_path)):
-            ext = os.path.splitext(f)[1].lower()
-            if ext not in image_extensions:
-                continue
-            
-            # 检查是否是seg开头的文件（已经是拼接后的文件）
-            if f.lower().startswith('seg'):
-                seg_files_exist = True
-                self._log(f"[长图拼接] ⚠️ 检测到已拼接文件: {f}，跳过此章节")
-                break
-            
-            image_files.append(os.path.join(chapter_path, f))
-        
-        # 如果存在seg文件，说明已经拼接过，跳过
-        if seg_files_exist:
-            self._log(f"[长图拼接] ⚠️ 章节已拼接过，跳过")
-            return []
-        
-        # 如果没有图片，返回空
-        if not image_files:
-            self._log(f"[长图拼接] ⚠️ 未找到图片文件，跳过")
-            return []
-        
-        # 如果只有1张图片，不需要拼接
-        if len(image_files) == 1:
-            self._log(f"[长图拼接] ⚠️ 只有1张图片，不满足拼接条件，跳过")
-            return []
-        
-        self._log(f"[长图拼接] 开始处理 {len(image_files)} 张图片")
-        
-        # 提取原始文件的序号信息
-        def extract_image_number(filepath: str) -> int:
-            """从文件名中提取图片序号"""
-            filename = os.path.basename(filepath)
-            name_without_ext = os.path.splitext(filename)[0]
-            # 尝试提取数字
-            match = re.search(r'(\d+)', name_without_ext)
-            if match:
-                return int(match.group(1))
-            return 0
-        
-        # 读取所有图片并获取尺寸
-        images = []
-        for img_path in image_files:
-            try:
-                img = Image.open(img_path)
-                img_num = extract_image_number(img_path)
-                images.append({
-                    'path': img_path,
-                    'image': img,
-                    'number': img_num,
-                    'filename': os.path.basename(img_path)
-                })
-            except Exception as e:
-                self._log(f"[长图拼接] ⚠️ 无法读取图片: {os.path.basename(img_path)}", "WARNING")
-        
-        if not images:
-            self._log(f"[长图拼接] ⚠️ 无法读取任何图片，跳过")
-            return []
-        
-        # 如果读取后只有1张图片，不需要拼接
-        if len(images) == 1:
-            images[0]['image'].close()
-            self._log(f"[长图拼接] ⚠️ 只有1张可读取的图片，不满足拼接条件，跳过")
-            return []
-        
-        # 拼接图片
-        result_files = []
-        current_batch = []
-        current_height = 0
-        batch_index = 1
-        
-        for img_data in images:
-            img = img_data['image']
-            img_height = img.height
-            
-            if current_height + img_height > max_height and current_batch:
-                # 保存当前批次
-                result_path = self._save_stitched_image_v2(chapter_path, current_batch, batch_index, margin)
-                if result_path:
-                    result_files.append(result_path)
-                    batch_count = len(current_batch)
-                    start_num = current_batch[0]['number']
-                    end_num = current_batch[-1]['number']
-                    self._log(f"[长图拼接] 分段 {batch_index}: img{start_num:03d}-{end_num:03d} ({batch_count}张) → 高度 {current_height}px")
-                batch_index += 1
-                current_batch = [img_data]
-                current_height = img_height
-            else:
-                current_batch.append(img_data)
-                current_height += img_height
-        
-        # 保存最后一批
-        if current_batch:
-            result_path = self._save_stitched_image_v2(chapter_path, current_batch, batch_index, margin)
-            if result_path:
-                result_files.append(result_path)
-                batch_count = len(current_batch)
-                start_num = current_batch[0]['number']
-                end_num = current_batch[-1]['number']
-                self._log(f"[长图拼接] 分段 {batch_index}: img{start_num:03d}-{end_num:03d} ({batch_count}张) → 高度 {current_height}px")
-        
-        # 只有在拼接成功后才删除原图（防止文件被清零）
-        if result_files:
-            deleted_count = 0
-            for img_data in images:
-                img_data['image'].close()
-                try:
-                    os.remove(img_data['path'])
-                    deleted_count += 1
-                except Exception as e:
-                    self._log(f"[长图拼接] ⚠️ 无法删除原图: {img_data['filename']}", "WARNING")
-            
-            self._log(f"[长图拼接] 已删除 {deleted_count} 张原图")
-        else:
-            # 拼接失败，只关闭图片，不删除原图
-            self._log(f"[长图拼接] ⚠️ 拼接未成功，保留原图")
-            for img_data in images:
-                img_data['image'].close()
-        
-        return result_files
-    
-    def _save_stitched_image_v2(self, chapter_path: str, batch: List[dict], batch_index: int, margin: int) -> Optional[str]:
-        """保存拼接后的图片（新版本）
-        
-        文件名格式：seg{batch:02d}_img{start:03d}-{end:03d}_{count}p.png
-        例如：seg01_img001-005_5p.png
-        """
-        from PIL import Image
-        
-        if not batch:
-            return None
-        
-        try:
-            # 计算总高度和最大宽度
-            total_height = sum(item['image'].height for item in batch) + margin * (len(batch) - 1)
-            max_width = max(item['image'].width for item in batch)
-            
-            # 创建新图片
-            stitched = Image.new('RGB', (max_width, total_height), (255, 255, 255))
-            
-            # 拼接
-            y_offset = 0
-            for item in batch:
-                img = item['image']
-                # 居中放置
-                x_offset = (max_width - img.width) // 2
-                stitched.paste(img.convert('RGB'), (x_offset, y_offset))
-                y_offset += img.height + margin
-            
-            # 生成文件名：seg{batch:02d}_img{start:03d}-{end:03d}_{count}p.png
-            start_num = batch[0]['number']
-            end_num = batch[-1]['number']
-            count = len(batch)
-            
-            filename = f"seg{batch_index:02d}_img{start_num:03d}-{end_num:03d}_{count}p.png"
-            result_path = os.path.join(chapter_path, filename)
-            
-            # 保存为PNG格式
-            stitched.save(result_path, 'PNG', optimize=True)
-            stitched.close()
-            
-            return result_path
-            
-        except Exception as e:
-            self._log(f"[长图拼接] ⚠️ 保存拼接图片失败: {e}", "ERROR")
-            return None
-    
-    def _save_stitched_image(self, chapter_path: str, batch: List, batch_index: int, margin: int) -> Optional[str]:
-        """保存拼接后的图片（旧版本，保留兼容性）"""
-        from PIL import Image
-        
-        if not batch:
-            return None
-        
-        # 计算总高度和最大宽度
-        total_height = sum(img.height for _, img in batch) + margin * (len(batch) - 1)
-        max_width = max(img.width for _, img in batch)
-        
-        # 创建新图片
-        stitched = Image.new('RGB', (max_width, total_height), (255, 255, 255))
-        
-        # 拼接
-        y_offset = 0
-        for _, img in batch:
-            # 居中放置
-            x_offset = (max_width - img.width) // 2
-            stitched.paste(img.convert('RGB'), (x_offset, y_offset))
-            y_offset += img.height + margin
-        
-        # 保存
-        result_path = os.path.join(chapter_path, f"stitched_{batch_index:03d}.jpg")
-        stitched.save(result_path, 'JPEG', quality=95)
-        stitched.close()
-        
-        return result_path
-    
+
     # ==================== 长图拆分相关方法 ====================
-    
+
     def _save_split_settings(self):
         """保存长图拆分设置"""
         settings = QSettings("MangaTranslator", "AdvancedFolder")

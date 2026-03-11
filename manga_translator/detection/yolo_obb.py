@@ -47,9 +47,40 @@ class YOLOOBBDetector(OfflineDetector):
         # 使用 1600 作为默认推理尺寸（会在预处理阶段 letterbox 到方形输入）
         self.input_size = 1600
         self.using_cuda = False  # 初始化标志
+        self.device = 'cpu'
+
+    @staticmethod
+    def get_preferred_device() -> str:
+        """Prefer CUDA when available, otherwise fall back to CPU."""
+        try:
+            import torch
+            if torch.cuda.is_available():
+                return 'cuda'
+        except Exception:
+            pass
+        return 'cpu'
+
+    @staticmethod
+    def _normalize_device(device: Optional[str]) -> str:
+        normalized = str(device or 'cpu').lower()
+        return 'cuda' if normalized.startswith('cuda') else 'cpu'
+
+    async def load(self, device: str, **kwargs):
+        target_device = self._normalize_device(device)
+        current_device = 'cuda' if self.using_cuda else self._normalize_device(getattr(self, 'device', 'cpu'))
+
+        if self.is_loaded():
+            if current_device == target_device:
+                return
+            self.logger.info(f"YOLO OBB: device switch {current_device} -> {target_device}, reloading model")
+            await self.reload(device=target_device, **kwargs)
+            return
+
+        await super().load(device=target_device, **kwargs)
     
     async def _load(self, device: str):
         """加载ONNX模型"""
+        requested_device = self._normalize_device(device)
         model_path = self._get_file_path(self._MODEL_FILENAME)
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"YOLO OBB 模型不存在: {model_path}")
@@ -62,13 +93,13 @@ class YOLOOBBDetector(OfflineDetector):
         self.session, active_device = create_inference_session(
             ort,
             model_path,
-            device=device,
+            device=requested_device,
             sess_options=sess_options,
             cuda_options={"device_id": 0},
             logger=self.logger,
         )
 
-        self.device = device
+        self.device = active_device
         self.using_cuda = active_device == "cuda"
         self.logger.info(f"YOLO OBB: {active_device.upper()} 模式加载成功")
     
