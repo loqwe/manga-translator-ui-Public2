@@ -749,6 +749,7 @@ def solve_no_br_layout(
     target_lang: str = "en_US",
     config: Any = None,
     iterations: int = 3,
+    letter_spacing_multiplier: float = 1.0,
 ) -> NoBrLayoutResult:
     clean_text = _normalize_no_br_text(text)
     if not clean_text:

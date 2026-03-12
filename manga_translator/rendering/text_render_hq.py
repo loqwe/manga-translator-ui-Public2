@@ -39,7 +39,8 @@ def render_text_with_upscale(
     reversed_direction: bool = False,
     target_lang: str = 'en_US',
     hyphenate: bool = True,
-    stroke_width: float = None
+    stroke_width: float = None,
+    letter_spacing: float = 1.0,
 ) -> np.ndarray:
     """
     使用放大渲染+缩小技术，提高低分辨率下的文本质量
@@ -69,13 +70,15 @@ def render_text_with_upscale(
         if is_horizontal:
             return text_render.put_text_horizontal(
                 font_size, text, width, height, alignment,
-                reversed_direction, fg, bg, target_lang, hyphenate, 
-                line_spacing, config, region_count, stroke_width
+                reversed_direction, fg, bg, target_lang, hyphenate,
+                line_spacing, config, region_count, stroke_width,
+                letter_spacing=letter_spacing
             )
         else:
             return text_render.put_text_vertical(
-                font_size, text, height, alignment, fg, bg, 
-                line_spacing, config, region_count, stroke_width
+                font_size, text, height, alignment, fg, bg,
+                line_spacing, config, region_count, stroke_width,
+                letter_spacing=letter_spacing
             )
     
     logger.debug(f"[HQ_RENDER] 使用 {upscale_factor}x 放大渲染 (原始字号={font_size})")
@@ -102,7 +105,8 @@ def render_text_with_upscale(
                 line_spacing,
                 config,
                 region_count,
-                stroke_width
+                stroke_width,
+                letter_spacing=letter_spacing
             )
         else:
             upscaled_canvas = text_render.put_text_vertical(
@@ -115,7 +119,8 @@ def render_text_with_upscale(
                 line_spacing,
                 config,
                 region_count,
-                stroke_width
+                stroke_width,
+                letter_spacing=letter_spacing
             )
     except Exception as e:
         logger.error(f"[HQ_RENDER] 放大渲染失败: {e}，回退到普通渲染")
@@ -124,12 +129,14 @@ def render_text_with_upscale(
             return text_render.put_text_horizontal(
                 font_size, text, width, height, alignment,
                 reversed_direction, fg, bg, target_lang, hyphenate,
-                line_spacing, config, region_count, stroke_width
+                line_spacing, config, region_count, stroke_width,
+                letter_spacing=letter_spacing
             )
         else:
             return text_render.put_text_vertical(
                 font_size, text, height, alignment, fg, bg,
-                line_spacing, config, region_count, stroke_width
+                line_spacing, config, region_count, stroke_width,
+                letter_spacing=letter_spacing
             )
     
     if upscaled_canvas is None:

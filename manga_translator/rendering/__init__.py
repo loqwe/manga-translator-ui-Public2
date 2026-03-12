@@ -22,12 +22,12 @@ from ..utils import (
     TextBlock,
     build_bubble_mask_from_mangalens_result,
     color_difference,
-    detect_bubbles_with_mangalens,
     fg_bg_compare,
+    detect_bubbles_with_mangalens,
     get_logger,
     rotate_polygons,
 )
-from ..config import Config
+from ..config import Config, Renderer
 
 logger = get_logger('render')
 
@@ -90,7 +90,7 @@ def _estimate_effect_padding(font_size: int, config: Config = None) -> float:
 
 def calc_text_block_dimensions(text: str, is_horizontal: bool, line_spacing: float = 1.0,
                                 config: Config = None, target_lang: str = None,
-                                font_size: int = BASE_FONT_SIZE) -> tuple:
+                                font_size: int = BASE_FONT_SIZE, letter_spacing: float = 1.0) -> tuple:
     """
     按指定字号模拟渲染文本块，返回精确的像素尺寸
 
@@ -117,7 +117,8 @@ def calc_text_block_dimensions(text: str, is_horizontal: bool, line_spacing: flo
         lines, widths = text_render.calc_horizontal(
             base_font, text_for_calc,
             max_width=99999, max_height=99999,
-            language=target_lang or 'en_US'
+            language=target_lang or 'en_US',
+            letter_spacing=letter_spacing
         )
         if widths:
             spacing_y = int(base_font * 0.01 * line_spacing)
@@ -132,7 +133,7 @@ def calc_text_block_dimensions(text: str, is_horizontal: bool, line_spacing: flo
 
         lines, heights = text_render.calc_vertical(
             base_font, text_for_calc,
-            max_height=99999, config=config
+            max_height=99999, config=config, letter_spacing=letter_spacing
         )
         if heights:
             spacing_x = int(base_font * 0.2 * line_spacing)
@@ -163,7 +164,7 @@ def calc_text_block_dimensions(text: str, is_horizontal: bool, line_spacing: flo
 
 def calc_font_from_box(width: float, height: float, text: str, is_horizontal: bool,
                        line_spacing: float = 1.0, config: Config = None,
-                       target_lang: str = None) -> int:
+                       target_lang: str = None, letter_spacing: float = 1.0) -> int:
     """
     框 → 字体：基于真实测量结果二分搜索可容纳的最大字号
 
@@ -195,7 +196,8 @@ def calc_font_from_box(width: float, height: float, text: str, is_horizontal: bo
             config,
             target_lang,
             center=None,
-            angle=0
+            angle=0,
+            letter_spacing=letter_spacing
         )
         return req_w <= width and req_h <= height
 
@@ -225,7 +227,7 @@ def calc_font_from_box(width: float, height: float, text: str, is_horizontal: bo
 def calc_box_from_font(font_size: int, text: str, is_horizontal: bool,
                        line_spacing: float = 1.0, config: Config = None,
                        target_lang: str = None, center: tuple = None,
-                       angle: float = 0) -> tuple:
+                       angle: float = 0, letter_spacing: float = 1.0) -> tuple:
     """
     字体 → 框：直接按目标字号测量文本像素尺寸
 
@@ -245,7 +247,7 @@ def calc_box_from_font(font_size: int, text: str, is_horizontal: bool,
     """
     font_size = max(1, int(font_size))
     base_w, base_h, n_lines = calc_text_block_dimensions(
-        text, is_horizontal, line_spacing, config, target_lang, font_size=font_size
+        text, is_horizontal, line_spacing, config, target_lang, font_size=font_size, letter_spacing=letter_spacing
     )
 
     if base_w <= 0 or base_h <= 0:
@@ -595,12 +597,14 @@ def optimize_line_breaks_for_region(region: TextBlock, config: Config, target_fo
         
         try:
             line_spacing_multiplier = _resolve_line_spacing_multiplier(region, config)
+            letter_spacing_multiplier = _resolve_letter_spacing_multiplier(region, config)
             # Calculate required dimensions
             if region.horizontal:
                 lines, widths = text_render.calc_horizontal(
                     target_font_size, text_for_calc, 
                     max_width=99999, max_height=99999, 
-                    language=region.target_lang
+                    language=region.target_lang,
+                    letter_spacing=letter_spacing_multiplier
                 )
                 if widths:
                     spacing_y = int(target_font_size * 0.01 * line_spacing_multiplier)
@@ -612,7 +616,7 @@ def optimize_line_breaks_for_region(region: TextBlock, config: Config, target_fo
                 if config.render.auto_rotate_symbols:
                     text_for_calc = text_render.auto_add_horizontal_tags(text_for_calc)
                 
-                lines, heights = text_render.calc_vertical(target_font_size, text_for_calc, max_height=99999)
+                lines, heights = text_render.calc_vertical(target_font_size, text_for_calc, max_height=99999, letter_spacing=letter_spacing_multiplier)
                 if heights:
                     spacing_x = int(target_font_size * 0.2 * line_spacing_multiplier)
                     required_height = max(heights)
@@ -792,11 +796,22 @@ def _resolve_line_spacing_multiplier(region: TextBlock, config: Config) -> float
     return 1.0
 
 
+def _resolve_letter_spacing_multiplier(region: TextBlock, config: Config) -> float:
+    region_letter_spacing = getattr(region, 'letter_spacing', None)
+    if isinstance(region_letter_spacing, (int, float)) and region_letter_spacing > 0:
+        return float(region_letter_spacing)
+    cfg_val = config.render.letter_spacing if config and hasattr(config, 'render') else None
+    if isinstance(cfg_val, (int, float)) and cfg_val > 0:
+        return float(cfg_val)
+    return 1.0
+
+
 def _calc_region_dst_points_for_font(
     region: TextBlock,
     font_size: int,
     render_horizontally: bool,
     line_spacing_multiplier: float,
+    letter_spacing_multiplier: float,
     config: Config,
 ) -> Optional[np.ndarray]:
     return calc_box_from_font(
@@ -808,6 +823,7 @@ def _calc_region_dst_points_for_font(
         region.target_lang,
         center=tuple(region.center),
         angle=region.angle,
+        letter_spacing=letter_spacing_multiplier,
     )
 
 
@@ -816,6 +832,7 @@ def _font_size_fits_bubble_mask(
     font_size: int,
     render_horizontally: bool,
     line_spacing_multiplier: float,
+    letter_spacing_multiplier: float,
     config: Config,
     bubble_mask: np.ndarray,
 ) -> Tuple[bool, Optional[np.ndarray]]:
@@ -824,6 +841,7 @@ def _font_size_fits_bubble_mask(
         font_size=font_size,
         render_horizontally=render_horizontally,
         line_spacing_multiplier=line_spacing_multiplier,
+        letter_spacing_multiplier=letter_spacing_multiplier,
         config=config,
     )
     if dst_points is None or dst_points.size == 0:
@@ -838,6 +856,7 @@ def _binary_search_font_for_bubble_mask(
     min_font_size: int,
     render_horizontally: bool,
     line_spacing_multiplier: float,
+    letter_spacing_multiplier: float,
     config: Config,
     bubble_mask: np.ndarray,
 ) -> Tuple[Optional[int], Optional[np.ndarray]]:
@@ -853,6 +872,7 @@ def _binary_search_font_for_bubble_mask(
             font_size=mid,
             render_horizontally=render_horizontally,
             line_spacing_multiplier=line_spacing_multiplier,
+            letter_spacing_multiplier=letter_spacing_multiplier,
             config=config,
             bubble_mask=bubble_mask,
         )
@@ -891,33 +911,37 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
     if mode == 'balloon_fill' and original_img is not None:
         try:
             model_result = detect_bubbles_with_mangalens(original_img, return_annotated=False, verbose=False)
-            balloon_fill_mask = build_bubble_mask_from_mangalens_result(model_result, original_img.shape[:2])
-            mask_pixels = int(np.count_nonzero(balloon_fill_mask))
-            detected = len(model_result.detections) if model_result is not None else 0
-            logger.debug(
-                f"balloon_fill model mask prepared: detections={detected}, mask_pixels={mask_pixels}"
-            )
-            if mask_pixels == 0 and debug_img is not None:
-                logger.warning("balloon_fill global bubble mask is empty (mask_pixels=0), blue overlay will not be visible")
-            if mask_pixels > 0:
-                _, balloon_fill_label_map = cv2.connectedComponents(
-                    np.where(balloon_fill_mask > 0, 1, 0).astype(np.uint8),
-                    connectivity=8,
+            if model_result is None:
+                logger.warning("balloon_fill bubble cache miss, skip global bubble mask")
+                balloon_fill_mask = np.zeros(original_img.shape[:2], dtype=np.uint8)
+            else:
+                balloon_fill_mask = build_bubble_mask_from_mangalens_result(model_result, original_img.shape[:2])
+                mask_pixels = int(np.count_nonzero(balloon_fill_mask))
+                detected = len(model_result.detections)
+                logger.debug(
+                    f"balloon_fill model mask prepared from cache: detections={detected}, mask_pixels={mask_pixels}"
                 )
-                if debug_img is not None:
-                    # 在调试图上渲染“蓝色蒙版区域”（半透明填充）+ 蓝色边界，提升可见性
-                    mask_u8 = np.where(balloon_fill_mask > 0, 255, 0).astype(np.uint8)
-                    mask_pixels_idx = mask_u8 > 0
-                    if np.any(mask_pixels_idx):
-                        overlay = debug_img.copy()
-                        overlay[mask_pixels_idx] = (255, 0, 0)  # BGR 蓝色
-                        cv2.addWeighted(overlay, 0.22, debug_img, 0.78, 0, dst=debug_img)
+                if mask_pixels == 0 and debug_img is not None:
+                    logger.warning("balloon_fill global bubble mask is empty (mask_pixels=0), blue overlay will not be visible")
+                if mask_pixels > 0:
+                    _, balloon_fill_label_map = cv2.connectedComponents(
+                        np.where(balloon_fill_mask > 0, 1, 0).astype(np.uint8),
+                        connectivity=8,
+                    )
+                    if debug_img is not None:
+                        # 在调试图上渲染“蓝色蒙版区域”（半透明填充）+ 蓝色边界，提升可见性
+                        mask_u8 = np.where(balloon_fill_mask > 0, 255, 0).astype(np.uint8)
+                        mask_pixels_idx = mask_u8 > 0
+                        if np.any(mask_pixels_idx):
+                            overlay = debug_img.copy()
+                            overlay[mask_pixels_idx] = (255, 0, 0)  # BGR 蓝色
+                            cv2.addWeighted(overlay, 0.22, debug_img, 0.78, 0, dst=debug_img)
 
-                    contours, _ = cv2.findContours(mask_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                    if contours:
-                        cv2.drawContours(debug_img, contours, -1, (255, 0, 0), 2)
+                        contours, _ = cv2.findContours(mask_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                        if contours:
+                            cv2.drawContours(debug_img, contours, -1, (255, 0, 0), 2)
         except Exception as exc:
-            logger.warning(f"balloon_fill model mask failed, fallback to existing behavior: {exc}")
+            logger.warning(f"balloon_fill bubble cache read failed, skip global bubble mask: {exc}")
             balloon_fill_mask = np.zeros(original_img.shape[:2], dtype=np.uint8)
             balloon_fill_label_map = None
 
@@ -956,6 +980,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                 actual_horizontal = region.horizontal
 
             line_spacing_multiplier = _resolve_line_spacing_multiplier(region, config)
+            letter_spacing_multiplier = _resolve_letter_spacing_multiplier(region, config)
 
             # 用区域自己的字体来量度字符宽度，保证和 render() 实际渲染时一致
             resolved_region_font_path = _resolve_font_path(getattr(region, 'font_path', '') or '')
@@ -967,7 +992,8 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
             dst_points = calc_box_from_font(
                 fixed_font_size, region.translation, actual_horizontal,
                 line_spacing_multiplier, config, region.target_lang,
-                center=tuple(region.center), angle=region.angle
+                center=tuple(region.center), angle=region.angle,
+                letter_spacing=letter_spacing_multiplier
             )
 
             if dst_points is None:
@@ -1005,6 +1031,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                     font_size=fallback_font_size,
                     render_horizontally=_resolve_region_render_horizontal(region),
                     line_spacing_multiplier=_resolve_line_spacing_multiplier(region, config),
+                    letter_spacing_multiplier=_resolve_letter_spacing_multiplier(region, config),
                     config=config,
                 )
                 if fallback_dst_points is None:
@@ -1016,6 +1043,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
             try:
                 render_horizontally = _resolve_region_render_horizontal(region)
                 line_spacing_multiplier = _resolve_line_spacing_multiplier(region, config)
+                letter_spacing_multiplier = _resolve_letter_spacing_multiplier(region, config)
 
                 has_br = bool(re.search(r'(\[BR\]|【BR】|<br>)', region.translation, flags=re.IGNORECASE))
                 region_bubble_mask = np.zeros(original_img.shape[:2], dtype=np.uint8)
@@ -1072,6 +1100,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                         line_spacing=line_spacing_multiplier,
                         config=config,
                         target_lang=region.target_lang,
+                        letter_spacing=letter_spacing_multiplier,
                     )
                     if estimated_font_from_box > layout_target_font_size:
                         logger.debug(
@@ -1083,7 +1112,11 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                     if not has_br:
                         no_br_max_font_size = int(layout_target_font_size)
                         if render_horizontally:
-                            total_width = text_render.get_string_width(layout_target_font_size, region.translation)
+                            total_width = text_render.get_string_width(
+                                layout_target_font_size,
+                                region.translation,
+                                letter_spacing=letter_spacing_multiplier,
+                            )
                             spacing_y = int(layout_target_font_size * 0.01 * line_spacing_multiplier)
                             ratio = bubble_width / bubble_height if bubble_height > 0 else 1.0
 
@@ -1119,7 +1152,11 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                                 seed_segments = n_ceil
                                 seed_font_size = font_ceil
                         else:
-                            total_height = text_render.get_string_height(layout_target_font_size, region.translation)
+                            total_height = text_render.get_string_height(
+                                layout_target_font_size,
+                                region.translation,
+                                letter_spacing=letter_spacing_multiplier,
+                            )
                             spacing_x = int(layout_target_font_size * 0.2 * line_spacing_multiplier)
                             ratio = bubble_width / bubble_height if bubble_height > 0 else 1.0
 
@@ -1166,6 +1203,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                             min_font_size=min_font_size,
                             max_font_size=no_br_max_font_size,
                             line_spacing_multiplier=line_spacing_multiplier,
+                            letter_spacing_multiplier=letter_spacing_multiplier,
                             target_lang=region.target_lang,
                             config=config,
                         )
@@ -1188,6 +1226,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                         font_size=preferred_font_size,
                         render_horizontally=render_horizontally,
                         line_spacing_multiplier=line_spacing_multiplier,
+                        letter_spacing_multiplier=letter_spacing_multiplier,
                         config=config,
                     )
                     if preferred_dst_points is not None and preferred_dst_points.size > 0:
@@ -1201,6 +1240,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                         min_font_size=min_font_size,
                         render_horizontally=render_horizontally,
                         line_spacing_multiplier=line_spacing_multiplier,
+                        letter_spacing_multiplier=letter_spacing_multiplier,
                         config=config,
                         bubble_mask=region_bubble_mask,
                     )
@@ -1211,6 +1251,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                             min_font_size=1,
                             render_horizontally=render_horizontally,
                             line_spacing_multiplier=line_spacing_multiplier,
+                            letter_spacing_multiplier=letter_spacing_multiplier,
                             config=config,
                             bubble_mask=region_bubble_mask,
                         )
@@ -1227,6 +1268,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                             font_size=chosen_font_size,
                             render_horizontally=render_horizontally,
                             line_spacing_multiplier=line_spacing_multiplier,
+                            letter_spacing_multiplier=letter_spacing_multiplier,
                             config=config,
                         )
 
@@ -1304,6 +1346,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
             
             font_size = target_font_size
             min_shrink_font_size = max(min_font_size, 8)
+            letter_spacing_multiplier = _resolve_letter_spacing_multiplier(region, config)
 
             # AI 断句适配：如果开启了 AI 断句且有 BR 标记，使用无限宽度/高度
             
@@ -1335,11 +1378,23 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
             while font_size >= min_shrink_font_size:
                 iteration_count += 1
                 if region.horizontal:
-                    lines, _ = text_render.calc_horizontal(font_size, region.translation, max_width=calc_max_width, max_height=calc_max_height, language=region.target_lang)
+                    lines, _ = text_render.calc_horizontal(
+                        font_size,
+                        region.translation,
+                        max_width=calc_max_width,
+                        max_height=calc_max_height,
+                        language=region.target_lang,
+                        letter_spacing=letter_spacing_multiplier,
+                    )
                     if len(lines) <= len(region.texts):
                         break
                 else:
-                    lines, _ = text_render.calc_vertical(font_size, region.translation, max_height=calc_max_height)
+                    lines, _ = text_render.calc_vertical(
+                        font_size,
+                        region.translation,
+                        max_height=calc_max_height,
+                        letter_spacing=letter_spacing_multiplier,
+                    )
                     if len(lines) <= len(region.texts):
                         break
                 font_size -= 1
@@ -1351,14 +1406,26 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
 
             while test_font_size <= target_font_size:
                 if region.horizontal:
-                    test_lines, _ = text_render.calc_horizontal(test_font_size, region.translation, max_width=calc_max_width, max_height=calc_max_height, language=region.target_lang)
+                    test_lines, _ = text_render.calc_horizontal(
+                        test_font_size,
+                        region.translation,
+                        max_width=calc_max_width,
+                        max_height=calc_max_height,
+                        language=region.target_lang,
+                        letter_spacing=letter_spacing_multiplier,
+                    )
                     if len(test_lines) <= len(region.texts):
                         max_fitting_font_size = test_font_size
                         test_font_size += 1
                     else:
                         break
                 else:
-                    test_lines, _ = text_render.calc_vertical(test_font_size, region.translation, max_height=calc_max_height)
+                    test_lines, _ = text_render.calc_vertical(
+                        test_font_size,
+                        region.translation,
+                        max_height=calc_max_height,
+                        letter_spacing=letter_spacing_multiplier,
+                    )
                     if len(test_lines) <= len(region.texts):
                         max_fitting_font_size = test_font_size
                         test_font_size += 1
@@ -1430,6 +1497,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                 # n 表示行/列数量，后续溢出重算会统一使用；默认 1 防止未赋值。
                 n = 1
                 line_spacing_multiplier = _resolve_line_spacing_multiplier(region, config)
+                letter_spacing_multiplier = _resolve_letter_spacing_multiplier(region, config)
 
                 # 根据有没有BR选择不同的计算方式
                 if has_br:
@@ -1439,7 +1507,14 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                     required_height = 0
 
                     if region.horizontal:
-                        lines, widths = text_render.calc_horizontal(target_font_size, region.translation, max_width=99999, max_height=99999, language=region.target_lang)
+                        lines, widths = text_render.calc_horizontal(
+                            target_font_size,
+                            region.translation,
+                            max_width=99999,
+                            max_height=99999,
+                            language=region.target_lang,
+                            letter_spacing=letter_spacing_multiplier,
+                        )
                         n = max(1, len(lines))
                         if widths:
                             spacing_y = int(target_font_size * 0.01 * line_spacing_multiplier)
@@ -1453,7 +1528,12 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                         if config.render.auto_rotate_symbols:
                             text_for_calc = text_render.auto_add_horizontal_tags(text_for_calc)
 
-                        lines, heights = text_render.calc_vertical(target_font_size, text_for_calc, max_height=99999)
+                        lines, heights = text_render.calc_vertical(
+                            target_font_size,
+                            text_for_calc,
+                            max_height=99999,
+                            letter_spacing=letter_spacing_multiplier,
+                        )
                         n = max(1, len(lines))
                         if heights:
                             spacing_x = int(target_font_size * 0.2 * line_spacing_multiplier)
@@ -1466,7 +1546,11 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
 
                     if region.horizontal:
                         # 横排：计算单行总宽度
-                        total_width = text_render.get_string_width(target_font_size, region.translation)
+                        total_width = text_render.get_string_width(
+                            target_font_size,
+                            region.translation,
+                            letter_spacing=letter_spacing_multiplier,
+                        )
                         spacing_y = int(target_font_size * 0.01 * line_spacing_multiplier)
                         ratio = bubble_width / bubble_height if bubble_height > 0 else 1.0
 
@@ -1505,7 +1589,11 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                         final_font_size = max(final_font_size, min_font_size)
 
                         # 用最终字体重新计算精确的required尺寸
-                        final_total_width = text_render.get_string_width(final_font_size, region.translation)
+                        final_total_width = text_render.get_string_width(
+                            final_font_size,
+                            region.translation,
+                            letter_spacing=letter_spacing_multiplier,
+                        )
                         final_spacing_y = int(final_font_size * 0.01 * line_spacing_multiplier)
                         required_width = final_total_width / n
                         required_height = n * final_font_size + max(0, n - 1) * final_spacing_y
@@ -1523,6 +1611,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                             min_font_size=min_font_size,
                             max_font_size=no_br_max_font_size,
                             line_spacing_multiplier=line_spacing_multiplier,
+                            letter_spacing_multiplier=letter_spacing_multiplier,
                             target_lang=region.target_lang,
                             config=config,
                         )
@@ -1537,7 +1626,11 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                         )
                     else: # Vertical
                         # 竖排：计算单列总高度
-                        total_height = text_render.get_string_height(target_font_size, region.translation)
+                        total_height = text_render.get_string_height(
+                            target_font_size,
+                            region.translation,
+                            letter_spacing=letter_spacing_multiplier,
+                        )
                         spacing_x = int(target_font_size * 0.2 * line_spacing_multiplier)
                         ratio = bubble_width / bubble_height if bubble_height > 0 else 1.0
 
@@ -1576,7 +1669,11 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                         final_font_size = max(final_font_size, min_font_size)
 
                         # 用最终字体重新计算精确的required尺寸
-                        final_total_height = text_render.get_string_height(final_font_size, region.translation)
+                        final_total_height = text_render.get_string_height(
+                            final_font_size,
+                            region.translation,
+                            letter_spacing=letter_spacing_multiplier,
+                        )
                         final_spacing_x = int(final_font_size * 0.2 * line_spacing_multiplier)
                         required_height = final_total_height / n
                         required_width = n * final_font_size + max(0, n - 1) * final_spacing_x
@@ -1594,6 +1691,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                             min_font_size=min_font_size,
                             max_font_size=no_br_max_font_size,
                             line_spacing_multiplier=line_spacing_multiplier,
+                            letter_spacing_multiplier=letter_spacing_multiplier,
                             target_lang=region.target_lang,
                             config=config,
                         )
@@ -1647,12 +1745,20 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
 
                     # 用取整后的字体重新算required
                     if region.horizontal:
-                        final_total_width = text_render.get_string_width(target_font_size, region.translation)
+                        final_total_width = text_render.get_string_width(
+                            target_font_size,
+                            region.translation,
+                            letter_spacing=letter_spacing_multiplier,
+                        )
                         final_spacing_y = int(target_font_size * 0.01 * line_spacing_multiplier)
                         required_width = final_total_width / n if n > 0 else final_total_width
                         required_height = n * target_font_size + max(0, n - 1) * final_spacing_y
                     else:
-                        final_total_height = text_render.get_string_height(target_font_size, region.translation)
+                        final_total_height = text_render.get_string_height(
+                            target_font_size,
+                            region.translation,
+                            letter_spacing=letter_spacing_multiplier,
+                        )
                         final_spacing_x = int(target_font_size * 0.2 * line_spacing_multiplier)
                         required_height = final_total_height / n if n > 0 else final_total_height
                         required_width = n * target_font_size + max(0, n - 1) * final_spacing_x
@@ -1695,10 +1801,12 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
 
             # 用辅助函数直接计算 dst_points（包含矩形构建和旋转）
             line_spacing_multiplier = _resolve_line_spacing_multiplier(region, config)
+            letter_spacing_multiplier = _resolve_letter_spacing_multiplier(region, config)
             dst_points = calc_box_from_font(
                 final_font_size, region.translation, region.horizontal,
                 line_spacing_multiplier, config, region.target_lang,
-                center=tuple(region.center), angle=region.angle
+                center=tuple(region.center), angle=region.angle,
+                letter_spacing=letter_spacing_multiplier,
             )
 
             # 如果计算失败，使用原始检测框
@@ -1762,6 +1870,11 @@ async def dispatch(
     if config is None:
         from ..config import Config
         config = Config()
+
+    if hasattr(Renderer, 'openai_renderer') and hasattr(Renderer, 'gemini_renderer') and config.render.renderer in (Renderer.openai_renderer, Renderer.gemini_renderer):
+        from .model_api_renderer import dispatch_api_rendering
+
+        return await dispatch_api_rendering(img=img, text_regions=text_regions, config=config)
 
     # 渲染阶段只依赖 region.font_path；这里仅设置一个稳定的初始字体兜底
     text_render.set_font(text_render.DEFAULT_FONT)
@@ -1929,6 +2042,8 @@ def render(
     if render_horizontally:
         text_to_render = re.sub(r'<H>(.*?)</H>', r'\1', text_to_render, flags=re.IGNORECASE | re.DOTALL)
 
+    letter_spacing = _resolve_letter_spacing_multiplier(region, config)
+
     # 将当前region传递给config，用于方向不匹配检测
     if config:
         config._current_region = region
@@ -1959,7 +2074,8 @@ def render(
             reversed_direction=(region.direction == 'hl'),
             target_lang=region.target_lang,
             hyphenate=hyphenate,
-            stroke_width=region.stroke_width  # 传递区域的描边宽度
+            stroke_width=region.stroke_width,  # 传递区域的描边宽度
+            letter_spacing=letter_spacing,
         )
     elif render_horizontally:
         temp_box = text_render.put_text_horizontal(
@@ -1976,7 +2092,8 @@ def render(
             line_spacing,
             config,
             len(region.lines),  # Pass region count
-            stroke_width=region.stroke_width  # 传递区域的描边宽度
+            stroke_width=region.stroke_width,  # 传递区域的描边宽度
+            letter_spacing=letter_spacing,
         )
     else:
         temp_box = text_render.put_text_vertical(
@@ -1989,7 +2106,8 @@ def render(
             line_spacing,
             config,
             len(region.lines),  # Pass region count
-            stroke_width=region.stroke_width  # 传递区域的描边宽度
+            stroke_width=region.stroke_width,  # 传递区域的描边宽度
+            letter_spacing=letter_spacing,
         )
     
     if temp_box is None:
