@@ -66,16 +66,18 @@ class CBZTransfer:
             for cbz_file in cbz_files:
                 target_path = target_comic_folder / cbz_file.name
                 
-                # 检查目标文件是否已存在
+                # Check if target already exists, compare sizes
                 if target_path.exists():
-                    # 比较文件大小，决定是否跳过
-                    if cbz_file.stat().st_size == target_path.stat().st_size:
-                        print(f"跳过（已存在且大小相同）: {cbz_file.name}")
+                    src_size = cbz_file.stat().st_size
+                    dst_size = target_path.stat().st_size
+                    if src_size < dst_size:
+                        print(f"⚠ 跳过（源文件更小）: {cbz_file.name} "
+                              f"(源 {src_size:,} < 目标 {dst_size:,} bytes)")
                         continue
-                    else:
-                        print(f"警告: 目标文件已存在但大小不同: {cbz_file.name}")
-                        # 为避免数据丢失，跳过
-                        continue
+                    # src >= dst: replace
+                    print(f"↻ 覆盖: {cbz_file.name} "
+                          f"(源 {src_size:,} >= 目标 {dst_size:,} bytes)")
+                    target_path.unlink()
                 
                 try:
                     if move:
