@@ -396,6 +396,17 @@ class ModelWrapper(ABC):
         if self.is_loaded():
             await self._unload()
             self._loaded = False
+            # 统一卸载后内存清理，确保检测/修复等模型直接卸载时也回收显存。
+            try:
+                import gc
+                gc.collect()
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    if hasattr(torch.cuda, 'ipc_collect'):
+                        torch.cuda.ipc_collect()
+            except Exception:
+                pass
 
     async def infer(self, *args, **kwargs):
         '''

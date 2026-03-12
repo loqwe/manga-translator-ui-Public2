@@ -6,7 +6,7 @@ from .text_mask_utils import complete_mask_fill, complete_mask
 from ..utils import (
     TextBlock,
     Quadrilateral,
-    detect_bubbles_with_mangalens,
+    get_cached_bubbles_with_mangalens,
     build_bubble_mask_from_mangalens_result,
     imwrite_unicode,
 )
@@ -244,9 +244,15 @@ async def dispatch(
 
     if use_model_bubble_repair_intersection or limit_mask_dilation_to_bubble_mask:
         try:
-            result = detect_bubbles_with_mangalens(raw_image, return_annotated=False, verbose=False)
-            detections = result.detections if result is not None else []
-            bubble_mask, bubble_source = _build_model_bubble_mask(final_mask.shape[:2], result)
+            result = get_cached_bubbles_with_mangalens(raw_image, return_annotated=False, verbose=False)
+            if result is None:
+                logger.warning("Model bubble mask cache miss in mask refinement; skip bubble-constrained post-process")
+                detections = []
+                bubble_mask = np.zeros(final_mask.shape[:2], dtype=np.uint8)
+                bubble_source = 'none'
+            else:
+                detections = result.detections
+                bubble_mask, bubble_source = _build_model_bubble_mask(final_mask.shape[:2], result)
 
             if np.count_nonzero(bubble_mask) == 0:
                 logger.info(

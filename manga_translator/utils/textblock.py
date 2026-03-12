@@ -304,6 +304,7 @@ class TextBlock(object):
             'alignment': self.alignment,
             'target_lang': self.target_lang,
             'source_lang': self.source_lang,
+            'letter_spacing': self.letter_spacing,
             'line_spacing': self.line_spacing,
             'stroke_width': self.default_stroke_width,  # 统一使用 stroke_width（后端加载时会转换为 default_stroke_width）
             'prob': self.prob,
