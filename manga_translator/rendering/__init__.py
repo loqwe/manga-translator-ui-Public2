@@ -23,7 +23,7 @@ from ..utils import (
     build_bubble_mask_from_mangalens_result,
     color_difference,
     fg_bg_compare,
-    detect_bubbles_with_mangalens,
+    get_cached_bubbles_with_mangalens,
     get_logger,
     rotate_polygons,
 )
@@ -910,7 +910,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
     balloon_fill_label_map = None
     if mode == 'balloon_fill' and original_img is not None:
         try:
-            model_result = detect_bubbles_with_mangalens(original_img, return_annotated=False, verbose=False)
+            model_result = get_cached_bubbles_with_mangalens(original_img, return_annotated=False, verbose=False)
             if model_result is None:
                 logger.warning("balloon_fill bubble cache miss, skip global bubble mask")
                 balloon_fill_mask = np.zeros(original_img.shape[:2], dtype=np.uint8)

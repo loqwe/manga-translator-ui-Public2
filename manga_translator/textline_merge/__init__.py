@@ -52,8 +52,19 @@ def _build_text_block_from_txtlns(txtlns: List[Quadrilateral], fg_color: Tuple[i
     lines = [txtln.pts for txtln in unique_txtlns]
     texts = [txtln.text for txtln in unique_txtlns]
     stroke_width = 0.07
-    if config and hasattr(config, 'render') and hasattr(config.render, 'stroke_width'):
-        stroke_width = config.render.stroke_width
+    line_spacing = 1.0
+    letter_spacing = 1.0
+    if config and hasattr(config, 'render'):
+        render_cfg = config.render
+        stroke_width_val = getattr(render_cfg, 'stroke_width', None)
+        if stroke_width_val is not None:
+            stroke_width = stroke_width_val
+        line_spacing_val = getattr(render_cfg, 'line_spacing', None)
+        if line_spacing_val is not None:
+            line_spacing = float(line_spacing_val)
+        letter_spacing_val = getattr(render_cfg, 'letter_spacing', None)
+        if letter_spacing_val is not None:
+            letter_spacing = float(letter_spacing_val)
 
     return TextBlock(
         lines,
@@ -63,6 +74,8 @@ def _build_text_block_from_txtlns(txtlns: List[Quadrilateral], fg_color: Tuple[i
         prob=np.exp(total_logprobs),
         fg_color=fg_color,
         bg_color=bg_color,
+        line_spacing=line_spacing,
+        letter_spacing=letter_spacing,
         default_stroke_width=stroke_width
     )
 

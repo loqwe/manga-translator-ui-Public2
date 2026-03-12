@@ -166,9 +166,67 @@ def _apply_yolo_label_infection(main_boxes: List[Quadrilateral], yolo_boxes: Lis
             infected_box.yolo_infected = True
 
 
+def _box_aabb(box: Quadrilateral):
+    min_x = float(np.min(box.pts[:, 0]))
+    max_x = float(np.max(box.pts[:, 0]))
+    min_y = float(np.min(box.pts[:, 1]))
+    max_y = float(np.max(box.pts[:, 1]))
+    return min_x, max_x, min_y, max_y
+
+
+def _contains_interval(outer_min: float, outer_max: float, inner_min: float, inner_max: float, eps: float = 2.0) -> bool:
+    return outer_min <= inner_min + eps and outer_max >= inner_max - eps
+
+
+def _aabb_contains(outer_aabb, inner_aabb, eps: float = 2.0) -> bool:
+    ox1, ox2, oy1, oy2 = outer_aabb
+    ix1, ix2, iy1, iy2 = inner_aabb
+    return (
+        _contains_interval(ox1, ox2, ix1, ix2, eps=eps)
+        and _contains_interval(oy1, oy2, iy1, iy2, eps=eps)
+    )
+
+
+def _box_direction(box: Quadrilateral) -> Optional[str]:
+    direction = getattr(box, 'assigned_direction', None) or getattr(box, 'direction', None)
+    if isinstance(direction, str):
+        direction = direction.strip().lower()
+    return direction if direction in ('h', 'v') else None
+
+
+def _is_axis_wrapped_pair(box_a: Quadrilateral, box_b: Quadrilateral, eps: float = 2.0) -> bool:
+    """
+    主轴包裹判定：
+    - 竖排(v)：看 X 区间是否一方包含另一方
+    - 横排(h)：看 Y 区间是否一方包含另一方
+    """
+    dir_a = _box_direction(box_a)
+    dir_b = _box_direction(box_b)
+    if dir_a is None or dir_b is None or dir_a != dir_b:
+        return False
+
+    a_min_x, a_max_x, a_min_y, a_max_y = _box_aabb(box_a)
+    b_min_x, b_max_x, b_min_y, b_max_y = _box_aabb(box_b)
+
+    if dir_a == 'v':
+        return (
+            _contains_interval(a_min_x, a_max_x, b_min_x, b_max_x, eps=eps)
+            or _contains_interval(b_min_x, b_max_x, a_min_x, a_max_x, eps=eps)
+        )
+
+    # dir_a == 'h'
+    return (
+        _contains_interval(a_min_y, a_max_y, b_min_y, b_max_y, eps=eps)
+        or _contains_interval(b_min_y, b_max_y, a_min_y, a_max_y, eps=eps)
+    )
+
+
 def merge_detection_boxes(yolo_boxes: List[Quadrilateral], main_boxes: List[Quadrilateral], overlap_threshold: float = 0.1) -> List[Quadrilateral]:
     """
     合并主检测器和YOLO检测器的框，智能替换逻辑：
+    0. 高优先级结构替换：
+       若同方向主框中存在"主轴包裹"成对关系（竖排看X、横排看Y），且某个YOLO框完整覆盖该对主框，
+       则直接用该YOLO框替换这对主框。
     1. 如果YOLO框与主检测器框重叠
     2. 且YOLO框完全包含主检测器框
     3. 且YOLO框面积 >= 主检测器框面积 * 2
@@ -200,8 +258,45 @@ def merge_detection_boxes(yolo_boxes: List[Quadrilateral], main_boxes: List[Quad
     yolo_boxes_to_remove = set()
     # 要添加的YOLO框（用于替换）
     yolo_boxes_to_add_set = set()  # 使用set避免重复
-    
+    # Coordinate tolerance (pixels)
+    axis_eps = 2.0
+
+    # Rule 0: high-priority structural replacement (before area-ratio rules).
+    # When a YOLO box fully covers a pair of main boxes that share an
+    # "axis-wrapped" relationship, replace those main boxes directly.
     for yolo_idx, yolo_box in enumerate(yolo_boxes):
+        yolo_label = _get_box_label(yolo_box)
+        # Consistent with existing logic: 'other' does not participate in geometric replacement
+        if yolo_label == 'other':
+            continue
+
+        yolo_aabb = _box_aabb(yolo_box)
+        covered_main_indices = []
+        for main_idx, main_box in enumerate(main_boxes):
+            if _aabb_contains(yolo_aabb, _box_aabb(main_box), eps=axis_eps):
+                covered_main_indices.append(main_idx)
+
+        if len(covered_main_indices) < 2:
+            continue
+
+        wrapped_pair_indices = set()
+        for i in range(len(covered_main_indices)):
+            for j in range(i + 1, len(covered_main_indices)):
+                idx_i = covered_main_indices[i]
+                idx_j = covered_main_indices[j]
+                if _is_axis_wrapped_pair(main_boxes[idx_i], main_boxes[idx_j], eps=axis_eps):
+                    wrapped_pair_indices.add(idx_i)
+                    wrapped_pair_indices.add(idx_j)
+
+        if len(wrapped_pair_indices) >= 2:
+            main_boxes_to_remove.update(wrapped_pair_indices)
+            yolo_boxes_to_add_set.add(yolo_idx)
+
+    for yolo_idx, yolo_box in enumerate(yolo_boxes):
+        # Rule 0 already marked this YOLO box for strong replacement; skip further checks
+        if yolo_idx in yolo_boxes_to_add_set:
+            continue
+
         yolo_label = _get_box_label(yolo_box)
         # other 仅用于包裹辅助：不参与替换/去除主框的几何决策
         if yolo_label == 'other':

@@ -354,10 +354,19 @@ class YOLOOBBDetector(OfflineDetector):
                 box_j_area = (box_j_max[0] - box_j_min[0]) * (box_j_max[1] - box_j_min[1])
                 union_area = box_i_area + box_j_area - inter_area
                 
-                # 计算IoU
+                # Check standard IoU
                 if union_area > 0:
                     iou = inter_area / union_area
                     if iou > iou_threshold:
+                        should_keep = False
+                        break
+
+                # Containment check: if intersection covers most of the smaller box,
+                # the lower-scored box is redundant even when standard IoU is low.
+                min_box_area = min(box_i_area, box_j_area)
+                if min_box_area > 0:
+                    containment = inter_area / min_box_area
+                    if containment > 0.6:
                         should_keep = False
                         break
             
@@ -758,7 +767,15 @@ class YOLOOBBDetector(OfflineDetector):
                 pad,
                 text_threshold,
             )
-        
+
+            # Deduplicate boxes for single-image path (same as rearrange path)
+            if len(boxes_corners) > 0:
+                boxes_corners, scores, class_ids = self.deduplicate_boxes(
+                    boxes_corners, scores, class_ids,
+                    distance_threshold=20.0,
+                    iou_threshold=0.5
+                )
+
         # 转换为Quadrilateral对象
         textlines = []
         for corners, score, class_id in zip(boxes_corners, scores, class_ids):

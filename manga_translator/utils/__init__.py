@@ -19,5 +19,6 @@ from .mangalens_detector import (
     MangaLensBubbleDetector,
     get_mangalens_detector,
     detect_bubbles_with_mangalens,
+    get_cached_bubbles_with_mangalens,
     build_bubble_mask_from_mangalens_result,
 )

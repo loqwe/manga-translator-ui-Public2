@@ -12,8 +12,8 @@ from ..utils import (
     TextBlock,
     ModelWrapper,
     Quadrilateral,
-    detect_bubbles_with_mangalens,
     build_bubble_mask_from_mangalens_result,
+    get_cached_bubbles_with_mangalens,
 )
 
 class CommonOCR(InfererModule):
@@ -39,21 +39,25 @@ class CommonOCR(InfererModule):
 
     def _get_model_bubble_mask(self, full_image: np.ndarray) -> np.ndarray:
         """
-        Runs MangaLens once per image and caches the merged bubble mask.
+        Reads the precomputed bubble mask from cache.
         """
         cache_key = (id(full_image), full_image.shape[0], full_image.shape[1])
         if getattr(self, '_model_bubble_cache_key', None) == cache_key:
             return getattr(self, '_model_bubble_cache_mask', np.zeros(full_image.shape[:2], dtype=np.uint8))
 
         try:
-            result = detect_bubbles_with_mangalens(full_image, return_annotated=False, verbose=False)
-            bubble_mask = build_bubble_mask_from_mangalens_result(result, full_image.shape[:2])
-            detected = len(result.detections) if result is not None else 0
-            self.logger.info(
-                f"Model bubble filter: detected {detected} bubbles, mask_pixels={int(np.count_nonzero(bubble_mask))}"
-            )
+            result = get_cached_bubbles_with_mangalens(full_image, return_annotated=False, verbose=False)
+            if result is None:
+                self.logger.warning("Model bubble filter cache miss, skip model gating for this image")
+                bubble_mask = np.zeros(full_image.shape[:2], dtype=np.uint8)
+            else:
+                bubble_mask = build_bubble_mask_from_mangalens_result(result, full_image.shape[:2])
+                detected = len(result.detections) if result is not None else 0
+                self.logger.info(
+                    f"Model bubble filter cache hit: detected {detected} bubbles, mask_pixels={int(np.count_nonzero(bubble_mask))}"
+                )
         except Exception as e:
-            self.logger.warning(f"Model bubble filter failed, fallback to heuristic filter: {e}")
+            self.logger.warning(f"Model bubble filter cache read failed, fallback to heuristic filter: {e}")
             bubble_mask = np.zeros(full_image.shape[:2], dtype=np.uint8)
 
         self._model_bubble_cache_key = cache_key

@@ -267,7 +267,12 @@ class MangaTranslator:
         return self._translator_name(translator_value) == str(original_value)
 
     def parse_init_params(self, params: dict):
-        self.verbose = params.get('verbose', False)
+        _verbose_raw = params.get('verbose', False)
+        # UI 传入 str ('standard'/'verbose'/'diagnostic')，CLI 传入 bool
+        if isinstance(_verbose_raw, str):
+            self.verbose = _verbose_raw in ('verbose', 'diagnostic')
+        else:
+            self.verbose = bool(_verbose_raw)
         # font_path 优先从配置文件读取，如果没有则使用命令行参数
         self.font_path = params.get('font_path', None)
         self.models_ttl = params.get('models_ttl', 0)
@@ -1557,7 +1562,56 @@ class MangaTranslator:
                 pass
         # --- END NON-MAXIMUM SUPPRESSION (NMS) ---
 
+        # 拆分检测框：
+        # - 前向流程（OCR/翻译）不包含 other
+        # - 保留 other 供 textline_merge 的模型辅助合并阶段使用
+        if result and result[0]:
+            all_textlines = result[0]
+            forward_textlines = []
+            other_textlines = []
+            for txtln in all_textlines:
+                det_label = getattr(txtln, 'det_label', None) or getattr(txtln, 'yolo_label', None)
+                if isinstance(det_label, str) and det_label.strip().lower() == 'other':
+                    other_textlines.append(txtln)
+                else:
+                    forward_textlines.append(txtln)
+            ctx.model_assisted_other_textlines = other_textlines
+            ctx.all_detected_textlines = all_textlines
+            if other_textlines:
+                logger.info(
+                    f"Detection split: total={len(all_textlines)}, "
+                    f"forward={len(forward_textlines)}, other_for_model_assisted_merge={len(other_textlines)}"
+                )
+            result = (forward_textlines, result[1], result[2])
+
+        self._prime_bubble_detection_cache(config, getattr(ctx, 'img_rgb', None))
         return result
+
+    def _should_prime_bubble_cache(self, config: Config) -> bool:
+        render_cfg = getattr(config, 'render', None)
+        ocr_cfg = getattr(config, 'ocr', None)
+        return any(
+            (
+                getattr(render_cfg, 'layout_mode', None) == 'balloon_fill',
+                bool(getattr(ocr_cfg, 'use_model_bubble_filter', False)),
+                bool(getattr(ocr_cfg, 'use_model_bubble_repair_intersection', False)),
+                bool(getattr(ocr_cfg, 'limit_mask_dilation_to_bubble_mask', False)),
+            )
+        )
+
+    def _prime_bubble_detection_cache(self, config: Config, image: Optional[np.ndarray]) -> None:
+        if image is None or getattr(image, 'size', 0) == 0:
+            return
+        if not self._should_prime_bubble_cache(config):
+            return
+        try:
+            from .utils import detect_bubbles_with_mangalens
+            result = detect_bubbles_with_mangalens(image, return_annotated=False, verbose=False)
+            detected = len(result.detections) if result is not None else 0
+            logger.info(f"Bubble cache primed during detection stage: detections={detected}")
+        except Exception as exc:
+            logger.warning(f"Bubble cache priming failed during detection stage: {exc}")
+
     async def _unload_model(self, tool: str, model: str, **kwargs):
         logger.info(f"Unloading {tool} model: {model}")
         match tool:

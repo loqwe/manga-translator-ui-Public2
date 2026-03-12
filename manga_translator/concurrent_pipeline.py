@@ -13,8 +13,11 @@ from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 import functools
 
+import cv2
+import numpy as np
+
 from .utils import Context, load_image
-from .utils.generic import is_mostly_noise_text
+from .utils.generic import is_mostly_noise_text, imwrite_unicode
 from .utils.failure_record import save_failure_record, remove_failure_record
 from .config import Config
 from .rate_limiter import RateLimiter
@@ -269,9 +272,17 @@ class ConcurrentPipeline:
                 ctx.save_quality = self.translator.save_quality
                 ctx.config = config
                 ctx.rate_limiter = self.rate_limiter  # 传递限速器引用，便于翻译器通知 429 错误
-                
+
+                # 设置图片上下文（创建调试子文件夹）
+                self.translator._set_image_context(config, image)
+                from .utils.generic import get_image_md5
+                _img_md5 = get_image_md5(image)
+                self.translator._save_current_image_context(_img_md5)
+                # 保存到 ctx 以便后续阶段恢复
+                ctx._image_md5 = _img_md5
+
                 logger.info(f"[检测+OCR] 处理 {idx+1}/{self.total_images}: {ctx.image_name}")
-                
+
                 # 预处理：加载图片、上色、超分
                 ctx.img_rgb, ctx.img_alpha = load_image(image)
                 
@@ -313,7 +324,31 @@ class ConcurrentPipeline:
                     # yolo_boxes 已经在 _run_detection 中保存到 ctx.yolo_boxes
                 else:
                     ctx.textlines, ctx.mask_raw, ctx.mask = detection_result
-                
+
+                # --- 保存调试图（verbose 模式）---
+                if self.translator.verbose:
+                    try:
+                        # input.png
+                        input_img = np.array(image)
+                        if len(input_img.shape) == 3:
+                            input_img = cv2.cvtColor(input_img, cv2.COLOR_RGB2BGR)
+                        imwrite_unicode(self.translator._result_path('input.png'), input_img, logger)
+                        # mask_raw.png
+                        if ctx.mask_raw is not None:
+                            heatmap = self.translator._create_confidence_heatmap(ctx.mask_raw, equalize=False)
+                            imwrite_unicode(self.translator._result_path('mask_raw.png'), heatmap, logger)
+                        # bboxes_unfiltered.png
+                        if ctx.textlines:
+                            img_bbox_raw = np.copy(ctx.img_rgb)
+                            for txtln in ctx.textlines:
+                                det_label = getattr(txtln, 'det_label', None) or getattr(txtln, 'yolo_label', None)
+                                if isinstance(det_label, str) and det_label.strip().lower() == 'other':
+                                    continue
+                                cv2.polylines(img_bbox_raw, [txtln.pts], True, color=(255, 0, 0), thickness=2)
+                            imwrite_unicode(self.translator._result_path('bboxes_unfiltered.png'), cv2.cvtColor(img_bbox_raw, cv2.COLOR_RGB2BGR), logger)
+                    except Exception as e:
+                        logger.debug(f"[检测+OCR] 保存调试图失败: {e}")
+
                 # OCR（在线程池中执行）
                 ocr_func = functools.partial(
                     asyncio.run,
@@ -326,6 +361,22 @@ class ConcurrentPipeline:
                 # 文本行合并
                 if ctx.textlines:
                     ctx.text_regions = await self.translator._run_textline_merge(config, ctx)
+
+                # bboxes.png（textline merge 后）
+                if self.translator.verbose and ctx.text_regions:
+                    try:
+                        from .utils import visualize_textblocks
+                        show_panels = not config.force_simple_sort
+                        bboxes = visualize_textblocks(
+                            cv2.cvtColor(ctx.img_rgb, cv2.COLOR_RGB2BGR) if ctx.img_rgb is not None else None,
+                            ctx.text_regions,
+                            show_panels=show_panels,
+                            img_rgb=ctx.img_rgb,
+                            right_to_left=config.render.rtl
+                        )
+                        imwrite_unicode(self.translator._result_path('bboxes.png'), bboxes, logger)
+                    except Exception as e:
+                        logger.debug(f"[检测+OCR] 保存bboxes.png失败: {e}")
                 
                 # 文本过滤（根据 OCR 识别的原文过滤）
                 if ctx.text_regions and self.translator.filter_text_enabled:
@@ -1760,7 +1811,11 @@ class ConcurrentPipeline:
                     continue
 
                 logger.info(f"[修复-{worker_id}] 处理: {ctx.image_name}")
-                
+
+                # 恢复图片上下文（确保调试图保存到正确的子文件夹）
+                if hasattr(ctx, '_image_md5'):
+                    self.translator._restore_image_context(ctx._image_md5)
+
                 # Mask refinement（在线程池中执行）
                 if ctx.mask is None and ctx.text_regions:
                     loop = asyncio.get_event_loop()
@@ -1778,7 +1833,18 @@ class ConcurrentPipeline:
                         self.translator._run_inpainting(config, ctx)
                     )
                     ctx.img_inpainted = await loop.run_in_executor(self.executor, inpaint_func)
-                
+
+                # 保存修复阶段调试图（verbose 模式）
+                if self.translator.verbose:
+                    try:
+                        if ctx.mask is not None:
+                            imwrite_unicode(self.translator._result_path('mask_final.png'), ctx.mask, logger)
+                        if ctx.img_inpainted is not None:
+                            inpainted_bgr = cv2.cvtColor(ctx.img_inpainted, cv2.COLOR_RGB2BGR) if len(ctx.img_inpainted.shape) == 3 else ctx.img_inpainted
+                            imwrite_unicode(self.translator._result_path('inpainted.png'), inpainted_bgr, logger)
+                    except Exception as e:
+                        logger.debug(f"[修复-{worker_id}] 保存调试图失败: {e}")
+
                 self.stats['inpaint'] += 1
                 logger.info(f"[修复-{worker_id}] 完成: {ctx.image_name} ({self.stats['inpaint']}/{self.total_images})")
                 
@@ -1880,6 +1946,10 @@ class ConcurrentPipeline:
                 # 使用验证后的ctx
                 ctx = verified_ctx
                 logger.info(f"[渲染] 开始处理: {ctx.image_name}")
+
+                # 恢复图片上下文（确保调试图保存到正确的子文件夹）
+                if hasattr(ctx, '_image_md5'):
+                    self.translator._restore_image_context(ctx._image_md5)
                 
                 # ✅ 检查渲染所需的数据是否完整
                 if not hasattr(ctx, 'img_rgb') or ctx.img_rgb is None:
@@ -1931,6 +2001,16 @@ class ConcurrentPipeline:
                 self.stats['rendering'] += 1
                 rendered_count += 1
                 logger.info(f"[渲染] 完成: {ctx.image_name} ({self.stats['rendering']}/{self.total_images})")
+
+                # 保存 final.png 调试图（verbose 模式）
+                if self.translator.verbose and ctx.result is not None:
+                    try:
+                        final_img = np.array(ctx.result)
+                        if len(final_img.shape) == 3:
+                            final_img = cv2.cvtColor(final_img, cv2.COLOR_RGB2BGR)
+                        imwrite_unicode(self.translator._result_path('final.png'), final_img, logger)
+                    except Exception as e:
+                        logger.debug(f"[渲染] 保存final.png失败: {e}")
                 
                 # ✅ 每张图片渲染完成后发送进度更新（UI进度条适配）
                 try:
