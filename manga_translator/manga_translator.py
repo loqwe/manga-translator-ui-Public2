@@ -4938,8 +4938,8 @@ class MangaTranslator:
                             except asyncio.CancelledError:
                                 raise
                             except Exception as fb_e:
-                                logger.error(f"[HQ降级] 文本翻译也失败，将回退原文: {fb_e}")
-                                return texts
+                                logger.error(f"[HQ降级] 文本翻译也失败: {fb_e}")
+                                raise fb_e
 
                         counts = []
                         for d in batch_data:
@@ -4962,8 +4962,8 @@ class MangaTranslator:
                             except asyncio.CancelledError:
                                 raise
                             except Exception as fb_e:
-                                logger.error(f"[HQ降级] 文本翻译也失败，将回退原文: {fb_e}")
-                                return texts
+                                logger.error(f"[HQ降级] 文本翻译也失败: {fb_e}")
+                                raise fb_e
 
                         results: List[str] = []
                         offset = 0
@@ -5050,20 +5050,18 @@ class MangaTranslator:
                                 except asyncio.CancelledError:
                                     raise
                                 except Exception as fb_e:
-                                    logger.error(f"[HQ降级] 文本翻译也失败，将回退原文: {fb_e}")
-                                    single_trans = list(single_texts)
+                                    logger.error(f"[HQ降级] 文本翻译也失败: {fb_e}")
+                                    raise fb_e
 
                             if (not isinstance(single_trans, list)) or (len(single_trans) != len(single_texts)):
-                                logger.warning(
-                                    f"[HQ降级] 单图结果数量不匹配，将回退原文 (expected={len(single_texts)}, got={len(single_trans) if isinstance(single_trans, list) else 'N/A'})"
+                                raise Exception(
+                                    f"[HQ降级] 单图结果数量不匹配 (expected={len(single_texts)}, got={len(single_trans) if isinstance(single_trans, list) else 'N/A'})"
                                 )
-                                single_trans = list(single_texts)
 
                             results.extend(single_trans)
 
                         if len(results) != len(texts):
-                            logger.warning(f"[HQ降级] 合并后的结果数量不匹配，将回退原文 (expected={len(texts)}, got={len(results)})")
-                            return texts
+                            raise Exception(f"[HQ降级] 合并后的结果数量不匹配 (expected={len(texts)}, got={len(results)})")
 
                         return results
 
