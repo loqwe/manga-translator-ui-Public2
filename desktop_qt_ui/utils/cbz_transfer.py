@@ -65,13 +65,22 @@ class CBZTransfer:
             # 转移每个 CBZ 文件
             for cbz_file in cbz_files:
                 target_path = target_comic_folder / cbz_file.name
+                stem = cbz_file.stem  # e.g. "Chapter_83" or "Chapter_83 [R]"
 
-                # Check if [R] variant exists in target and remove it
-                stem = cbz_file.stem  # e.g. "Chapter_83"
-                r_variant = target_comic_folder / f"{stem} [R].cbz"
-                if r_variant.exists() and r_variant != target_path:
-                    print(f"↻ 删除 [R] 版本: {r_variant.name} (被 {cbz_file.name} 替代)")
-                    r_variant.unlink()
+                # Source has [R] suffix, target has non-[R] version → skip
+                if stem.endswith(' [R]'):
+                    base_stem = stem[:-4]  # strip " [R]"
+                    non_r_variant = target_comic_folder / f"{base_stem}.cbz"
+                    if non_r_variant.exists():
+                        print(f"⚠ 跳过（目标已有无[R]版本）: {cbz_file.name}")
+                        continue
+
+                # Source has no [R] suffix, target has [R] version → delete [R] version
+                if not stem.endswith(' [R]'):
+                    r_variant = target_comic_folder / f"{stem} [R].cbz"
+                    if r_variant.exists():
+                        print(f"↻ 删除 [R] 版本: {r_variant.name} (被 {cbz_file.name} 替代)")
+                        r_variant.unlink()
 
                 # Check if target already exists, compare sizes
                 if target_path.exists():
