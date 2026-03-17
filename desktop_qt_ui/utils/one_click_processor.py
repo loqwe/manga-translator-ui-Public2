@@ -201,7 +201,19 @@ class OneClickProcessor:
                         except Exception as e:
                             self._report_progress(f"  ⚠ 重命名失败 {old_name}: {e}")
                     else:
-                        self._report_progress(f"  ⚠ 目标文件夹已存在: {new_name}")
+                        # Target exists, merge contents into it
+                        try:
+                            for item in chapter_folder.iterdir():
+                                dst = new_path / item.name
+                                if not dst.exists():
+                                    shutil.move(str(item), str(dst))
+                            # Remove empty source folder
+                            if not any(chapter_folder.iterdir()):
+                                chapter_folder.rmdir()
+                            organized.append((str(chapter_folder), str(new_path)))
+                            self._report_progress(f"  • 合并: {old_name} → {new_name}")
+                        except Exception as e:
+                            self._report_progress(f"  ⚠ 合并失败 {old_name}: {e}")
                 continue
             
             try:
