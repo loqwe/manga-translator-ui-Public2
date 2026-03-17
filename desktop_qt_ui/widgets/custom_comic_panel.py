@@ -111,18 +111,36 @@ class ProcessThread(QThread):
     """处理线程"""
     progress = pyqtSignal(str)
     finished = pyqtSignal(dict)
-    
+
     def __init__(self, processor):
         super().__init__()
         self.processor = processor
         self.processor.progress_callback = self.report_progress
-    
+
     def report_progress(self, message: str):
         self.progress.emit(message)
-    
+
     def run(self):
         results = self.processor.process_all()
         self.finished.emit(results)
+
+
+class RollbackThread(QThread):
+    """回退线程"""
+    progress = pyqtSignal(str)
+    finished = pyqtSignal(bool)
+
+    def __init__(self, processor):
+        super().__init__()
+        self.processor = processor
+        self.processor.progress_callback = self.report_progress
+
+    def report_progress(self, message: str):
+        self.progress.emit(message)
+
+    def run(self):
+        success = self.processor.rollback()
+        self.finished.emit(success)
 
 
 class CustomComicPanel(QWidget):
@@ -230,6 +248,12 @@ class CustomComicPanel(QWidget):
         self.process_btn.clicked.connect(self.start_processing)
         self.process_btn.setStyleSheet("background-color: #0078d4; color: white; padding: 5px;")
         btn_layout.addWidget(self.process_btn)
+
+        self.rollback_btn = QPushButton("回退上次处理")
+        self.rollback_btn.clicked.connect(self.start_rollback)
+        self.rollback_btn.setStyleSheet("background-color: #d45500; color: white; padding: 5px;")
+        btn_layout.addWidget(self.rollback_btn)
+
         layout.addRow("", btn_layout)
         
         return group
@@ -393,11 +417,55 @@ class CustomComicPanel(QWidget):
     def on_finished(self, results: dict):
         """处理完成"""
         self.process_btn.setEnabled(True)
-        total = (len(results.get('organized', [])) + 
-                len(results.get('compressed', [])) + 
+        self.rollback_btn.setEnabled(True)
+        total = (len(results.get('organized', [])) +
+                len(results.get('compressed', [])) +
                 len(results.get('transferred', [])))
         self.result_text.append(f"\n✓ 处理完成！共完成 {total} 项操作")
         QMessageBox.information(self, "完成", f"一键处理完成\n共处理 {total} 项")
+
+    def start_rollback(self):
+        """回退上次一键处理"""
+        if not OneClickProcessor:
+            QMessageBox.warning(self, "错误", "无法加载处理模块，请检查依赖文件")
+            return
+
+        input_folder = self.input_folder_edit.text()
+        output_folder = self.output_folder_edit.text()
+
+        if not input_folder or not os.path.exists(input_folder):
+            QMessageBox.warning(self, "错误", "输入文件夹不存在")
+            return
+
+        reply = QMessageBox.question(
+            self, "确认回退",
+            "确定要回退上次一键处理的所有操作吗？\n（转移、压缩、组织将全部撤销）",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self.result_text.clear()
+        self.result_text.append("开始回退上次处理...")
+        self.process_btn.setEnabled(False)
+        self.rollback_btn.setEnabled(False)
+
+        processor = OneClickProcessor(input_folder, output_folder)
+        self.rollback_thread = RollbackThread(processor)
+        self.rollback_thread.progress.connect(self.on_progress)
+        self.rollback_thread.finished.connect(self.on_rollback_finished)
+        self.rollback_thread.start()
+
+    def on_rollback_finished(self, success: bool):
+        """回退完成"""
+        self.process_btn.setEnabled(True)
+        self.rollback_btn.setEnabled(True)
+        if success:
+            self.result_text.append("\n✓ 回退完成！")
+            QMessageBox.information(self, "完成", "回退成功，所有操作已撤销")
+        else:
+            self.result_text.append("\n⚠ 回退完成，但有部分错误")
+            QMessageBox.warning(self, "警告", "回退完成，但有部分操作失败，请查看日志")
 
     # ============ Settings persistence ============
     def _settings(self) -> QSettings:
