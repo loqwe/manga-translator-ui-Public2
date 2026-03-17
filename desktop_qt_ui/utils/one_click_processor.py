@@ -5,12 +5,17 @@
 功能：整合名称替换、CBZ压缩、文件转移三个步骤
 """
 
+import json
+import shutil
 from pathlib import Path
 from typing import Dict, List, Tuple, Callable, Optional
 
 from name_replacer import NameReplacer
 from cbz_compressor import CBZCompressor, is_cjk_origin
 from cbz_transfer import CBZTransfer
+
+# Rollback record file name
+ROLLBACK_FILE = "_last_process_rollback.json"
 
 
 class OneClickProcessor:
@@ -157,7 +162,10 @@ class OneClickProcessor:
         self._report_progress(f"文件转移: {len(self.results['transferred'])} 个")
         if self.results['errors']:
             self._report_progress(f"错误: {len(self.results['errors'])} 个")
-        
+
+        # Save rollback record
+        self._save_rollback()
+
         return self.results
     
     def step_organize(self) -> List[Tuple[str, str]]:
@@ -371,5 +379,107 @@ class OneClickProcessor:
             if comic_info['chapters'] or comic_info['cbz_count']:
                 preview_info['comic_folders'].append(comic_info)
                 preview_info['estimated_operations'] += len(comic_info['chapters']) + comic_info['cbz_count']
-        
+
         return preview_info
+
+    def _save_rollback(self):
+        """Save rollback record to JSON file after processing."""
+        rollback_path = self.input_folder / ROLLBACK_FILE
+        try:
+            with open(rollback_path, 'w', encoding='utf-8') as f:
+                json.dump(self.results, f, ensure_ascii=False, indent=2)
+            self._report_progress(f"• 回退记录已保存")
+        except Exception as e:
+            self._report_progress(f"⚠ 保存回退记录失败: {e}")
+
+    def rollback(self) -> bool:
+        """
+        Rollback the last one-click process.
+        Order: transfer → compress → organize (reverse of process_all).
+
+        Returns:
+            True if rollback succeeded, False otherwise.
+        """
+        rollback_path = self.input_folder / ROLLBACK_FILE
+        if not rollback_path.exists():
+            self._report_progress("❌ 没有找到回退记录")
+            return False
+
+        try:
+            with open(rollback_path, 'r', encoding='utf-8') as f:
+                records = json.load(f)
+        except Exception as e:
+            self._report_progress(f"❌ 读取回退记录失败: {e}")
+            return False
+
+        errors = []
+
+        # Step 1: Reverse transfer (move CBZ back from output to input)
+        self._report_progress("=" * 60)
+        self._report_progress("回退 1/3: 撤销文件转移")
+        self._report_progress("=" * 60)
+        for src, dst in records.get('transferred', []):
+            dst_path = Path(dst)
+            src_path = Path(src)
+            if dst_path.exists():
+                src_path.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    shutil.move(str(dst_path), str(src_path))
+                    self._report_progress(f"  ↩ {dst_path.name} → {src_path.parent.name}/")
+                except Exception as e:
+                    errors.append(f"转移回退失败 {dst_path.name}: {e}")
+                    self._report_progress(f"  ❌ {errors[-1]}")
+
+        # Step 2: Reverse compress (delete generated CBZ files)
+        self._report_progress("")
+        self._report_progress("=" * 60)
+        self._report_progress("回退 2/3: 删除生成的CBZ文件")
+        self._report_progress("=" * 60)
+        for _, cbz_path_str in records.get('compressed', []):
+            cbz_path = Path(cbz_path_str)
+            if cbz_path.exists():
+                try:
+                    cbz_path.unlink()
+                    self._report_progress(f"  ↩ 删除: {cbz_path.name}")
+                except Exception as e:
+                    errors.append(f"删除CBZ失败 {cbz_path.name}: {e}")
+                    self._report_progress(f"  ❌ {errors[-1]}")
+
+        # Step 3: Reverse organize (move chapter folders back to input root)
+        self._report_progress("")
+        self._report_progress("=" * 60)
+        self._report_progress("回退 3/3: 撤销文件夹组织")
+        self._report_progress("=" * 60)
+        for original, moved_to in records.get('organized', []):
+            moved_path = Path(moved_to)
+            original_path = Path(original)
+            if moved_path.exists():
+                try:
+                    shutil.move(str(moved_path), str(original_path))
+                    self._report_progress(f"  ↩ {moved_path.name} → {original_path.parent.name}/")
+                except Exception as e:
+                    errors.append(f"组织回退失败 {moved_path.name}: {e}")
+                    self._report_progress(f"  ❌ {errors[-1]}")
+            # Clean up empty comic folder
+            parent = moved_path.parent
+            if parent.exists() and parent != self.input_folder and not any(parent.iterdir()):
+                try:
+                    parent.rmdir()
+                    self._report_progress(f"  ↩ 删除空文件夹: {parent.name}")
+                except Exception:
+                    pass
+
+        # Summary
+        self._report_progress("")
+        self._report_progress("=" * 60)
+        if errors:
+            self._report_progress(f"回退完成，但有 {len(errors)} 个错误")
+        else:
+            self._report_progress("回退完成！")
+            try:
+                rollback_path.unlink()
+            except Exception:
+                pass
+        self._report_progress("=" * 60)
+
+        return len(errors) == 0
