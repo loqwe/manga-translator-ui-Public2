@@ -5,11 +5,10 @@ from dataclasses import dataclass
 import os
 import threading
 from pathlib import Path
-from typing import Any, Dict, Optional, Sequence, Tuple, Union
+from typing import Any, Optional, Sequence, Union
 
 import cv2
 import numpy as np
-import torch
 
 from .generic import BASE_PATH
 from .inference import ModelWrapper
@@ -57,24 +56,22 @@ class _SimpleRawResult:
 
 class MangaLensBubbleDetector(ModelWrapper):
     """
-    Lightweight backend detector for `models/detection/mangalens.pt`.
-    Loads the serialized PyTorch checkpoint directly and runs manual postprocess.
+    Lightweight backend detector for `models/detection/mangalens.onnx`.
+    Uses pure ONNX Runtime (no ultralytics dependency).
     """
 
     _MODEL_SUB_DIR = "detection"
-    _MODEL_FILENAME = "mangalens.pt"
-    _SOURCE_CHECKPOINT_FILENAME = "mangalens.pt"
-    _LEGACY_MODEL_FILENAMES = ("best.pt",)
+    _DEFAULT_MODEL_URLS = [
+        # Keep consistent with other models (same ModelScope repo as OCR, detector, etc.).
+        "https://www.modelscope.cn/models/hgmzhn/manga-translator-ui/resolve/master/mangalens.onnx",
+    ]
     _MODEL_MAPPING = {
         "model": {
-            "url": [
-                "https://www.modelscope.cn/models/hgmzhn/manga-translator-ui/resolve/master/mangalens.pt",
-            ],
-            "hash": "4028152940f7c910f40192f46ede3b3f6c7129e5c76849c324d3564f8ac50198",
-            "file": "mangalens.pt",
-        },
+            "url": _DEFAULT_MODEL_URLS,
+            "file": "mangalens.onnx",
+        }
     }
-    DEFAULT_MODEL_PATH = Path(BASE_PATH) / "models" / "detection" / _MODEL_FILENAME
+    DEFAULT_MODEL_PATH = Path(BASE_PATH) / "models" / "detection" / "mangalens.onnx"
 
     def __init__(
         self,
@@ -95,49 +92,30 @@ class MangaLensBubbleDetector(ModelWrapper):
         self.default_device = device or self._auto_select_device()
 
         self.model = None
+        self._input_name: Optional[str] = None
+        self._output_names: Optional[list[str]] = None
         self._session_device = "cpu"
-        self._torch_device = torch.device("cpu")
         self._provider_logged = False
         self._device_logged = False
 
+        model_url_override = os.getenv("MANGALENS_MODEL_URL", "").strip()
+        model_urls: list[str] = []
+        if model_url_override:
+            model_urls.append(model_url_override)
+        model_urls.extend(self._DEFAULT_MODEL_URLS)
+        model_urls = list(dict.fromkeys(model_urls))
+        self._MODEL_MAPPING = {
+            "model": {
+                "url": model_urls,
+                "file": "mangalens.onnx",
+            }
+        }
+
         super().__init__()
-        self.model_path = self._resolve_model_path()
+        self.model_path = self._custom_model_path if self._custom_model_path else Path(self._get_file_path("mangalens.onnx"))
 
         if auto_load:
             self.load_model()
-
-    def _resolve_model_path(self) -> Path:
-        if self._custom_model_path:
-            return self._custom_model_path
-
-        preferred_path = Path(self._get_file_path(self._MODEL_FILENAME))
-        return self._migrate_legacy_model_path(preferred_path)
-
-    def _migrate_legacy_model_path(self, preferred_path: Path) -> Path:
-        if preferred_path.exists():
-            return preferred_path
-
-        for legacy_name in self._LEGACY_MODEL_FILENAMES:
-            legacy_path = Path(self._get_file_path(legacy_name))
-            if not legacy_path.exists():
-                continue
-            try:
-                preferred_path.parent.mkdir(parents=True, exist_ok=True)
-                legacy_path.replace(preferred_path)
-                self.logger.info(
-                    f"Migrated MangaLens model filename: {legacy_path.name} -> {preferred_path.name}"
-                )
-                return preferred_path
-            except OSError as exc:
-                self.logger.warning(
-                    f"Failed to rename legacy MangaLens model {legacy_path} to {preferred_path}: {exc}"
-                )
-                return legacy_path
-
-        return preferred_path
-
-    def _check_downloaded(self) -> bool:
-        return self._resolve_model_path().exists()
 
     @staticmethod
     def _run_coro_sync(coro):
@@ -181,8 +159,6 @@ class MangaLensBubbleDetector(ModelWrapper):
         dev = (device or "cpu").lower()
         if dev.startswith("cuda"):
             return "cuda"
-        if dev.startswith("mps"):
-            return "mps"
         return "cpu"
 
     @staticmethod
@@ -204,15 +180,41 @@ class MangaLensBubbleDetector(ModelWrapper):
             return self.default_device
         return self._auto_select_device()
 
-    def _resolve_torch_device(self, runtime_device: str) -> torch.device:
+    def _create_ort_session(self, runtime_device: str):
+        try:
+            import onnxruntime as ort
+        except Exception as exc:
+            raise ImportError(
+                "onnxruntime is required for MangaLens ONNX inference. "
+                "Install with: pip install onnxruntime-gpu (or onnxruntime)"
+            ) from exc
+
+        sess_options = ort.SessionOptions()
+        sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        sess_options.log_severity_level = 3
+
         wanted = self._normalize_device(runtime_device)
-        if wanted == "cuda" and torch.cuda.is_available():
-            return torch.device(runtime_device)
-        if wanted == "mps" and getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
-            return torch.device("mps")
-        if wanted != "cpu":
-            self.logger.warning(f"Bubble detector requested {runtime_device}, but it is unavailable. Falling back to CPU.")
-        return torch.device("cpu")
+        providers: list[Any] = ["CPUExecutionProvider"]
+
+        if wanted == "cuda":
+            if hasattr(ort, "preload_dlls"):
+                try:
+                    ort.preload_dlls()
+                except Exception as exc:
+                    self.logger.warning(f"onnxruntime.preload_dlls() failed: {exc}")
+            available = ort.get_available_providers()
+            if not self._provider_logged:
+                self.logger.debug(f"MangaLens ONNX available providers: {available}")
+                self._provider_logged = True
+            if "CUDAExecutionProvider" in available:
+                providers = [("CUDAExecutionProvider", {"device_id": 0}), "CPUExecutionProvider"]
+            else:
+                self.logger.warning("CUDAExecutionProvider not available, fallback to CPU")
+
+        session = ort.InferenceSession(str(self.model_path), sess_options=sess_options, providers=providers)
+        active = "cuda" if "CUDAExecutionProvider" in session.get_providers() else "cpu"
+        self.logger.debug(f"MangaLens ONNX session providers: {session.get_providers()}")
+        return session, active
 
     def load_model(self, device: Optional[str] = None):
         runtime_device = self._resolve_runtime_device(device)
@@ -228,34 +230,19 @@ class MangaLensBubbleDetector(ModelWrapper):
             if not self.model_path.exists():
                 raise FileNotFoundError(f"MangaLens model not found: {self.model_path}")
 
-        torch_device = self._resolve_torch_device(runtime_device)
-        load_path = os.path.relpath(str(self.model_path), os.getcwd())
-        if not os.path.exists(load_path):
-            load_path = str(self.model_path)
-
-        checkpoint = torch.load(load_path, map_location="cpu", weights_only=False)
-        if isinstance(checkpoint, dict):
-            model = checkpoint.get("ema") or checkpoint.get("model")
-            if model is None:
-                raise TypeError(f"Unsupported bubble detector checkpoint structure: {type(checkpoint)}")
-        else:
-            model = checkpoint
-        if not isinstance(model, torch.nn.Module):
-            raise TypeError(f"Bubble detector checkpoint did not resolve to a torch.nn.Module: {type(model)}")
-        model = model.float().eval()
-        for param in model.parameters():
-            param.requires_grad_(False)
-        model.to(torch_device)
-        self.model = model
-        self._torch_device = torch_device
-        self._session_device = torch_device.type
+        session, active = self._create_ort_session(runtime_device)
+        self.model = session
+        self._input_name = session.get_inputs()[0].name
+        self._output_names = [o.name for o in session.get_outputs()]
+        self._session_device = active
         self.logger.debug(f"MangaLens model loaded: {self.model_path} (device={self._session_device})")
         return self.model
 
     def unload_model(self):
         self.model = None
+        self._input_name = None
+        self._output_names = None
         self._session_device = "cpu"
-        self._torch_device = torch.device("cpu")
 
     async def _load(self, device: str, *args, **kwargs):
         self.load_model(device=device)
@@ -492,30 +479,6 @@ class MangaLensBubbleDetector(ModelWrapper):
         down_scale_ratio = h / float(max(target_size, 1))
         return down_scale_ratio > 2.5 and asp_ratio > 3.0
 
-    def _run_model(self, blob: np.ndarray) -> list[np.ndarray]:
-        if self.model is None:
-            raise RuntimeError("Bubble detector model is not loaded")
-
-        tensor = torch.from_numpy(blob).to(self._torch_device)
-        with torch.inference_mode():
-            outputs = self.model(tensor)
-
-        if isinstance(outputs, torch.Tensor):
-            return [self._to_numpy(outputs)]
-        if isinstance(outputs, (list, tuple)):
-            if len(outputs) == 0:
-                return []
-            first = outputs[0]
-            if isinstance(first, (list, tuple)):
-                return [self._to_numpy(output) for output in first]
-            meta = outputs[1] if len(outputs) > 1 and isinstance(outputs[1], dict) else None
-            if meta is not None and isinstance(first, torch.Tensor):
-                proto = meta.get("proto")
-                if proto is not None:
-                    return [self._to_numpy(first), self._to_numpy(proto)]
-            return [self._to_numpy(output) for output in outputs if isinstance(output, torch.Tensor)]
-        raise TypeError(f"Unsupported bubble detector output type: {type(outputs)}")
-
     def _infer_single(
         self,
         session: Any,
@@ -534,7 +497,8 @@ class MangaLensBubbleDetector(ModelWrapper):
         blob = img_lb.transpose(2, 0, 1)[None].astype(np.float32) / 255.0
         blob = np.ascontiguousarray(blob)
 
-        outputs = self._run_model(blob)
+        assert self._input_name is not None and self._output_names is not None
+        outputs = session.run(self._output_names, {self._input_name: blob})
         return self._postprocess(
             outputs=outputs,
             conf_thres=conf_thres,
@@ -764,7 +728,7 @@ class MangaLensBubbleDetector(ModelWrapper):
         session = self.load_model(device=active_device)
 
         if not self._device_logged:
-            self.logger.debug(f"MangaLens detect device request: {active_device}, active_session={self._session_device}")
+            self.logger.info(f"MangaLens detect device request: {active_device}, active_session={self._session_device}")
             self._device_logged = True
 
         img = self._load_input_image(image)
@@ -825,6 +789,15 @@ class MangaLensBubbleDetector(ModelWrapper):
         annotated_image = None
         if return_annotated:
             annotated_image = img.copy()
+            # Draw filled semi-transparent bubble masks if available
+            if simple_masks is not None and simple_masks.xy:
+                overlay = annotated_image.copy()
+                for poly in simple_masks.xy:
+                    if poly.shape[0] >= 3:
+                        pts = poly.astype(np.int32).reshape((-1, 1, 2))
+                        cv2.fillPoly(overlay, [pts], (100, 120, 255))
+                cv2.addWeighted(overlay, 0.45, annotated_image, 0.55, 0, annotated_image)
+            # Draw bounding boxes and labels on top
             for det in detections:
                 x1, y1, x2, y2 = [int(round(v)) for v in det.xyxy]
                 cv2.rectangle(annotated_image, (x1, y1), (x2, y2), (255, 64, 64), 2)
@@ -851,7 +824,7 @@ class MangaLensBubbleDetector(ModelWrapper):
 
 
 _default_detector: Optional[MangaLensBubbleDetector] = None
-_mangalens_result_cache: Dict[Tuple[Any, ...], BubbleDetectionResult] = {}
+_mangalens_result_cache: dict[tuple[Any, ...], BubbleDetectionResult] = {}
 _MANGALENS_RESULT_CACHE_MAX = 8
 
 
@@ -862,7 +835,7 @@ def get_mangalens_detector(model_path: Optional[Union[str, Path]] = None) -> Man
     return _default_detector
 
 
-def _normalize_cache_classes(classes: Any) -> Optional[Tuple[int, ...]]:
+def _normalize_cache_classes(classes: Any) -> Optional[tuple[int, ...]]:
     if classes is None:
         return None
     if isinstance(classes, np.ndarray):
@@ -881,7 +854,7 @@ def _normalize_cache_classes(classes: Any) -> Optional[Tuple[int, ...]]:
         return None
 
 
-def _make_cache_image_key(image: ImageInput) -> Tuple[Any, ...]:
+def _make_cache_image_key(image: ImageInput) -> tuple[Any, ...]:
     if isinstance(image, np.ndarray):
         try:
             ptr = int(image.__array_interface__['data'][0])
@@ -894,8 +867,8 @@ def _make_cache_image_key(image: ImageInput) -> Tuple[Any, ...]:
 def _make_mangalens_cache_key(
     image: ImageInput,
     model_path: Optional[Union[str, Path]],
-    kwargs: Dict[str, Any],
-) -> Tuple[Any, ...]:
+    kwargs: dict[str, Any],
+) -> tuple[Any, ...]:
     return (
         _make_cache_image_key(image),
         str(model_path) if model_path is not None else None,
@@ -907,7 +880,7 @@ def _make_mangalens_cache_key(
     )
 
 
-def _put_cache(key: Tuple[Any, ...], value: BubbleDetectionResult):
+def _put_cache(key: tuple[Any, ...], value: BubbleDetectionResult):
     _mangalens_result_cache[key] = value
     # Keep cache bounded and simple.
     while len(_mangalens_result_cache) > _MANGALENS_RESULT_CACHE_MAX:
@@ -915,9 +888,37 @@ def _put_cache(key: Tuple[Any, ...], value: BubbleDetectionResult):
         _mangalens_result_cache.pop(oldest_key, None)
 
 
+def detect_bubbles_with_mangalens(
+    image: ImageInput,
+    model_path: Optional[Union[str, Path]] = None,
+    **kwargs,
+) -> BubbleDetectionResult:
+    use_cache = not bool(kwargs.get("return_annotated", False))
+    cache_key = _make_mangalens_cache_key(image, model_path, kwargs) if use_cache else None
+    if use_cache and cache_key is not None:
+        cached = _mangalens_result_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+    detector = get_mangalens_detector(model_path=model_path)
+    result = detector.detect(image, **kwargs)
+    if use_cache and cache_key is not None:
+        _put_cache(cache_key, result)
+    return result
+
+
+def get_cached_bubbles_with_mangalens(
+    image: ImageInput,
+    model_path: Optional[Union[str, Path]] = None,
+    **kwargs,
+) -> Optional[BubbleDetectionResult]:
+    cache_key = _make_mangalens_cache_key(image, model_path, kwargs)
+    return _mangalens_result_cache.get(cache_key)
+
+
 def build_bubble_mask_from_mangalens_result(
     result: Optional[BubbleDetectionResult],
-    image_shape: Tuple[int, int],
+    image_shape: tuple[int, int],
 ) -> np.ndarray:
     h, w = int(image_shape[0]), int(image_shape[1])
     mask = np.zeros((h, w), dtype=np.uint8)
@@ -968,31 +969,3 @@ def build_bubble_mask_from_mangalens_result(
                 cv2.rectangle(mask, (ix1, iy1), (ix2, iy2), 255, -1)
 
     return mask
-
-
-def detect_bubbles_with_mangalens(
-    image: ImageInput,
-    model_path: Optional[Union[str, Path]] = None,
-    **kwargs,
-) -> BubbleDetectionResult:
-    use_cache = not bool(kwargs.get("return_annotated", False))
-    cache_key = _make_mangalens_cache_key(image, model_path, kwargs) if use_cache else None
-    if use_cache and cache_key is not None:
-        cached = _mangalens_result_cache.get(cache_key)
-        if cached is not None:
-            return cached
-
-    detector = get_mangalens_detector(model_path=model_path)
-    result = detector.detect(image, **kwargs)
-    if use_cache and cache_key is not None:
-        _put_cache(cache_key, result)
-    return result
-
-
-def get_cached_bubbles_with_mangalens(
-    image: ImageInput,
-    model_path: Optional[Union[str, Path]] = None,
-    **kwargs,
-) -> Optional[BubbleDetectionResult]:
-    cache_key = _make_mangalens_cache_key(image, model_path, kwargs)
-    return _mangalens_result_cache.get(cache_key)
