@@ -23,6 +23,14 @@
           {
             "original": "정다은",
             "translation": "郑多恩"
+          },
+          {
+            "original": "대우",
+            "translation": "大宇"
+          },
+          {
+            "original": "재근",
+            "translation": "在根"
           }
         ],
         "Location": [],
@@ -108,6 +116,26 @@
           {
             "original": "봉수",
             "translation": "奉秀"
+          },
+          {
+            "original": "시현이",
+            "translation": "时贤"
+          },
+          {
+            "original": "빨간망토",
+            "translation": "小红帽"
+          },
+          {
+            "original": "드리",
+            "translation": "德里"
+          },
+          {
+            "original": "채아",
+            "translation": "彩儿"
+          },
+          {
+            "original": "강선호",
+            "translation": "姜善浩"
           }
         ],
         "Location": [
@@ -142,6 +170,18 @@
           {
             "original": "SUCURSAL 2",
             "translation": "2号分店"
+          },
+          {
+            "original": "원툰왕국",
+            "translation": "元通王国"
+          },
+          {
+            "original": "뉴토끼",
+            "translation": "纽兔"
+          },
+          {
+            "original": "정조역전월드",
+            "translation": "贞操逆转世界"
           }
         ],
         "Org": [
@@ -149,6 +189,10 @@
             "original": "러닝크루",
             "translation": "跑步团",
             "lang": "ko"
+          },
+          {
+            "original": "TEMPLE OF EXQUISITE",
+            "translation": "精致神殿"
           }
         ],
         "Item": [
@@ -170,6 +214,10 @@
           {
             "original": "Rotor",
             "translation": "跳蛋"
+          },
+          {
+            "original": "전동 안마기",
+            "translation": "电动按摩器"
           }
         ],
         "Skill": [
@@ -349,9 +397,30 @@
           {
             "original": "윤혜윤",
             "translation": "尹惠允"
+          },
+          {
+            "original": "야름",
+            "translation": "雅凛"
+          },
+          {
+            "original": "왕국는토끼1469",
+            "translation": "王国兔子1469"
+          },
+          {
+            "original": "장미희",
+            "translation": "张美熙"
+          },
+          {
+            "original": "공부담당미희",
+            "translation": "学习担当美熙"
           }
         ],
-        "Location": [],
+        "Location": [
+          {
+            "original": "라피카",
+            "translation": "拉皮卡"
+          }
+        ],
         "Org": [],
         "Item": [],
         "Skill": [],
@@ -426,6 +495,14 @@
           {
             "original": "최국봉",
             "translation": "崔国峰"
+          },
+          {
+            "original": "민아",
+            "translation": "敏儿"
+          },
+          {
+            "original": "상아",
+            "translation": "尚雅"
           }
         ],
         "Location": [],
@@ -491,12 +568,29 @@
           {
             "original": "마리아",
             "translation": "玛利亚"
+          },
+          {
+            "original": "세하",
+            "translation": "世河"
+          },
+          {
+            "original": "김문도",
+            "translation": "金文道"
+          },
+          {
+            "original": "김제타",
+            "translation": "金杰塔"
           }
         ],
         "Location": [],
         "Org": [],
         "Item": [],
-        "Skill": [],
+        "Skill": [
+          {
+            "original": "잉태 의식",
+            "translation": "受孕仪式"
+          }
+        ],
         "Creature": []
       },
       "我的掌上明珠": {
@@ -572,6 +666,18 @@
           {
             "original": "단장님",
             "translation": "团长"
+          },
+          {
+            "original": "은남",
+            "translation": "恩南"
+          },
+          {
+            "original": "나희",
+            "translation": "娜熙"
+          },
+          {
+            "original": "야경",
+            "translation": "夜景"
           }
         ],
         "Location": [],
@@ -679,6 +785,10 @@
           {
             "original": "오나희",
             "translation": "吴娜熙"
+          },
+          {
+            "original": "도지유",
+            "translation": "都智友"
           }
         ],
         "Location": [
@@ -750,6 +860,14 @@
           {
             "original": "이현우",
             "translation": "李贤宇"
+          },
+          {
+            "original": "기철",
+            "translation": "奇哲"
+          },
+          {
+            "original": "벨루가",
+            "translation": "白鲸"
           }
         ],
         "Location": [
@@ -1085,6 +1203,10 @@
             "original": "래빗",
             "translation": "小兔",
             "lang": "ko"
+          },
+          {
+            "original": "오곡전도사",
+            "translation": "五谷传道士"
           }
         ],
         "Location": [
@@ -1132,6 +1254,26 @@
             "original": "노예각인",
             "translation": "奴隶烙印",
             "lang": "ko"
+          },
+          {
+            "original": "보시절정술",
+            "translation": "视淫绝顶术"
+          },
+          {
+            "original": "기습보지절정술",
+            "translation": "突袭小穴高潮术"
+          },
+          {
+            "original": "노예보지서약",
+            "translation": "骚逼奴隶誓约"
+          },
+          {
+            "original": "노예보지각인",
+            "translation": "骚逼奴隶烙印"
+          },
+          {
+            "original": "교배프레스",
+            "translation": "交配式"
           }
         ],
         "Creature": [
@@ -1303,6 +1445,18 @@
           {
             "original": "성유나",
             "translation": "成宥娜"
+          },
+          {
+            "original": "우진",
+            "translation": "宇镇"
+          },
+          {
+            "original": "조사장님",
+            "translation": "曹老板"
+          },
+          {
+            "original": "라니",
+            "translation": "拉妮"
           }
         ],
         "Org": [
@@ -1524,6 +1678,10 @@
             "original": "인하",
             "translation": "仁荷",
             "lang": "auto"
+          },
+          {
+            "original": "정인하",
+            "translation": "郑仁荷"
           }
         ],
         "Location": [
@@ -1533,7 +1691,16 @@
             "lang": "auto"
           }
         ],
-        "Org": [],
+        "Org": [
+          {
+            "original": "서흥",
+            "translation": "瑞兴"
+          },
+          {
+            "original": "IP운영실",
+            "translation": "IP运营室"
+          }
+        ],
         "Item": [],
         "Skill": [],
         "Creature": [
@@ -1551,6 +1718,20 @@
           "original": "ユニカ",
           "translation": "优妮卡",
           "raw_work_name": "QQ"
+        },
+        {
+          "original": "Hoonsang",
+          "translation": "勋尚",
+          "raw_work_name": "longxin"
+        },
+        {
+          "original": "Yuna",
+          "translation": "宥娜",
+          "raw_work_name": "longxin"
+        },
+        {
+          "original": "LEE KYUNG",
+          "translation": "李京"
         }
       ],
       "Location": [],
@@ -1560,6 +1741,11 @@
           "original": "ノヴァ",
           "translation": "诺瓦",
           "raw_work_name": "QQ"
+        },
+        {
+          "original": "MOBY DICK",
+          "translation": "白鲸记",
+          "raw_work_name": "longxin"
         }
       ],
       "Skill": [],
@@ -2460,6 +2646,74 @@
       {
         "original": "오나희",
         "translation": "吴娜熙"
+      },
+      {
+        "original": "시현이",
+        "translation": "时贤"
+      },
+      {
+        "original": "야름",
+        "translation": "雅凛"
+      },
+      {
+        "original": "왕국는토끼1469",
+        "translation": "王国兔子1469"
+      },
+      {
+        "original": "조사장님",
+        "translation": "曹老板"
+      },
+      {
+        "original": "도지유",
+        "translation": "都智友"
+      },
+      {
+        "original": "대우",
+        "translation": "大宇"
+      },
+      {
+        "original": "재근",
+        "translation": "在根"
+      },
+      {
+        "original": "라니",
+        "translation": "拉妮"
+      },
+      {
+        "original": "드리",
+        "translation": "德里"
+      },
+      {
+        "original": "채아",
+        "translation": "彩儿"
+      },
+      {
+        "original": "장미희",
+        "translation": "张美熙"
+      },
+      {
+        "original": "공부담당미희",
+        "translation": "学习担当美熙"
+      },
+      {
+        "original": "정인하",
+        "translation": "郑仁荷"
+      },
+      {
+        "original": "오곡전도사",
+        "translation": "五谷传道士"
+      },
+      {
+        "original": "상아",
+        "translation": "尚雅"
+      },
+      {
+        "original": "기철",
+        "translation": "奇哲"
+      },
+      {
+        "original": "벨루가",
+        "translation": "白鲸"
       }
     ],
     "Location": [
@@ -2600,6 +2854,22 @@
       {
         "original": "드림마트",
         "translation": "梦想超市"
+      },
+      {
+        "original": "라피카",
+        "translation": "拉皮卡"
+      },
+      {
+        "original": "원툰왕국",
+        "translation": "元通王国"
+      },
+      {
+        "original": "뉴토끼",
+        "translation": "纽兔"
+      },
+      {
+        "original": "정조역전월드",
+        "translation": "贞操逆转世界"
       }
     ],
     "Org": [
@@ -2697,6 +2967,18 @@
       {
         "original": "달자 식품",
         "translation": "达子食品"
+      },
+      {
+        "original": "TEMPLE OF EXQUISITE",
+        "translation": "精致神殿"
+      },
+      {
+        "original": "서흥",
+        "translation": "瑞兴"
+      },
+      {
+        "original": "IP운영실",
+        "translation": "IP运营室"
       }
     ],
     "Item": [
@@ -2754,6 +3036,10 @@
       {
         "original": "로터",
         "translation": "跳蛋"
+      },
+      {
+        "original": "전동 안마기",
+        "translation": "电动按摩器"
       }
     ],
     "Skill": [
@@ -2860,6 +3146,30 @@
         "original": "노예각인",
         "translation": "奴隶烙印",
         "lang": "ko"
+      },
+      {
+        "original": "잉태 의식",
+        "translation": "受孕仪式"
+      },
+      {
+        "original": "보시절정술",
+        "translation": "视淫绝顶术"
+      },
+      {
+        "original": "기습보지절정술",
+        "translation": "突袭小穴高潮术"
+      },
+      {
+        "original": "노예보지서약",
+        "translation": "骚逼奴隶誓约"
+      },
+      {
+        "original": "노예보지각인",
+        "translation": "骚逼奴隶烙印"
+      },
+      {
+        "original": "교배프레스",
+        "translation": "交配式"
       }
     ],
     "Creature": [

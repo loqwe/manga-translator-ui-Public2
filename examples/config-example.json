@@ -12,10 +12,10 @@
       "interval_ms": 500,
       "log_expanded": false
     },
-    "window_x": 327,
-    "window_y": 484,
+    "window_x": 586,
+    "window_y": 353,
     "window_width": 1300,
-    "window_height": 626,
+    "window_height": 726,
     "window_maximized": false
   },
   "enable_watermark_filter": true,
@@ -29,7 +29,7 @@
     "high_quality_prompt_path": "dict/prompt_example.json",
     "extract_glossary": true,
     "use_custom_api_params": false,
-    "use_stream": false,
+    "use_stream": true,
     "attempts": -1
   },
   "ocr": {
@@ -120,7 +120,7 @@
     "use_gpu": true,
     "context_size": 3,
     "format": "不指定",
-    "overwrite": true,
+    "overwrite": false,
     "skip_no_text": false,
     "save_text": true,
     "load_text": false,

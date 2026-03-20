@@ -12,6 +12,7 @@ import tempfile
 from fastapi import APIRouter, Request, UploadFile, File, Form, HTTPException
 from fastapi.responses import StreamingResponse
 
+from manga_translator.utils import open_pil_image
 from manga_translator.server.request_extraction import (
     get_ctx, while_streaming, TranslateRequest, BatchTranslateRequest, get_batch_ctx
 )
@@ -1012,8 +1013,7 @@ async def import_json_and_render(req: Request, image: UploadFile = File(...), js
     """Import JSON + image, return rendered image (load_text workflow)"""
 #     import json
     from manga_translator.utils.path_manager import get_work_dir
-    from PIL import Image as PILImage
-    
+
     img_bytes = await image.read()
     json_content = await json_file.read()
     conf = parse_config(config)
@@ -1042,11 +1042,11 @@ async def import_json_and_render(req: Request, image: UploadFile = File(...), js
             f.write(json_content)
         
         # Save image to temporary location (using same name)
-        temp_image = PILImage.open(io.BytesIO(img_bytes))
+        temp_image = open_pil_image(io.BytesIO(img_bytes), eager=False)
         temp_image.save(temp_image_path)
-        
+
         # Reload image and set name attribute
-        temp_image = PILImage.open(temp_image_path)
+        temp_image = open_pil_image(temp_image_path, eager=False)
         temp_image.name = temp_image_path
         
         # Use load_text workflow, call through get_ctx (supports task queue)
@@ -1088,8 +1088,7 @@ async def import_txt_and_render(req: Request, image: UploadFile = File(...), txt
     """Import TXT + JSON + image, return rendered image (using UI layer import logic)"""
     import importlib.util
     from manga_translator.utils.path_manager import get_work_dir
-    from PIL import Image as PILImage
-    
+
     # Import workflow_service module directly, avoid triggering __init__.py
     workflow_service_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 
                                         'desktop_qt_ui', 'services', 'workflow_service.py')
@@ -1156,11 +1155,11 @@ async def import_txt_and_render(req: Request, image: UploadFile = File(...), txt
             raise HTTPException(400, detail=import_result)
         
         # Save image to temporary location
-        temp_image = PILImage.open(io.BytesIO(img_bytes))
+        temp_image = open_pil_image(io.BytesIO(img_bytes), eager=False)
         temp_image.save(temp_image_path)
-        
+
         # Reload image and set name attribute
-        temp_image = PILImage.open(temp_image_path)
+        temp_image = open_pil_image(temp_image_path, eager=False)
         temp_image.name = temp_image_path
         
         # Use load_text workflow, call through get_ctx (supports task queue)
@@ -1201,8 +1200,7 @@ async def import_json_and_render_stream(req: Request, image: UploadFile = File(.
     """Import JSON + image, return rendered image (streaming, with progress)"""
 #     import json
     from manga_translator.utils.path_manager import get_work_dir
-    from PIL import Image
-    
+
     img = await image.read()
     json_content = await json_file.read()
     conf = parse_config(config)
@@ -1232,13 +1230,13 @@ async def import_json_and_render_stream(req: Request, image: UploadFile = File(.
             f.write(json_content)
         
         # Save image to temporary location
-        temp_image = Image.open(io.BytesIO(img))
+        temp_image = open_pil_image(io.BytesIO(img), eager=False)
         temp_image.save(temp_image_path)
-        
+
         # Reload image and set name attribute
-        temp_image = Image.open(temp_image_path)
+        temp_image = open_pil_image(temp_image_path, eager=False)
         temp_image.name = temp_image_path
-        
+
         # Use streaming translation, pass PIL Image object
         # Note: Cannot delete files in finally block during streaming response
         # Temporary files will accumulate in result directory, need periodic cleanup
@@ -1264,8 +1262,7 @@ async def import_txt_and_render_stream(req: Request, image: UploadFile = File(..
     """Import TXT + JSON + image, return rendered image (streaming, with progress, using UI layer import logic)"""
     import importlib.util
     from manga_translator.utils.path_manager import get_work_dir
-    from PIL import Image
-    
+
     # Import workflow_service module directly, avoid triggering __init__.py
     workflow_service_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 
                                         'desktop_qt_ui', 'services', 'workflow_service.py')
@@ -1332,13 +1329,13 @@ async def import_txt_and_render_stream(req: Request, image: UploadFile = File(..
             raise HTTPException(400, detail=import_result)
         
         # Save image to temporary location
-        temp_image = Image.open(io.BytesIO(img))
+        temp_image = open_pil_image(io.BytesIO(img), eager=False)
         temp_image.save(temp_image_path)
-        
+
         # Reload image and set name attribute
-        temp_image = Image.open(temp_image_path)
+        temp_image = open_pil_image(temp_image_path, eager=False)
         temp_image.name = temp_image_path
-        
+
         # Use streaming translation, pass PIL Image object
         # Note: Cannot delete files in finally block during streaming response
         # Temporary files will accumulate in result directory, need periodic cleanup

@@ -1,5 +1,21 @@
 {
-  "OPENAI_API_KEY": "",
-  "OPENAI_MODEL": "",
-  "OPENAI_API_BASE": ""
+  "BAIDU_APP_ID": "",
+  "BAIDU_SECRET_KEY": "",
+  "CAIYUN_TOKEN": "",
+  "DEEPL_AUTH_KEY": "",
+  "GEMINI_API_BASE": "",
+  "GEMINI_API_KEY": "",
+  "GEMINI_MODEL": "",
+  "GROQ_API_KEY": "",
+  "GROQ_MODEL": "",
+  "OPENAI_API_BASE": "https://cpa-13nx.onrender.com/v1",
+  "OPENAI_API_KEY": "123",
+  "OPENAI_MODEL": "gemini-3-flash-preview",
+  "PAPAGO_CLIENT_ID": "",
+  "PAPAGO_CLIENT_SECRET": "",
+  "SAKURA_API_BASE": "",
+  "SAKURA_DICT_PATH": "",
+  "SAKURA_VERSION": "",
+  "YOUDAO_APP_KEY": "",
+  "YOUDAO_SECRET_KEY": ""
 }

@@ -23,6 +23,9 @@ CJK_H2V = {
     "‥": "︰",
     "—": "︱",
     "―": "|",
+    "─": "│",  # BOX DRAWINGS LIGHT HORIZONTAL -> VERTICAL
+    "━": "┃",  # BOX DRAWINGS HEAVY HORIZONTAL -> VERTICAL
+    "═": "║",  # BOX DRAWINGS DOUBLE HORIZONTAL -> VERTICAL
     "–": "︲",
     "_": "︳",
     "_": "︴",

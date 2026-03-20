@@ -1,9 +1,11 @@
 import os
+import re
+import time
 from typing import List, Callable, Tuple, Optional
 import numpy as np
 import cv2
 import functools
-from PIL import Image
+from PIL import Image, ImageOps
 import tqdm
 
 # 解除 PIL 图片大小限制（防止 DecompressionBombWarning）
@@ -35,6 +37,7 @@ except AttributeError: # Supports Python versions below 3.8
     functools.cached_property = cached_property
 
 MODULE_PATH = os.path.dirname(os.path.realpath(__file__))
+EXIF_ORIENTATION_TAG = 274
 
 # PyInstaller compatibility: use sys._MEIPASS if available
 if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
@@ -227,6 +230,61 @@ def get_image_md5(image) -> str:
         import time
         return f"fallback_{int(time.time() * 1000)}"
 
+def _preserve_runtime_image_attrs(src: Image.Image, dst: Image.Image) -> Image.Image:
+    for attr in ('name', 'filename', 'format'):
+        try:
+            value = getattr(src, attr, None)
+            if value is not None:
+                setattr(dst, attr, value)
+        except Exception:
+            pass
+    try:
+        if getattr(dst, 'name', None) is None and getattr(dst, 'filename', None):
+            dst.name = dst.filename
+    except Exception:
+        pass
+    return dst
+
+def normalize_pil_image(img: Image.Image, eager: bool = False, apply_exif: bool = True) -> Image.Image:
+    """
+    Normalize PIL Image orientation via EXIF data; optionally force-load pixels.
+    """
+    if apply_exif:
+        try:
+            orientation = int(img.getexif().get(EXIF_ORIENTATION_TAG, 1) or 1)
+        except Exception:
+            orientation = 1
+        if orientation != 1:
+            normalized = ImageOps.exif_transpose(img)
+            normalized = _preserve_runtime_image_attrs(img, normalized)
+            if eager:
+                normalized.load()
+            return normalized
+    if eager:
+        img.load()
+    return img
+
+def open_pil_image(source, eager: bool = False, apply_exif: bool = True) -> Image.Image:
+    """
+    Unified image open entry point.
+
+    eager=True:  decode immediately (for short-lived file handles).
+    eager=False: lazy load, only decode early when EXIF rotation is needed.
+    """
+    image = Image.open(source)
+    try:
+        if getattr(image, 'name', None) is None and getattr(image, 'filename', None):
+            image.name = image.filename
+    except Exception:
+        pass
+    normalized = normalize_pil_image(image, eager=eager, apply_exif=apply_exif)
+    if normalized is not image:
+        try:
+            image.close()
+        except Exception:
+            pass
+    return normalized
+
 def get_filename_from_url(url: str, default: str = '') -> str:
     m = re.search(r'/([^/?]+)[^/]*$', url)
     if m:
@@ -405,6 +463,71 @@ def dump_image(img_pil: Image.Image, img: np.ndarray, alpha_ch: Image.Image = No
     result = img_pil.convert('RGBA').resize((img.shape[1], img.shape[0]))
     result.paste(Image.fromarray(img), mask = mask_for_paste)
     return result
+
+def _infer_pil_save_format(output_path: str, format: Optional[str] = None) -> str:
+    if format:
+        return format.upper()
+    ext = os.path.splitext(output_path)[1].lower()
+    format_map = {
+        '.jpg': 'JPEG', '.jpeg': 'JPEG',
+        '.png': 'PNG', '.webp': 'WEBP',
+        '.bmp': 'BMP', '.tif': 'TIFF', '.tiff': 'TIFF',
+        '.avif': 'AVIF', '.heic': 'HEIF', '.heif': 'HEIF',
+    }
+    return format_map.get(ext, 'PNG')
+
+
+def build_preserved_pil_save_kwargs(source_image: Optional[Image.Image] = None) -> dict:
+    """从原图提取 ICC profile 和 DPI 信息，用于保存时保留色彩配置。"""
+    if source_image is None:
+        return {}
+    info = getattr(source_image, 'info', None) or {}
+    save_kwargs = {}
+    icc_profile = info.get('icc_profile')
+    if icc_profile:
+        save_kwargs['icc_profile'] = icc_profile
+    dpi = info.get('dpi')
+    if isinstance(dpi, tuple) and len(dpi) >= 2 and dpi[0] is not None and dpi[1] is not None:
+        save_kwargs['dpi'] = dpi[:2]
+    return save_kwargs
+
+
+def save_pil_image(
+    image: Image.Image,
+    output_path: str,
+    source_image: Optional[Image.Image] = None,
+    *,
+    quality: Optional[int] = None,
+    format: Optional[str] = None,
+    **save_kwargs,
+):
+    """保存 PIL 图片，尽量保留原图的 ICC profile 和 DPI。"""
+    target_format = _infer_pil_save_format(output_path, format)
+    image_to_save = image
+    converted_image = None
+    try:
+        if target_format in {'JPEG', 'BMP'}:
+            if image_to_save.mode != 'RGB':
+                converted_image = image_to_save.convert('RGB')
+                image_to_save = converted_image
+        elif image_to_save.mode == 'CMYK':
+            converted_image = image_to_save.convert('RGB')
+            image_to_save = converted_image
+
+        for key, value in build_preserved_pil_save_kwargs(source_image).items():
+            save_kwargs.setdefault(key, value)
+
+        if quality is not None and target_format in {'JPEG', 'WEBP', 'AVIF', 'HEIF'}:
+            save_kwargs.setdefault('quality', quality)
+
+        if format is not None:
+            image_to_save.save(output_path, format=target_format, **save_kwargs)
+        else:
+            image_to_save.save(output_path, **save_kwargs)
+    finally:
+        if converted_image is not None:
+            converted_image.close()
+
 
 def resize_keep_aspect(img, size):
     ratio = (float(size)/max(img.shape[0], img.shape[1]))

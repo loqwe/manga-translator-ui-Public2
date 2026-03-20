@@ -91,6 +91,41 @@ def _is_fully_wrapped(inner: Quadrilateral, outer: Quadrilateral, eps: float = 1
         inner_y2 <= outer_y2 + eps
     )
 
+def _wrapped_cover_ratio(inner: Quadrilateral, outer: Quadrilateral, eps: float = 1.0) -> float:
+    """计算 inner 被 outer（含 eps 容差）覆盖的面积比例。"""
+    inner_x1, inner_y1 = np.min(inner.pts[:, 0]), np.min(inner.pts[:, 1])
+    inner_x2, inner_y2 = np.max(inner.pts[:, 0]), np.max(inner.pts[:, 1])
+    outer_x1, outer_y1 = np.min(outer.pts[:, 0]), np.min(outer.pts[:, 1])
+    outer_x2, outer_y2 = np.max(outer.pts[:, 0]), np.max(outer.pts[:, 1])
+
+    inner_w = max(0.0, inner_x2 - inner_x1)
+    inner_h = max(0.0, inner_y2 - inner_y1)
+    inner_area = inner_w * inner_h
+    if inner_area <= 0:
+        return 0.0
+
+    inter_x1 = max(inner_x1, outer_x1 - eps)
+    inter_y1 = max(inner_y1, outer_y1 - eps)
+    inter_x2 = min(inner_x2, outer_x2 + eps)
+    inter_y2 = min(inner_y2, outer_y2 + eps)
+    inter_w = max(0.0, inter_x2 - inter_x1)
+    inter_h = max(0.0, inter_y2 - inter_y1)
+    return (inter_w * inter_h) / inner_area
+
+def _is_special_wrap_related(
+    inner: Quadrilateral,
+    outer: Quadrilateral,
+    outer_label: Optional[str],
+    eps: float = 1.0,
+    other_cover_threshold: float = 0.9,
+) -> bool:
+    """完全包裹直接通过；outer 是 other 辅助框时，覆盖率 > threshold 也通过。"""
+    if _is_fully_wrapped(inner, outer, eps):
+        return True
+    if outer_label in WRAP_ONLY_LABELS:
+        return _wrapped_cover_ratio(inner, outer, eps) > other_cover_threshold
+    return False
+
 def _aabb_bounds(txtln: Quadrilateral) -> Tuple[float, float, float, float]:
     x1, y1 = np.min(txtln.pts[:, 0]), np.min(txtln.pts[:, 1])
     x2, y2 = np.max(txtln.pts[:, 0]), np.max(txtln.pts[:, 1])
@@ -124,10 +159,11 @@ def _required_uniform_shrink_scale(inner: Quadrilateral, outer: Quadrilateral, e
 
 def _group_by_full_wrap(candidates: List[Quadrilateral], wrap_eps: float = 1.0) -> List[Set[int]]:
     """
-    使用“完全包裹”关系分组：只有存在 A 包裹 B 或 B 包裹 A 才连接。
+    使用"完全包裹"关系分组：只有存在 A 包裹 B 或 B 包裹 A 才连接。
     对同一个非 other 框，如果被多个 other 包裹，只保留一个 other 连接：
-    以“outer 等比例缩小时仍可包裹 inner 的最小所需 scale”作为主判据（越小越优）。
+    以"outer 等比例缩小时仍可包裹 inner 的最小所需 scale"作为主判据（越小越优）。
     这样可避免 one-to-many 的 other 占用把多个 other 粘成同一连通组。
+    其中 other 作为包裹辅助框时，允许对 inner 的 AABB 覆盖率 > 90%。
     """
     node_count = len(candidates)
     labels = [_get_det_label(txtln) for txtln in candidates]
@@ -136,7 +172,10 @@ def _group_by_full_wrap(candidates: List[Quadrilateral], wrap_eps: float = 1.0) 
         if labels[i] in WRAP_ONLY_LABELS and labels[j] in WRAP_ONLY_LABELS:
             # 包裹辅助框之间不互相连边，避免 helper 之间形成无意义连通桥。
             continue
-        if _is_fully_wrapped(candidates[i], candidates[j], wrap_eps) or _is_fully_wrapped(candidates[j], candidates[i], wrap_eps):
+        if (
+            _is_special_wrap_related(candidates[i], candidates[j], labels[j], wrap_eps)
+            or _is_special_wrap_related(candidates[j], candidates[i], labels[i], wrap_eps)
+        ):
             edge_set.add((i, j))
 
     # 同一 inner 被多个 other 包裹时，裁剪为“单一 other 归属”
@@ -150,7 +189,7 @@ def _group_by_full_wrap(candidates: List[Quadrilateral], wrap_eps: float = 1.0) 
                 continue
             if labels[other_idx] not in WRAP_ONLY_LABELS:
                 continue
-            if not _is_fully_wrapped(inner_txtln, other_txtln, wrap_eps):
+            if not _is_special_wrap_related(inner_txtln, other_txtln, labels[other_idx], wrap_eps):
                 continue
 
             min_scale = _required_uniform_shrink_scale(inner_txtln, other_txtln, eps=wrap_eps)

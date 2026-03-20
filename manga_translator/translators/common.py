@@ -160,14 +160,14 @@ def validate_openai_response(response, logger=None) -> bool:
 def validate_gemini_response(response, logger=None) -> bool:
     """
     验证Gemini API响应对象的有效性
-    
+
     Args:
         response: API返回的响应对象
         logger: 日志记录器（可选）
-    
+
     Returns:
         bool: 响应是否有效
-    
+
     Raises:
         Exception: 如果响应对象无效
     """
@@ -177,15 +177,187 @@ def validate_gemini_response(response, logger=None) -> bool:
         if logger:
             logger.error(error_msg)
         raise Exception(f"Gemini API返回了无效的响应对象，类型: {type(response).__name__}")
-    
+
     # 检查是否有text属性（某些错误响应可能没有）
     if not hasattr(response, 'text'):
-        error_msg = f"Gemini API响应缺少text属性: {type(response).__name__}"
+        diagnostics = extract_gemini_response_diagnostics(response)
+        error_msg = f"Gemini API响应缺少text属性: {format_gemini_response_diagnostics(diagnostics)}"
         if logger:
             logger.error(error_msg)
         raise Exception("Gemini API响应缺少text属性")
-    
+
+    # text 可能存在但为 None（如安全拦截/空回），后续 .strip() 会崩溃
+    if getattr(response, 'text', None) is None:
+        diagnostics = extract_gemini_response_diagnostics(response)
+        error_msg = f"Gemini returned empty content ({format_gemini_response_diagnostics(diagnostics)})"
+        if logger:
+            logger.error(error_msg)
+        raise Exception(error_msg)
+
     return True
+
+
+def _get_gemini_field(obj: Any, *names: str) -> Any:
+    """兼容 SDK 对象 / 自定义对象 / dict 的 Gemini 字段读取。"""
+    if obj is None:
+        return None
+    for name in names:
+        if isinstance(obj, dict):
+            if name in obj:
+                return obj[name]
+        elif hasattr(obj, name):
+            return getattr(obj, name)
+    return None
+
+
+def _normalize_gemini_enum(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if hasattr(value, 'name'):
+        try:
+            return str(value.name)
+        except Exception:
+            pass
+    text = str(value)
+    if '.' in text:
+        text = text.split('.')[-1]
+    return text
+
+
+def _normalize_gemini_safety_ratings(ratings: Any) -> List[Dict[str, Any]]:
+    normalized = []
+    for item in ratings or []:
+        category = _normalize_gemini_enum(_get_gemini_field(item, 'category'))
+        probability = _normalize_gemini_enum(_get_gemini_field(item, 'probability'))
+        severity = _normalize_gemini_enum(_get_gemini_field(item, 'severity'))
+        blocked = _get_gemini_field(item, 'blocked')
+        normalized.append({
+            'category': category,
+            'probability': probability,
+            'severity': severity,
+            'blocked': bool(blocked) if blocked is not None else None,
+        })
+    return normalized
+
+
+def extract_gemini_response_diagnostics(response: Any, fallback_finish_reason: Any = None) -> Dict[str, Any]:
+    """提取 Gemini 响应诊断信息，供日志与重试逻辑复用。"""
+    candidate = None
+    candidates = _get_gemini_field(response, 'candidates')
+    if candidates:
+        try:
+            candidate = candidates[0]
+        except Exception:
+            candidate = None
+
+    prompt_feedback = _get_gemini_field(response, 'prompt_feedback', 'promptFeedback')
+    finish_reason = fallback_finish_reason
+    if finish_reason is None:
+        finish_reason = _get_gemini_field(candidate, 'finish_reason', 'finishReason')
+    block_reason = _get_gemini_field(prompt_feedback, 'block_reason', 'blockReason')
+
+    prompt_safety_ratings = _normalize_gemini_safety_ratings(
+        _get_gemini_field(prompt_feedback, 'safety_ratings', 'safetyRatings')
+    )
+    candidate_safety_ratings = _normalize_gemini_safety_ratings(
+        _get_gemini_field(candidate, 'safety_ratings', 'safetyRatings')
+    )
+
+    finish_reason_str = _normalize_gemini_enum(finish_reason)
+    block_reason_str = _normalize_gemini_enum(block_reason)
+    text_value = _get_gemini_field(response, 'text')
+
+    return {
+        'finish_reason': finish_reason,
+        'finish_reason_str': finish_reason_str,
+        'block_reason': block_reason,
+        'block_reason_str': block_reason_str,
+        'prompt_safety_ratings': prompt_safety_ratings,
+        'candidate_safety_ratings': candidate_safety_ratings,
+        'text': text_value,
+    }
+
+
+def _format_gemini_safety_ratings(ratings: List[Dict[str, Any]]) -> str:
+    if not ratings:
+        return "[]"
+
+    parts = []
+    for item in ratings:
+        segments = []
+        if item.get('category'):
+            segments.append(item['category'])
+        if item.get('probability'):
+            segments.append(f"prob={item['probability']}")
+        if item.get('severity'):
+            segments.append(f"sev={item['severity']}")
+        if item.get('blocked') is not None:
+            segments.append(f"blocked={item['blocked']}")
+        parts.append("(" + ", ".join(segments) + ")")
+    return "[" + ", ".join(parts) + "]"
+
+
+def format_gemini_response_diagnostics(diagnostics: Dict[str, Any]) -> str:
+    """格式化 Gemini 诊断信息，便于日志输出。"""
+    parts = [
+        f"finish_reason={diagnostics.get('finish_reason_str') or 'None'}",
+        f"block_reason={diagnostics.get('block_reason_str') or 'None'}",
+    ]
+
+    prompt_ratings = diagnostics.get('prompt_safety_ratings') or []
+    candidate_ratings = diagnostics.get('candidate_safety_ratings') or []
+    if prompt_ratings:
+        parts.append(f"prompt_safety_ratings={_format_gemini_safety_ratings(prompt_ratings)}")
+    if candidate_ratings:
+        parts.append(f"candidate_safety_ratings={_format_gemini_safety_ratings(candidate_ratings)}")
+
+    return ", ".join(parts)
+
+
+def gemini_diagnostics_indicate_safety(diagnostics: Dict[str, Any]) -> bool:
+    """根据 Gemini 响应诊断判断是否属于安全策略拦截。"""
+    values = [
+        (diagnostics.get('finish_reason_str') or "").upper(),
+        (diagnostics.get('block_reason_str') or "").upper(),
+    ]
+    safety_keywords = (
+        'SAFETY',
+        'BLOCKLIST',
+        'PROHIBITED_CONTENT',
+        'SPII',
+        'RECITATION',
+    )
+    if any(any(keyword in value for keyword in safety_keywords) for value in values):
+        return True
+
+    for rating in (diagnostics.get('prompt_safety_ratings') or []) + (diagnostics.get('candidate_safety_ratings') or []):
+        if rating.get('blocked') is True:
+            return True
+
+    return False
+
+
+def gemini_diagnostics_should_disable_images(diagnostics: Dict[str, Any]) -> bool:
+    """根据 Gemini 诊断判断 HQ 重试时是否应去掉图片。"""
+    if gemini_diagnostics_indicate_safety(diagnostics):
+        return True
+    finish_reason = (diagnostics.get('finish_reason_str') or "").upper()
+    return 'OTHER' in finish_reason
+
+
+def gemini_error_message_indicates_safety(error_message: str) -> bool:
+    upper = (error_message or "").upper()
+    return any(token in upper for token in (
+        'SAFETY',
+        'BLOCKLIST',
+        'PROHIBITED_CONTENT',
+        'SPII',
+        'RECITATION',
+        'BLOCKED=TRUE',
+        'FINISH_REASON: 2',
+        'FINISH_REASON=2',
+        'FINISH_REASON IS 2',
+    ))
 
 def draw_text_boxes_on_image(image, text_regions: List[Any], text_order: List[int], 
                              upscaled_size: Tuple[int, int] = None):
@@ -682,6 +854,33 @@ class MTPEAdapter():
             new_translations.append(new_translation)
         print()
         return new_translations
+
+
+def _flatten_prompt_data(data, indent: int = 0) -> str:
+    """Recursively flattens a dictionary or list into a formatted string.
+
+    Used to convert custom prompt JSON/YAML data into a readable text block
+    for inclusion in system prompts.
+    """
+    prompt_parts = []
+    prefix = "  " * indent
+
+    if isinstance(data, dict):
+        for key, value in data.items():
+            if isinstance(value, (dict, list)):
+                prompt_parts.append(f"{prefix}- {key}:")
+                prompt_parts.append(_flatten_prompt_data(value, indent + 1))
+            else:
+                prompt_parts.append(f"{prefix}- {key}: {value}")
+    elif isinstance(data, list):
+        for item in data:
+            if isinstance(item, (dict, list)):
+                prompt_parts.append(_flatten_prompt_data(item, indent + 1))
+            else:
+                prompt_parts.append(f"{prefix}- {item}")
+
+    return "\n".join(prompt_parts)
+
 
 class CommonTranslator(InfererModule):
     # Translator has to support all languages listed in here. The language codes will be resolved into

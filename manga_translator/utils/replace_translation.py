@@ -28,7 +28,7 @@ from typing import Optional, List, Tuple, Dict, Any
 from PIL import Image
 
 from .textblock import TextBlock
-from .generic import Context, dump_image, imwrite_unicode
+from .generic import Context, dump_image, imwrite_unicode, open_pil_image
 from .path_manager import TRANSLATED_IMAGES_SUBDIR, get_work_dir
 
 logger = logging.getLogger(__name__)
@@ -230,7 +230,7 @@ async def translate_batch_replace_translation(translator, images_with_configs: L
                 await asyncio.sleep(0)
                 translator._check_cancelled()
                 
-                translated_image = Image.open(translated_path)
+                translated_image = open_pil_image(translated_path, eager=False)
                 translated_image.name = translated_path
                 
                 translated_ctx = await translator._translate_until_translation(translated_image, config)
