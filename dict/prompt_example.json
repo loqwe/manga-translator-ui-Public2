@@ -108,6 +108,14 @@
           {
             "original": "봉수",
             "translation": "奉秀"
+          },
+          {
+            "original": "지이야",
+            "translation": "智儿"
+          },
+          {
+            "original": "SHIN AYOUNG",
+            "translation": "申雅英"
           }
         ],
         "Location": [
@@ -170,6 +178,10 @@
           {
             "original": "Rotor",
             "translation": "跳蛋"
+          },
+          {
+            "original": "CONEXION INALAMBRICA",
+            "translation": "无线连接"
           }
         ],
         "Skill": [
@@ -2460,6 +2472,14 @@
       {
         "original": "오나희",
         "translation": "吴娜熙"
+      },
+      {
+        "original": "지이야",
+        "translation": "智儿"
+      },
+      {
+        "original": "SHIN AYOUNG",
+        "translation": "申雅英"
       }
     ],
     "Location": [
@@ -2754,6 +2774,10 @@
       {
         "original": "로터",
         "translation": "跳蛋"
+      },
+      {
+        "original": "CONEXION INALAMBRICA",
+        "translation": "无线连接"
       }
     ],
     "Skill": [
