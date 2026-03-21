@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 
 from manga_translator import Config
+from manga_translator.utils import normalize_pil_image, open_pil_image
 from contextlib import asynccontextmanager
 import logging
 
@@ -110,19 +111,19 @@ class BatchTranslateRequest(BaseModel):
 async def to_pil_image(image: Union[str, bytes, Image.Image]) -> Image.Image:
     try:
         if isinstance(image, Image.Image):
-            return image
+            return normalize_pil_image(image, eager=False)
         elif isinstance(image, builtins.bytes):
-            image = Image.open(io.BytesIO(image))
+            image = open_pil_image(io.BytesIO(image), eager=False)
             return image
         else:
             if re.match(r'^data:image/.+;base64,', image):
                 value = image.split(',', 1)[1]
                 image_data = b64decode(value)
-                image = Image.open(io.BytesIO(image_data))
+                image = open_pil_image(io.BytesIO(image_data), eager=False)
                 return image
             else:
                 response = requests.get(image)
-                image = Image.open(io.BytesIO(response.content))
+                image = open_pil_image(io.BytesIO(response.content), eager=False)
                 return image
     except Exception as e:
         raise HTTPException(status_code=422, detail=str(e))

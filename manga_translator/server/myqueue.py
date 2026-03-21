@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from fastapi.requests import Request
 
 from manga_translator import Config
+from manga_translator.utils import open_pil_image
 from manga_translator.server.instance import executor_instances
 from manga_translator.server.sent_data_internal import NotifyType
 
@@ -28,7 +29,7 @@ class QueueElement:
 
     def get_image(self)-> Image:
         if isinstance(self.image, str):
-            return Image.open(self.image)
+            return open_pil_image(self.image, eager=False)
         else:
             return self.image
 

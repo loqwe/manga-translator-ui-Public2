@@ -31,6 +31,7 @@ from .utils import (
     TextBlock,
     imwrite_unicode
 )
+from .utils.generic import save_pil_image
 from .utils.text_filter import match_filter, ensure_filter_list_exists
 import matplotlib
 matplotlib.use('Agg')  # 使用非GUI后端
@@ -509,35 +510,47 @@ class MangaTranslator:
 
     def _save_translated_image(self, image: Image.Image, output_path: str, image_path: str, overwrite: bool = True, mode_label: str = "BATCH") -> bool:
         """
-        保存翻译后的图片到指定路径
-        
+        保存翻译后的图片到指定路径，保留原图的 ICC profile 和 DPI 信息
+
         Args:
             image: 要保存的PIL图片对象
             output_path: 输出文件路径
             image_path: 原始图片路径（用于更新翻译映射表）
             overwrite: 是否覆盖已存在的文件
             mode_label: 模式标签（用于日志）
-            
+
         Returns:
             bool: 是否成功保存
         """
         if not overwrite and os.path.exists(output_path):
             logger.info(f"  -> ⚠️ [{mode_label}] Skipping existing file: {os.path.basename(output_path)}")
             return False
-        
+
         try:
-            image_to_save = image
-            # 处理RGBA到RGB转换（JPEG格式）
-            if output_path.lower().endswith(('.jpg', '.jpeg')) and image_to_save.mode in ('RGBA', 'LA'):
-                image_to_save = image_to_save.convert('RGB')
-            
-            # 保存图片并应用save_quality设置
-            image_to_save.save(output_path, quality=self.save_quality)
+            # 尝试从原图读取 ICC/DPI 元数据
+            source_image = None
+            try:
+                if image_path and os.path.exists(image_path):
+                    source_image = Image.open(image_path)
+            except Exception:
+                pass
+
+            try:
+                save_pil_image(
+                    image,
+                    output_path,
+                    source_image=source_image,
+                    quality=self.save_quality,
+                )
+            finally:
+                if source_image is not None:
+                    source_image.close()
+
             logger.info(f"  -> ✅ [{mode_label}] Saved successfully: {os.path.basename(output_path)}")
-            
+
             # 创建"出生证明"文件：记录原始源文件夹路径
             self._create_source_path_file(image_path, output_path)
-            
+
             # 更新翻译映射表
             self._update_translation_map(image_path, output_path)
             return True
@@ -1933,13 +1946,28 @@ class MangaTranslator:
                 del os.environ['MANGA_OCR_RESULT_DIR']
 
         new_textlines = []
+        filtered_count = 0
         for textline in textlines:
-            if textline.text.strip():
-                if config.render.font_color_fg:
-                    textline.fg_r, textline.fg_g, textline.fg_b = config.render.font_color_fg
-                if config.render.font_color_bg:
-                    textline.bg_r, textline.bg_g, textline.bg_b = config.render.font_color_bg
-                new_textlines.append(textline)
+            text = str(getattr(textline, 'text', '') or '')
+            if not text.strip():
+                continue
+
+            if self.filter_text_enabled:
+                match_result = match_filter(text)
+                if match_result:
+                    matched_word, match_type = match_result
+                    filtered_count += 1
+                    logger.info(f'OCR过滤文本行 ({match_type}匹配): "{text}" -> 匹配: "{matched_word}"')
+                    continue
+
+            if config.render.font_color_fg:
+                textline.fg_r, textline.fg_g, textline.fg_b = config.render.font_color_fg
+            if config.render.font_color_bg:
+                textline.bg_r, textline.bg_g, textline.bg_b = config.render.font_color_bg
+            new_textlines.append(textline)
+
+        if filtered_count > 0:
+            logger.info(f'OCR过滤列表: 过滤了 {filtered_count} 个文本行')
         return new_textlines
 
     async def _run_textline_merge(self, config: Config, ctx: Context):
