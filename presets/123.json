@@ -1,21 +1,5 @@
 {
-  "BAIDU_APP_ID": "",
-  "BAIDU_SECRET_KEY": "",
-  "CAIYUN_TOKEN": "",
-  "DEEPL_AUTH_KEY": "",
-  "GEMINI_API_BASE": "",
-  "GEMINI_API_KEY": "",
-  "GEMINI_MODEL": "",
-  "GROQ_API_KEY": "",
-  "GROQ_MODEL": "",
-  "OPENAI_API_BASE": "",
   "OPENAI_API_KEY": "",
   "OPENAI_MODEL": "",
-  "PAPAGO_CLIENT_ID": "",
-  "PAPAGO_CLIENT_SECRET": "",
-  "SAKURA_API_BASE": "",
-  "SAKURA_DICT_PATH": "",
-  "SAKURA_VERSION": "",
-  "YOUDAO_APP_KEY": "",
-  "YOUDAO_SECRET_KEY": ""
+  "OPENAI_API_BASE": ""
 }

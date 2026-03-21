@@ -224,59 +224,11 @@
         "Creature": []
       },
       "我不画成人漫画了": {
-        "Person": [
-          {
-            "original": "Min-ah",
-            "translation": "敏儿"
-          },
-          {
-            "original": "Jin-su",
-            "translation": "进秀"
-          },
-          {
-            "original": "KANG SU-JIN",
-            "translation": "姜秀珍"
-          },
-          {
-            "original": "Na-yeon",
-            "translation": "娜妍"
-          },
-          {
-            "original": "Tajo",
-            "translation": "鸵鸟"
-          },
-          {
-            "original": "KONG-I MIN-BANG",
-            "translation": "孔伊敏邦"
-          }
-        ],
-        "Location": [
-          {
-            "original": "Veggie Village",
-            "translation": "蔬菜村"
-          }
-        ],
+        "Person": [],
+        "Location": [],
         "Org": [],
-        "Item": [
-          {
-            "original": "MONSTR",
-            "translation": "怪物"
-          },
-          {
-            "original": "SLAM DUK",
-            "translation": "灌篮高手"
-          },
-          {
-            "original": "KI*U",
-            "translation": "寄*兽"
-          }
-        ],
-        "Skill": [
-          {
-            "original": "LHÔPITALS RULE",
-            "translation": "洛必达法则"
-          }
-        ],
+        "Item": [],
+        "Skill": [],
         "Creature": []
       },
       "校园成人礼": {
@@ -333,14 +285,6 @@
           {
             "original": "뱁새",
             "translation": "山雀"
-          },
-          {
-            "original": "유나",
-            "translation": "宥娜"
-          },
-          {
-            "original": "얀새",
-            "translation": "燕鸟"
           }
         ],
         "Location": [
@@ -348,18 +292,9 @@
             "original": "크라겐호프",
             "translation": "克拉根酒吧",
             "lang": "ko"
-          },
-          {
-            "original": "CH학교",
-            "translation": "CH学校"
           }
         ],
-        "Org": [
-          {
-            "original": "여사치들",
-            "translation": "女死党们"
-          }
-        ],
+        "Org": [],
         "Item": [],
         "Skill": [],
         "Creature": []
@@ -744,10 +679,6 @@
           {
             "original": "오나희",
             "translation": "吴娜熙"
-          },
-          {
-            "original": "엄자영",
-            "translation": "严自营"
           }
         ],
         "Location": [
@@ -1372,18 +1303,6 @@
           {
             "original": "성유나",
             "translation": "成宥娜"
-          },
-          {
-            "original": "조사장",
-            "translation": "赵社长"
-          },
-          {
-            "original": "우진",
-            "translation": "宇镇"
-          },
-          {
-            "original": "서우진",
-            "translation": "徐宇振"
           }
         ],
         "Org": [
@@ -1440,30 +1359,6 @@
           {
             "original": "탈영",
             "translation": "脱英"
-          },
-          {
-            "original": "박성현",
-            "translation": "朴成贤"
-          },
-          {
-            "original": "황비",
-            "translation": "皇妃"
-          },
-          {
-            "original": "미리아",
-            "translation": "米莉亚"
-          },
-          {
-            "original": "차수현",
-            "translation": "车秀贤"
-          },
-          {
-            "original": "수현",
-            "translation": "秀贤"
-          },
-          {
-            "original": "주교",
-            "translation": "主教"
           }
         ],
         "Location": [
@@ -1483,18 +1378,6 @@
           {
             "original": "부광여고",
             "translation": "北光女中"
-          },
-          {
-            "original": "Lotto Mart",
-            "translation": "乐透超市"
-          },
-          {
-            "original": "Gangnam",
-            "translation": "江南"
-          },
-          {
-            "original": "엔시아의꽃",
-            "translation": "恩西亚之花"
           }
         ],
         "Org": [
@@ -1509,28 +1392,12 @@
           {
             "original": "코빅스튜디오",
             "translation": "柯比克工作室"
-          },
-          {
-            "original": "여기어때",
-            "translation": "这里如何"
-          },
-          {
-            "original": "나무교",
-            "translation": "树木教"
-          },
-          {
-            "original": "TEMPLE OF EXQUISITE",
-            "translation": "精美殿堂"
           }
         ],
         "Item": [
           {
             "original": "탑문 마그네슘",
             "translation": "塔门镁"
-          },
-          {
-            "original": "마리아상",
-            "translation": "玛利亚像"
           }
         ],
         "Skill": [],
@@ -1674,93 +1541,6 @@
             "original": "마무맘",
             "translation": "马姆姆",
             "lang": "auto"
-          }
-        ]
-      },
-      "倒追游戏": {
-        "Item": [],
-        "Org": [
-          {
-            "original": "기공과",
-            "translation": "机械工程系"
-          },
-          {
-            "original": "낭만고등어",
-            "translation": "浪漫青花鱼"
-          }
-        ],
-        "Person": [
-          {
-            "original": "유나",
-            "translation": "宥娜"
-          },
-          {
-            "original": "기태",
-            "translation": "基泰"
-          },
-          {
-            "original": "우기태",
-            "translation": "禹基泰"
-          },
-          {
-            "original": "홍유나",
-            "translation": "洪宥娜"
-          },
-          {
-            "original": "주희",
-            "translation": "珠熙"
-          },
-          {
-            "original": "세화",
-            "translation": "世华"
-          },
-          {
-            "original": "강주희",
-            "translation": "姜珠熙"
-          },
-          {
-            "original": "새런",
-            "translation": "塞伦"
-          },
-          {
-            "original": "지호",
-            "translation": "智浩"
-          },
-          {
-            "original": "카라비",
-            "translation": "卡拉比"
-          },
-          {
-            "original": "하지",
-            "translation": "夏至"
-          },
-          {
-            "original": "진수",
-            "translation": "镇秀"
-          },
-          {
-            "original": "대근",
-            "translation": "大根"
-          },
-          {
-            "original": "채 교수",
-            "translation": "蔡教授"
-          },
-          {
-            "original": "나라비",
-            "translation": "娜拉比"
-          }
-        ],
-        "Skill": [],
-        "Creature": [],
-        "Location": [
-          {
-            "original": "키스방",
-            "translation": "吻吧"
-          },
-          {
-            "original": "호빠",
-            "translation": "男模店"
           }
         ]
       }
@@ -2680,114 +2460,6 @@
       {
         "original": "오나희",
         "translation": "吴娜熙"
-      },
-      {
-        "original": "박성현",
-        "translation": "朴成贤"
-      },
-      {
-        "original": "황비",
-        "translation": "皇妃"
-      },
-      {
-        "original": "미리아",
-        "translation": "米莉亚"
-      },
-      {
-        "original": "차수현",
-        "translation": "车秀贤"
-      },
-      {
-        "original": "주교",
-        "translation": "主教"
-      },
-      {
-        "original": "조사장",
-        "translation": "赵社长"
-      },
-      {
-        "original": "서우진",
-        "translation": "徐宇振"
-      },
-      {
-        "original": "엄자영",
-        "translation": "严自营"
-      },
-      {
-        "original": "Min-ah",
-        "translation": "敏儿"
-      },
-      {
-        "original": "Jin-su",
-        "translation": "进秀"
-      },
-      {
-        "original": "KANG SU-JIN",
-        "translation": "姜秀珍"
-      },
-      {
-        "original": "Na-yeon",
-        "translation": "娜妍"
-      },
-      {
-        "original": "Tajo",
-        "translation": "鸵鸟"
-      },
-      {
-        "original": "KONG-I MIN-BANG",
-        "translation": "孔伊敏邦"
-      },
-      {
-        "original": "기태",
-        "translation": "基泰"
-      },
-      {
-        "original": "우기태",
-        "translation": "禹基泰"
-      },
-      {
-        "original": "홍유나",
-        "translation": "洪宥娜"
-      },
-      {
-        "original": "주희",
-        "translation": "珠熙"
-      },
-      {
-        "original": "세화",
-        "translation": "世华"
-      },
-      {
-        "original": "강주희",
-        "translation": "姜珠熙"
-      },
-      {
-        "original": "새런",
-        "translation": "塞伦"
-      },
-      {
-        "original": "지호",
-        "translation": "智浩"
-      },
-      {
-        "original": "카라비",
-        "translation": "卡拉比"
-      },
-      {
-        "original": "진수",
-        "translation": "镇秀"
-      },
-      {
-        "original": "대근",
-        "translation": "大根"
-      },
-      {
-        "original": "채 교수",
-        "translation": "蔡教授"
-      },
-      {
-        "original": "나라비",
-        "translation": "娜拉比"
       }
     ],
     "Location": [
@@ -2928,34 +2600,6 @@
       {
         "original": "드림마트",
         "translation": "梦想超市"
-      },
-      {
-        "original": "Lotto Mart",
-        "translation": "乐透超市"
-      },
-      {
-        "original": "Gangnam",
-        "translation": "江南"
-      },
-      {
-        "original": "엔시아의꽃",
-        "translation": "恩西亚之花"
-      },
-      {
-        "original": "CH학교",
-        "translation": "CH学校"
-      },
-      {
-        "original": "Veggie Village",
-        "translation": "蔬菜村"
-      },
-      {
-        "original": "키스방",
-        "translation": "吻吧"
-      },
-      {
-        "original": "호빠",
-        "translation": "男模店"
       }
     ],
     "Org": [
@@ -3053,30 +2697,6 @@
       {
         "original": "달자 식품",
         "translation": "达子食品"
-      },
-      {
-        "original": "여기어때",
-        "translation": "这里如何"
-      },
-      {
-        "original": "나무교",
-        "translation": "树木教"
-      },
-      {
-        "original": "여사치들",
-        "translation": "女死党们"
-      },
-      {
-        "original": "TEMPLE OF EXQUISITE",
-        "translation": "精美殿堂"
-      },
-      {
-        "original": "기공과",
-        "translation": "机械工程系"
-      },
-      {
-        "original": "낭만고등어",
-        "translation": "浪漫青花鱼"
       }
     ],
     "Item": [
@@ -3134,22 +2754,6 @@
       {
         "original": "로터",
         "translation": "跳蛋"
-      },
-      {
-        "original": "마리아상",
-        "translation": "玛利亚像"
-      },
-      {
-        "original": "MONSTR",
-        "translation": "怪物"
-      },
-      {
-        "original": "SLAM DUK",
-        "translation": "灌篮高手"
-      },
-      {
-        "original": "KI*U",
-        "translation": "寄*兽"
       }
     ],
     "Skill": [
@@ -3256,10 +2860,6 @@
         "original": "노예각인",
         "translation": "奴隶烙印",
         "lang": "ko"
-      },
-      {
-        "original": "LHÔPITALS RULE",
-        "translation": "洛必达法则"
       }
     ],
     "Creature": [

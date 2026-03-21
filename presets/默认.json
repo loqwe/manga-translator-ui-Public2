@@ -1,4 +1,7 @@
 {
+  "OPENAI_API_BASE": "https://x666.me/v1",
+  "OPENAI_API_KEY": "sk-balwbvMPtJFohEdgo7DuD9kLmvSBF7JcusK4S0jMmQ23QEch",
+  "OPENAI_MODEL": "gemini-3-flash-preview",
   "BAIDU_APP_ID": "",
   "BAIDU_SECRET_KEY": "",
   "CAIYUN_TOKEN": "",
@@ -8,9 +11,6 @@
   "GEMINI_MODEL": "",
   "GROQ_API_KEY": "",
   "GROQ_MODEL": "",
-  "OPENAI_API_BASE": "http://localhost:5642/api/v1",
-  "OPENAI_API_KEY": "123",
-  "OPENAI_MODEL": "gemini-3-flash-preview",
   "PAPAGO_CLIENT_ID": "",
   "PAPAGO_CLIENT_SECRET": "",
   "SAKURA_API_BASE": "",
