@@ -1,6 +1,6 @@
 {
   "app": {
-    "last_open_dir": "D:\\漫画\\漫画下载文件夹\\믿으세요!_처음을_바칠지어니",
+    "last_open_dir": "D:\\漫画\\漫画下载文件夹\\정조역전",
     "last_output_path": "D:/漫画/通过翻译后输出文件夹",
     "favorite_folders": null,
     "theme": "native",
@@ -12,8 +12,8 @@
       "interval_ms": 500,
       "log_expanded": false
     },
-    "window_x": 327,
-    "window_y": 484,
+    "window_x": 515,
+    "window_y": 285,
     "window_width": 1300,
     "window_height": 626,
     "window_maximized": false
@@ -29,7 +29,7 @@
     "high_quality_prompt_path": "dict/prompt_example.json",
     "extract_glossary": true,
     "use_custom_api_params": false,
-    "use_stream": false,
+    "use_stream": true,
     "attempts": -1
   },
   "ocr": {
@@ -114,13 +114,13 @@
     "colorizer": "none"
   },
   "cli": {
-    "verbose": "verbose",
+    "verbose": "standard",
     "attempts": 3,
     "ignore_errors": false,
     "use_gpu": true,
     "context_size": 3,
     "format": "不指定",
-    "overwrite": true,
+    "overwrite": false,
     "skip_no_text": false,
     "save_text": true,
     "load_text": false,

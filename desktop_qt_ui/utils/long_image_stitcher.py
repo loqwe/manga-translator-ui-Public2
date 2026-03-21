@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import List, Tuple, Optional, Dict
 from dataclasses import dataclass, field
 from datetime import datetime
+from statistics import median
 
 import numpy as np
 import cv2
@@ -544,7 +545,16 @@ class LongImageStitcher:
             )
             output_path = os.path.join(output_dir, output_name)
 
-            # Save
+            # Save (WebP max dimension is 16383px, fallback to JPEG if exceeded)
+            WEBP_MAX_DIM = 16383
+            if majority_ext == '.webp' and (total_height > WEBP_MAX_DIM or max_width > WEBP_MAX_DIM):
+                self.logger.info(
+                    f"Image {max_width}x{total_height} exceeds WebP limit, fallback to JPEG"
+                )
+                majority_ext = '.jpg'
+                output_name = os.path.splitext(output_name)[0] + '.jpg'
+                output_path = os.path.join(output_dir, output_name)
+
             if majority_ext in ('.jpg', '.jpeg'):
                 canvas.save(output_path, 'JPEG', quality=95, optimize=True)
             elif majority_ext == '.png':
@@ -619,15 +629,47 @@ class LongImageStitcher:
                 f"max_height={self.max_height}px"
             )
 
+        median_height = int(median(info.height for info in images))
+        if median_height > self.trigger_height:
+            skip_message = (
+                f"[stitch] 跳过 {chapter_name}: 全章图片高度中位数为 "
+                f"{median_height}px，高于触发阈值 {self.trigger_height}px"
+            )
+            self.logger.info(skip_message)
+            if progress_callback:
+                progress_callback(skip_message)
+            return StitchResult(
+                output_files=[],
+                group_count=0,
+                source_count=len(images),
+            )
+
         # Compute groups
         groups, decisions = await self.compute_groups(images, progress_callback)
+
+        single_group_count = sum(1 for group in groups if len(group) == 1)
+        multi_group_count = sum(1 for group in groups if len(group) > 1)
+        if single_group_count > 0 and multi_group_count > 0:
+            skip_message = (
+                f"[stitch] 跳过 {chapter_name}: 检测到混合分组，"
+                f"单图组 {single_group_count} 个，多图组 {multi_group_count} 个"
+            )
+            self.logger.info(skip_message)
+            if progress_callback:
+                progress_callback(skip_message)
+            self._save_debug_data(chapter_name, groups, decisions)
+            return StitchResult(
+                output_files=[],
+                group_count=0,
+                source_count=len(images),
+            )
 
         # Save debug data
         self._save_debug_data(chapter_name, groups, decisions)
 
         # Stitch each group
         output_files = []
-        original_paths = set()
+        successful_original_paths = set()
         global_index = self.index_start
 
         for gi, group in enumerate(groups):
@@ -636,12 +678,12 @@ class LongImageStitcher:
             )
             if result_path:
                 output_files.append(result_path)
-            for info in group:
-                original_paths.add(info.path)
+                for info in group:
+                    successful_original_paths.add(info.path)
 
-        # Delete originals
+        # Delete originals only for groups that were saved successfully.
         if delete_originals and output_files:
-            for path in original_paths:
+            for path in successful_original_paths:
                 # Don't delete if it's also an output (single-image group edge case)
                 if path not in output_files:
                     try:
