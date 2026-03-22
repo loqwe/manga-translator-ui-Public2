@@ -205,6 +205,12 @@ class OneClickProcessor:
                         try:
                             for item in chapter_folder.iterdir():
                                 dst = new_path / item.name
+                                # If dst has [R] variant, remove it before moving
+                                if item.suffix.lower() == '.cbz' and not item.stem.endswith(' [R]'):
+                                    r_variant = new_path / f"{item.stem} [R].cbz"
+                                    if r_variant.exists():
+                                        r_variant.unlink()
+                                        self._report_progress(f"    ↻ 删除 [R] 版本: {r_variant.name}")
                                 if not dst.exists():
                                     shutil.move(str(item), str(dst))
                             # Remove empty source folder
