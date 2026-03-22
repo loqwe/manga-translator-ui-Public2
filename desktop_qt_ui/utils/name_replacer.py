@@ -75,19 +75,24 @@ class NameReplacer:
             return True
         return False
     
+    @staticmethod
+    def _strip(text: str) -> str:
+        """Strip spaces, underscores and punctuation for fuzzy matching."""
+        return re.sub(r'[\s_\-!！?？.,。，~～·\'\"()（）\[\]【】{}]', '', text)
+
     def get_translated_name(self, raw_name: str) -> str:
         """
         获取翻译后的名称
         支持多个生肉名用 | 分隔：韩文名|英文名|日文名 → 中文名
-        
+
         Args:
             raw_name: 生肉漫画名
-            
+
         Returns:
             熟肉漫画名，如果没有映射则返回原名
         """
-        # Normalize underscores to spaces for matching
         normalized = raw_name.replace('_', ' ')
+        stripped = self._strip(raw_name)
 
         # Direct match (original and normalized)
         if raw_name in self.mapping:
@@ -95,13 +100,18 @@ class NameReplacer:
         if normalized != raw_name and normalized in self.mapping:
             return self.mapping[normalized]
 
-        # Check pipe-separated variant keys
+        # Fuzzy + pipe-separated matching
         for key, value in self.mapping.items():
             if '|' in key:
                 variants = [v.strip() for v in key.split('|')]
                 if raw_name in variants or normalized in variants:
                     return value
-        
+                if any(self._strip(v) == stripped for v in variants):
+                    return value
+            else:
+                if self._strip(key) == stripped:
+                    return value
+
         return raw_name
     
     def get_raw_name(self, translated_name: str) -> str:
