@@ -632,9 +632,15 @@ class AdvancedFolderDialog(QDialog):
         self._is_splitting = False
         self._split_accept_after = False  # 拆分完成后是否自动接受对话框
         
-        # 撤回功能：记录最近一次操作的备份数据
-        self._undo_data: Optional[dict] = None  # {章节路径: {"backup_dir": 备份目录, "generated_files": [生成的文件]}}
-        self._undo_type: str = ""  # "split" 或 "stitch"
+        # 撤回功能：记录最近三次操作的备份数据
+        self._undo_max = 3
+        self._undo_backup_root = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "debug", "undo_backup"
+        )
+        self._undo_history_file = os.path.join(self._undo_backup_root, "undo_history.json")
+        self._undo_history: List[dict] = []
+        self._load_undo_history()
         
         # 支持多个根目录
         settings = QSettings("MangaTranslator", "AdvancedFolder")
@@ -2586,7 +2592,6 @@ class AdvancedFolderDialog(QDialog):
         self._save_column_widths()
         self._save_root_path()
         self._save_recent_works()  # 保存最近操作的作品
-        self._clear_undo_data()    # 关闭时清理撤回备份
         super().accept()
     
     def reject(self):
@@ -2596,13 +2601,10 @@ class AdvancedFolderDialog(QDialog):
         self._stop_split_if_running()
         self._save_column_widths()
         self._save_root_path()
-        self._clear_undo_data()    # 关闭时清理撤回备份
         super().reject()
     
     def closeEvent(self, event):
         """窗口关闭事件"""
-        # 确保关闭窗口时清理撤回备份
-        self._clear_undo_data()
         super().closeEvent(event)
     
     def _save_root_path(self):
@@ -3449,8 +3451,7 @@ class AdvancedFolderDialog(QDialog):
         self._is_stitching = True
         self._stitch_accept_after = accept_after
 
-        # 清空上一次的撤回数据，创建备份
-        self._clear_undo_data()
+        # 创建备份
         self._pending_undo_data = {}
         self._pending_chapters = chapters[:]
         self._backup_chapters_for_undo(chapters, "stitch")
@@ -3716,9 +3717,6 @@ class AdvancedFolderDialog(QDialog):
         self._is_splitting = True
         self._split_accept_after = accept_after
         
-        # 清空上一次的撤回数据
-        self._clear_undo_data()
-        
         # 创建备份目录
         self._pending_undo_data = {}
         self._pending_chapters = chapters[:]
@@ -3835,23 +3833,29 @@ class AdvancedFolderDialog(QDialog):
     
     def _backup_chapters_for_undo(self, chapters: List[str], operation_type: str):
         """备份章节图片用于撤回
-        
+
         Args:
             chapters: 章节路径列表
             operation_type: "split" 或 "stitch"
         """
         import shutil
-        import tempfile
-        
+        from datetime import datetime
+
         self._pending_undo_data = {}
         image_extensions = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'}
-        
+
+        # 用时间戳创建本次操作的备份根目录
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        batch_dir = os.path.join(self._undo_backup_root, f"{operation_type}_{ts}")
+        os.makedirs(batch_dir, exist_ok=True)
+
         for chapter_path in chapters:
             try:
-                # 创建临时备份目录
-                backup_dir = tempfile.mkdtemp(prefix=f"undo_{operation_type}_")
+                chapter_name = os.path.basename(chapter_path)
+                backup_dir = os.path.join(batch_dir, chapter_name)
+                os.makedirs(backup_dir, exist_ok=True)
                 backup_files = []
-                
+
                 # 备份所有图片文件
                 for f in os.listdir(chapter_path):
                     ext = os.path.splitext(f)[1].lower()
@@ -3860,102 +3864,186 @@ class AdvancedFolderDialog(QDialog):
                         dst = os.path.join(backup_dir, f)
                         shutil.copy2(src, dst)
                         backup_files.append(f)
-                
+
                 if backup_files:
                     self._pending_undo_data[chapter_path] = {
                         "backup_dir": backup_dir,
                         "backup_files": backup_files,
                         "generated_files": []  # 待填充
                     }
-                    self._log(f"[撤回] 已备份 {len(backup_files)} 张图片: {os.path.basename(chapter_path)}")
+                    self._log(f"[撤回] 已备份 {len(backup_files)} 张图片: {chapter_name}")
                 else:
                     # 没有图片，删除空备份目录
                     shutil.rmtree(backup_dir, ignore_errors=True)
-                    
+
             except Exception as e:
                 self._log(f"[撤回] ⚠️ 备份失败 {os.path.basename(chapter_path)}: {e}")
     
     def _finalize_undo_data(self, generated_files: List[str], operation_type: str):
-        """完成撤回数据记录
-        
-        Args:
-            generated_files: 生成的文件路径列表
-            operation_type: "split" 或 "stitch"
-        """
+        """完成撤回数据记录，推入历史栈（最多保留3次），持久化到磁盘"""
         if not hasattr(self, '_pending_undo_data') or not self._pending_undo_data:
             return
-        
+
         # 按章节分组生成的文件
         for file_path in generated_files:
             chapter_path = os.path.dirname(file_path)
             if chapter_path in self._pending_undo_data:
                 self._pending_undo_data[chapter_path]["generated_files"].append(file_path)
-        
-        # 保存撤回数据
-        self._undo_data = self._pending_undo_data
-        self._undo_type = operation_type
+
+        # 推入历史栈
+        entry = {"type": operation_type, "chapters": self._pending_undo_data}
+        self._undo_history.append(entry)
+
+        # 超过上限时，清理最旧的备份
+        while len(self._undo_history) > self._undo_max:
+            old = self._undo_history.pop(0)
+            self._cleanup_undo_entry(old)
+
         self._pending_undo_data = {}
-        
+        self._save_undo_history()
+
         # 启用撤回按钮
         self.undo_button.setEnabled(True)
-        self.undo_button.setToolTip(f"撤销最近的{"拆分" if operation_type == "split" else "拼接"}操作")
-        self._log(f"[撤回] ✓ 已记录撤回数据，可点击“撤回”按钮恢复")
+        op_name = "拆分" if operation_type == "split" else "拼接"
+        self.undo_button.setToolTip(f"撤销操作（共 {len(self._undo_history)} 条记录）")
+        self._log(f"[撤回] ✓ 已记录{op_name}撤回数据（历史 {len(self._undo_history)}/{self._undo_max}）")
     
-    def _clear_undo_data(self):
-        """清除撤回数据并删除备份文件"""
+    def _cleanup_undo_entry(self, entry: dict):
+        """清理单条撤回记录的备份文件"""
         import shutil
-        
-        if self._undo_data:
-            for chapter_data in self._undo_data.values():
-                backup_dir = chapter_data.get("backup_dir")
-                if backup_dir and os.path.isdir(backup_dir):
-                    try:
-                        shutil.rmtree(backup_dir)
-                    except Exception:
-                        pass
-        
-        self._undo_data = None
-        self._undo_type = ""
+        for chapter_data in entry.get("chapters", {}).values():
+            backup_dir = chapter_data.get("backup_dir")
+            if backup_dir and os.path.isdir(backup_dir):
+                try:
+                    shutil.rmtree(backup_dir)
+                except Exception:
+                    pass
+
+    def _clear_undo_data(self):
+        """清除所有撤回数据并删除备份文件"""
+        for entry in self._undo_history:
+            self._cleanup_undo_entry(entry)
+        self._undo_history.clear()
         self.undo_button.setEnabled(False)
-    
+        self._save_undo_history()
+
+    def _save_undo_history(self):
+        """将撤回历史持久化到 JSON 文件"""
+        import json
+        try:
+            os.makedirs(self._undo_backup_root, exist_ok=True)
+            with open(self._undo_history_file, 'w', encoding='utf-8') as f:
+                json.dump(self._undo_history, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self._log(f"[撤回] ⚠️ 保存撤回历史失败: {e}")
+
+    def _load_undo_history(self):
+        """从 JSON 文件加载撤回历史，并校验有效性"""
+        import json
+        import shutil
+
+        self._undo_history = []
+
+        if not os.path.isfile(self._undo_history_file):
+            return
+
+        try:
+            with open(self._undo_history_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except Exception:
+            return
+
+        if not isinstance(data, list):
+            return
+
+        changed = False
+        for entry in data:
+            if not isinstance(entry, dict) or "type" not in entry or "chapters" not in entry:
+                changed = True
+                continue
+
+            # 校验每个章节的备份目录是否还存在
+            valid_chapters = {}
+            for chapter_path, chapter_data in entry["chapters"].items():
+                backup_dir = chapter_data.get("backup_dir", "")
+                if os.path.isdir(backup_dir):
+                    # 备份目录存在，检查是否还有备份文件
+                    existing_files = [f for f in chapter_data.get("backup_files", [])
+                                      if os.path.exists(os.path.join(backup_dir, f))]
+                    if existing_files:
+                        chapter_data["backup_files"] = existing_files
+                        valid_chapters[chapter_path] = chapter_data
+                    else:
+                        shutil.rmtree(backup_dir, ignore_errors=True)
+                        changed = True
+                else:
+                    changed = True
+
+            if valid_chapters:
+                entry["chapters"] = valid_chapters
+                self._undo_history.append(entry)
+            else:
+                changed = True
+
+        # 更新按钮状态
+        if self._undo_history:
+            self.undo_button.setEnabled(True)
+            self.undo_button.setToolTip(f"撤销操作（共 {len(self._undo_history)} 条记录）")
+        else:
+            self.undo_button.setEnabled(False)
+
+        # 如果有无效记录被清理，重新保存
+        if changed:
+            self._save_undo_history()
+
     def _on_undo_clicked(self):
         """撤回按钮点击"""
-        if not self._undo_data:
+        if not self._undo_history:
             QMessageBox.information(self, "提示", "没有可撤回的操作")
             return
-        
-        operation_name = "拆分" if self._undo_type == "split" else "拼接"
-        chapter_count = len(self._undo_data)
-        
+
+        latest = self._undo_history[-1]
+        operation_name = "拆分" if latest["type"] == "split" else "拼接"
+        chapter_count = len(latest["chapters"])
+
         reply = QMessageBox.question(
             self, "确认撤回",
             f"确定要撤销最近的{operation_name}操作吗？\n\n"
             f"涉及 {chapter_count} 个章节\n"
             f"• 删除{operation_name}后生成的文件\n"
-            f"• 恢复原始图片",
+            f"• 恢复原始图片\n\n"
+            f"（剩余 {len(self._undo_history) - 1} 条可撤回记录）",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
-        
-        self._execute_undo()
+
+        entry = self._undo_history.pop()
+        self._execute_undo(entry)
+        self._save_undo_history()
+
+        # 更新按钮状态
+        if self._undo_history:
+            self.undo_button.setEnabled(True)
+            self.undo_button.setToolTip(f"撤销操作（共 {len(self._undo_history)} 条记录）")
+        else:
+            self.undo_button.setEnabled(False)
+            self.undo_button.setToolTip("")
     
-    def _execute_undo(self):
+    def _execute_undo(self, entry: dict):
         """执行撤回操作"""
         import shutil
-        
-        if not self._undo_data:
-            return
-        
-        operation_name = "拆分" if self._undo_type == "split" else "拼接"
+
+        undo_data = entry["chapters"]
+        operation_name = "拆分" if entry["type"] == "split" else "拼接"
         success_count = 0
-        
-        for chapter_path, chapter_data in self._undo_data.items():
+
+        for chapter_path, chapter_data in undo_data.items():
             try:
                 backup_dir = chapter_data.get("backup_dir")
                 backup_files = chapter_data.get("backup_files", [])
                 generated_files = chapter_data.get("generated_files", [])
-                
+
                 # 1. 删除生成的文件
                 for file_path in generated_files:
                     if os.path.exists(file_path):
@@ -3963,7 +4051,7 @@ class AdvancedFolderDialog(QDialog):
                             os.remove(file_path)
                         except Exception:
                             pass
-                
+
                 # 2. 恢复备份文件
                 if backup_dir and os.path.isdir(backup_dir):
                     for f in backup_files:
@@ -3971,25 +4059,20 @@ class AdvancedFolderDialog(QDialog):
                         dst = os.path.join(chapter_path, f)
                         if os.path.exists(src):
                             shutil.copy2(src, dst)
-                    
+
                     # 删除备份目录
                     shutil.rmtree(backup_dir, ignore_errors=True)
-                
+
                 success_count += 1
                 self._log(f"[撤回] ✓ 已恢复: {os.path.basename(chapter_path)}")
-                
+
             except Exception as e:
                 self._log(f"[撤回] ⚠️ 恢复失败 {os.path.basename(chapter_path)}: {e}")
-        
-        # 清除撤回数据
-        self._undo_data = None
-        self._undo_type = ""
-        self.undo_button.setEnabled(False)
-        
+
         # 刷新已选章节列表
         selected_chapters = self.get_selected_chapters()
         self._update_selected_chapters_list(selected_chapters)
-        
+
         self._log(f"[撤回] ✓ {operation_name}操作已撤销，恢复了 {success_count} 个章节")
         QMessageBox.information(self, "撤回完成", f"已成功撤销{operation_name}操作，恢复了 {success_count} 个章节")
 

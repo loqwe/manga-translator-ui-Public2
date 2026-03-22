@@ -214,8 +214,20 @@ class LongImageStitcher:
         result = []
         for path in image_files:
             try:
-                with Image.open(path) as img:
-                    w, h = img.size
+                # Convert WebP to JPEG before stitching
+                ext = os.path.splitext(path)[1].lower()
+                if ext == '.webp':
+                    with Image.open(path) as img:
+                        w, h = img.size
+                        jpg_path = os.path.splitext(path)[0] + '.jpg'
+                        img.convert('RGB').save(jpg_path, 'JPEG', quality=95, optimize=True)
+                    os.remove(path)
+                    path = jpg_path
+                    self.logger.info(f"Converted WebP to JPEG: {os.path.basename(jpg_path)}")
+                else:
+                    with Image.open(path) as img:
+                        w, h = img.size
+
                 result.append(_ImageInfo(
                     path=path,
                     width=w,
@@ -545,22 +557,10 @@ class LongImageStitcher:
             )
             output_path = os.path.join(output_dir, output_name)
 
-            # Save (WebP max dimension is 16383px, fallback to JPEG if exceeded)
-            WEBP_MAX_DIM = 16383
-            if majority_ext == '.webp' and (total_height > WEBP_MAX_DIM or max_width > WEBP_MAX_DIM):
-                self.logger.info(
-                    f"Image {max_width}x{total_height} exceeds WebP limit, fallback to JPEG"
-                )
-                majority_ext = '.jpg'
-                output_name = os.path.splitext(output_name)[0] + '.jpg'
-                output_path = os.path.join(output_dir, output_name)
-
             if majority_ext in ('.jpg', '.jpeg'):
                 canvas.save(output_path, 'JPEG', quality=95, optimize=True)
             elif majority_ext == '.png':
                 canvas.save(output_path, 'PNG', optimize=True)
-            elif majority_ext == '.webp':
-                canvas.save(output_path, 'WEBP', quality=95)
 
             # Close PIL images
             for img, _ in pil_images:
